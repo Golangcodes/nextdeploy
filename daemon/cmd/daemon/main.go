@@ -4,13 +4,14 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/daemon"
-	"github.com/Golangcodes/nextdeploy/shared"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/Golangcodes/nextdeploy/daemon/internal/daemon"
+	"github.com/Golangcodes/nextdeploy/shared"
 )
 
 func main() {
@@ -61,7 +62,7 @@ func daemonize() {
 	if err != nil {
 		log.Fatalf("Error getting executable path: %v", err)
 	}
-	// return ourselvs in foreground
+	// return ourselves in foreground
 	args := []string{"--foreground=true"}
 	if len(os.Args) > 1 {
 		// preserver other args like config path

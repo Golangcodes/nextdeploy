@@ -21,7 +21,7 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 	}
 	buildCommand, err := buildCommand(string(PackageManager))
 	if err != nil {
-		PackageManager = "npm"
+		// fallback to npm
 	}
 	if err := os.MkdirAll(".nextdeploy", 0750); err != nil {
 		return nil, fmt.Errorf("failed to create .nextdeploy directory: %w", err)
@@ -74,13 +74,13 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 	outputMode := OutputModeDefault
 	if _, err := os.Stat(filepath.Join(nextDir, "standalone")); err == nil {
 		outputMode = OutputModeStandalone
-	// #nosec G304
+		// #nosec G304
 	} else if b, err := os.ReadFile(filepath.Join(projectDir, "next.config.js")); err == nil {
 		content := string(b)
 		if strings.Contains(content, "output: 'export'") || strings.Contains(content, "output: \"export\"") {
 			outputMode = OutputModeExport
 		}
-	// #nosec G304
+		// #nosec G304
 	} else if b, err := os.ReadFile(filepath.Join(projectDir, "next.config.mjs")); err == nil {
 		content := string(b)
 		if strings.Contains(content, "output: 'export'") || strings.Contains(content, "output: \"export\"") {

@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 
 	"golang.org/x/time/rate"
 )
@@ -98,7 +99,7 @@ func (ss *SocketServer) AcceptConnections() {
 	for {
 		conn, err := ss.listener.Accept()
 		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
