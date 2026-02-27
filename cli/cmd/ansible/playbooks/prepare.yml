@@ -415,21 +415,88 @@
       register: daemon_check
       changed_when: false
 
-    - name: "Phase 3 | Daemon – install nextdeployd control plane"
+    - name: "Phase 3 | Daemon – check installed version"
       ansible.builtin.shell: >
-        curl -sL
-        https://raw.githubusercontent.com/aynaash/NextDeploy/main/scripts/install-daemon.sh
-        | sudo bash
-      ignore_errors: true # non-fatal — script may not exist yet during active development
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        nextdeployd --version 2>/dev/null || echo 'none'
+      register: daemon_version
+      changed_when: false
+      failed_when: false
+      when: "'installed' in daemon_check.stdout"
+
+    - name: "Phase 3 | Daemon – check if Go is available for installation"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+        sh -c 'command -v go >/dev/null 2>&1 && echo yes || echo no'
+      register: go_available
+      changed_when: false
+
+    - name: "Phase 3 | Daemon – install Go (if not present)"
+      ansible.builtin.shell: |
+        curl -fsSL https://go.dev/dl/go1.26.linux-amd64.tar.gz -o /tmp/go.tar.gz
+        sudo rm -rf /usr/local/go
+        sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+        rm -f /tmp/go.tar.gz
+        sudo ln -sf /usr/local/go/bin/go /usr/local/bin/go
+        sudo ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+      become: true
+      when: "'no' in go_available.stdout"
+
+    - name: "Phase 3 | Daemon – install nextdeployd via go install"
+      ansible.builtin.shell: |
+        export GOPATH="${HOME}/go"
+        export PATH="${GOPATH}/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        go install github.com/Golangcodes/nextdeploy/daemon/cmd/nextdeployd@latest
+        sudo cp "${GOPATH}/bin/nextdeployd" /usr/local/bin/nextdeployd
+        sudo chmod +x /usr/local/bin/nextdeployd
       register: daemon_install
       when: "'installed' not in daemon_check.stdout"
 
-    - name: "Phase 3 | Daemon – warn on non-fatal failure"
-      ansible.builtin.debug:
-        msg: "⚠ daemon install had a non-fatal error (continuing): {{ daemon_install.stderr | default('') }}"
-      when:
-        - daemon_install is not skipped
-        - daemon_install is failed
+    - name: "Phase 3 | Daemon – write systemd service unit"
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/nextdeployd.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=NextDeploy Daemon
+          Documentation=https://nextdeploy.one/docs
+          After=network.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/nextdeployd --foreground=true
+          Restart=on-failure
+          RestartSec=5s
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=nextdeployd
+
+          [Install]
+          WantedBy=multi-user.target
+      become: true
+      when: "'installed' not in daemon_check.stdout"
+
+    - name: "Phase 3 | Daemon – reload systemd, enable and start service"
+      ansible.builtin.systemd:
+        name: nextdeployd
+        daemon_reload: true
+        enabled: true
+        state: started
+      become: true
+      when: "'installed' not in daemon_check.stdout"
+
+    - name: "Phase 3 | Daemon – assert installed"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        sh -c 'command -v nextdeployd >/dev/null 2>&1 && echo installed || echo missing'
+      register: daemon_final
+      changed_when: false
+
+    - name: "Phase 3 | Daemon – verify presence"
+      ansible.builtin.assert:
+        that: "'installed' in daemon_final.stdout"
+        fail_msg: "nextdeployd installation failed — binary not found in PATH"
+
 
     # ── Phase 4: verify ────────────────────────────────────────────────────────
 
@@ -473,6 +540,14 @@
       register: v_doppler
       changed_when: false
 
+    - name: "Phase 4 | Verify nextdeployd"
+      ansible.builtin.shell: >
+        env -i HOME="$HOME"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        nextdeployd --version
+      register: v_daemon
+      changed_when: false
+
     # ── Phase 4: app directory ─────────────────────────────────────────────────
 
     - name: "Phase 4 | Create application directory {{ app_dir }}"
@@ -488,9 +563,10 @@
     - name: "Phase 4 | Installation summary"
       ansible.builtin.debug:
         msg:
-          - "✓ Node.js : {{ v_node.stdout }}"
-          - "✓ npm     : {{ v_npm.stdout }}"
-          - "✓ Bun     : {{ v_bun.stdout }}"
-          - "✓ Caddy   : {{ v_caddy.stdout }}"
-          - "✓ Doppler : {{ v_doppler.stdout }}"
-          - "✓ App dir : {{ app_dir }}"
+          - "✓ Node.js     : {{ v_node.stdout }}"
+          - "✓ npm         : {{ v_npm.stdout }}"
+          - "✓ Bun         : {{ v_bun.stdout }}"
+          - "✓ Caddy       : {{ v_caddy.stdout }}"
+          - "✓ Doppler     : {{ v_doppler.stdout }}"
+          - "✓ nextdeployd : {{ v_daemon.stdout }}"
+          - "✓ App dir     : {{ app_dir }}"
