@@ -1,6 +1,6 @@
 
 # NextDeploy Build Makefile
-.PHONY: help build build-cli build-daemon build-all clean test lint security-scan cross-build install
+.PHONY: help build build-cli build-daemon build-all clean test lint security-scan cross-build install dev mage-install
 
 # Build variables — VERSION comes from the current git tag (set automatically by CI or manually)
 VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git describe --tags 2>/dev/null || echo "dev")
@@ -207,3 +207,15 @@ docker-buildx: ## Build multi-platform Docker image
 # List all available targets
 list: ## List all make targets
 	@$(MAKE) -pRrq -f $(lastword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/^# File/,/^# Finished Make data base/ {if ($$1 !~ "^[#.]") {print $$1}}' | sort | egrep -v -e '^[^[:alnum:]]' -e '^$@$$'
+
+# ── Mage bootstrap ───────────────────────────────────────────────────────────
+mage-install: ## Install mage build tool to /usr/local/bin
+	@echo "Installing mage..."
+	@go install github.com/magefile/mage@latest
+	@sudo cp "$(shell go env GOPATH)/bin/mage" /usr/local/bin/mage
+	@echo "mage installed: $$(mage --version)"
+
+# ── Dev workflow ─────────────────────────────────────────────────────────────
+dev: build-cli ## Build the CLI and run it (alias for quick local iteration)
+	@echo "Running nextdeploy (dev build)..."
+	@./$(BIN_DIR)/nextdeploy

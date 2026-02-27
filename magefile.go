@@ -219,7 +219,7 @@ func Install() error {
 			return err
 		}
 	}
-	fmt.Println("✅ Installed")
+	fmt.Println("Installed")
 	return nil
 }
 
