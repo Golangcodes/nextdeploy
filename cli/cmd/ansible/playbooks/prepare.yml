@@ -15,6 +15,7 @@
 
   vars:
     node22_version: "22.22.0"
+    go_version: "1.26.0"
     app_dir: /opt/nextjs-app
     caddy_fallback_version: "2.8.4"
 
@@ -211,6 +212,40 @@
           'installed' in bun_check.stdout or
           (bun_verify is defined and 'installed' in bun_verify.stdout)
         fail_msg: "bun webi install appeared to succeed but bun is not in PATH"
+
+    # ── Phase 2: Go ────────────────────────────────────────────────────────────
+
+    - name: "Phase 2 | Go – check if installed"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        sh -c 'command -v go >/dev/null 2>&1 && go version || echo missing'
+      register: go_check
+      changed_when: false
+
+    - name: "Phase 2 | Go – download and install go{{ go_version }}"
+      ansible.builtin.shell: |
+        curl -fsSL --retry 3 --retry-delay 2 \
+          https://go.dev/dl/go{{ go_version }}.linux-{{ ansible_architecture | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}.tar.gz \
+          -o /tmp/go.tar.gz
+        sudo rm -rf /usr/local/go
+        sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+        rm -f /tmp/go.tar.gz
+        sudo ln -sf /usr/local/go/bin/go    /usr/local/bin/go
+        sudo ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+      become: true
+      when: "'missing' in go_check.stdout or 'go version' not in go_check.stdout"
+
+    - name: "Phase 2 | Go – verify"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        go version
+      register: go_final
+      changed_when: false
+
+    - name: "Phase 2 | Go – assert installed"
+      ansible.builtin.assert:
+        that: "'go version' in go_final.stdout"
+        fail_msg: "go installation failed — 'go version' not in PATH"
 
     # ── Phase 2: Doppler CLI ───────────────────────────────────────────────────
 
@@ -426,21 +461,10 @@
 
     - name: "Phase 3 | Daemon – check if Go is available for installation"
       ansible.builtin.shell: >
-        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         sh -c 'command -v go >/dev/null 2>&1 && echo yes || echo no'
       register: go_available
       changed_when: false
-
-    - name: "Phase 3 | Daemon – install Go (if not present)"
-      ansible.builtin.shell: |
-        curl -fsSL https://go.dev/dl/go1.26.linux-amd64.tar.gz -o /tmp/go.tar.gz
-        sudo rm -rf /usr/local/go
-        sudo tar -C /usr/local -xzf /tmp/go.tar.gz
-        rm -f /tmp/go.tar.gz
-        sudo ln -sf /usr/local/go/bin/go /usr/local/bin/go
-        sudo ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
-      become: true
-      when: "'no' in go_available.stdout"
 
     - name: "Phase 3 | Daemon – install nextdeployd via go install"
       ansible.builtin.shell: |
@@ -540,6 +564,14 @@
       register: v_doppler
       changed_when: false
 
+    - name: "Phase 4 | Verify Go"
+      ansible.builtin.shell: >
+        env -i HOME="$HOME"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        go version
+      register: v_go
+      changed_when: false
+
     - name: "Phase 4 | Verify nextdeployd"
       ansible.builtin.shell: >
         env -i HOME="$HOME"
@@ -566,6 +598,7 @@
           - "✓ Node.js     : {{ v_node.stdout }}"
           - "✓ npm         : {{ v_npm.stdout }}"
           - "✓ Bun         : {{ v_bun.stdout }}"
+          - "✓ Go          : {{ v_go.stdout }}"
           - "✓ Caddy       : {{ v_caddy.stdout }}"
           - "✓ Doppler     : {{ v_doppler.stdout }}"
           - "✓ nextdeployd : {{ v_daemon.stdout }}"
