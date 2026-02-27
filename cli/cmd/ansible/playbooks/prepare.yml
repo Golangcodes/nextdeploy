@@ -453,23 +453,15 @@
       register: daemon_check
       changed_when: false
 
-    - name: "Phase 3 | Daemon – check installed version"
+    - name: "Phase 3 | Daemon – record current version (if any)"
       ansible.builtin.shell: >
         env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        nextdeployd --version 2>/dev/null || echo 'none'
-      register: daemon_version
+        sh -c 'nextdeployd --version 2>/dev/null || echo "not installed"'
+      register: daemon_version_before
       changed_when: false
       failed_when: false
-      when: "'installed' in daemon_check.stdout"
 
-    - name: "Phase 3 | Daemon – check if Go is available for installation"
-      ansible.builtin.shell: >
-        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        sh -c 'command -v go >/dev/null 2>&1 && echo yes || echo no'
-      register: go_available
-      changed_when: false
-
-    - name: "Phase 3 | Daemon – install nextdeployd via go install"
+    - name: "Phase 3 | Daemon – always install latest via go install"
       ansible.builtin.shell: |
         export GOPATH="${HOME}/go"
         export PATH="${GOPATH}/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -477,12 +469,24 @@
         sudo cp "${GOPATH}/bin/nextdeployd" /usr/local/bin/nextdeployd
         sudo chmod +x /usr/local/bin/nextdeployd
       register: daemon_install
-      when: "'installed' not in daemon_check.stdout"
+
+    - name: "Phase 3 | Daemon – record new version after install"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        nextdeployd --version 2>/dev/null || echo "unknown"
+      register: daemon_version_after
+      changed_when: false
+      failed_when: false
+
+    - name: "Phase 3 | Daemon – show version delta"
+      ansible.builtin.debug:
+        msg: "nextdeployd: {{ daemon_version_before.stdout | trim }} → {{ daemon_version_after.stdout | trim }}"
 
     - name: "Phase 3 | Daemon – write systemd service unit"
       ansible.builtin.copy:
         dest: /etc/systemd/system/nextdeployd.service
         mode: "0644"
+        force: true
         content: |
           [Unit]
           Description=NextDeploy Daemon
@@ -501,16 +505,14 @@
           [Install]
           WantedBy=multi-user.target
       become: true
-      when: "'installed' not in daemon_check.stdout"
 
-    - name: "Phase 3 | Daemon – reload systemd, enable and start service"
+    - name: "Phase 3 | Daemon – reload systemd, enable and restart service"
       ansible.builtin.systemd:
         name: nextdeployd
         daemon_reload: true
         enabled: true
-        state: started
+        state: restarted
       become: true
-      when: "'installed' not in daemon_check.stdout"
 
     - name: "Phase 3 | Daemon – assert installed"
       ansible.builtin.shell: >
@@ -523,6 +525,7 @@
       ansible.builtin.assert:
         that: "'installed' in daemon_final.stdout"
         fail_msg: "nextdeployd installation failed — binary not found in PATH"
+
 
 
     # ── Phase 4: verify ────────────────────────────────────────────────────────
