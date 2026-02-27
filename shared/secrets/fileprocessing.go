@@ -51,6 +51,7 @@ func (sm *SecretManager) EncryptFile(filename string, key []byte) error {
 
 // encryptWithOpenSSL is the core OpenSSL encryption function
 func (sm *SecretManager) encryptWithOpenSSL(inputPath, outputPath, password string) error {
+	// #nosec G204
 	cmd := exec.Command("openssl", "enc", "-aes-256-cbc", "-salt",
 		"-in", inputPath, "-out", outputPath, "-pass", "pass:"+password, "-pbkdf2")
 

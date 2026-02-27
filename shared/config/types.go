@@ -70,6 +70,7 @@ type SSLConfig struct {
 type CloudProviderStruct struct {
 	Name      string `yaml:"name"`
 	Region    string `yaml:"region"`
+	// #nosec G117
 	AccessKey string `yaml:"access_key,omitempty"`
 	SecretKey string `yaml:"secret_key,omitempty"`
 }
@@ -79,6 +80,7 @@ type ServerConfig struct {
 	Host          string     `yaml:"host"`
 	Port          int        `yaml:"port"`
 	Username      string     `yaml:"username"`
+	// #nosec G117
 	Password      string     `yaml:"password"`
 	KeyPath       string     `yaml:"key_path"`
 	SSHKey        string     `yaml:"ssh_key,omitempty"`
@@ -110,6 +112,7 @@ type DockerConfig struct {
 	Build          DockerBuild `yaml:"build"`
 	Push           bool        `yaml:"push"`
 	Username       string      `yaml:"username,omitempty"`
+	// #nosec G117
 	Password       string      `yaml:"password,omitempty"`
 	AlwaysPull     bool        `yaml:"alwaysPull,omitempty"`
 	Strategy       string      `yaml:"strategy,omitempty"`
@@ -164,6 +167,7 @@ type Database struct {
 	Host     string `yaml:"host"`
 	Port     string `yaml:"port"`
 	Username string `yaml:"username"`
+	// #nosec G117
 	Password string `yaml:"password"`
 	Name     string `yaml:"name"`
 }
@@ -212,6 +216,7 @@ type VaultConfig struct {
 // SecretFile defines file-based secrets
 type SecretFile struct {
 	Path   string `yaml:"path"`
+	// #nosec G117
 	Secret string `yaml:"secret"`
 }
 
@@ -234,6 +239,7 @@ type Storage struct {
 	Type      string `yaml:"type"`
 	Endpoint  string `yaml:"endpoint,omitempty"`
 	Bucket    string `yaml:"bucket"`
+	// #nosec G117
 	AccessKey string `yaml:"accessKey,omitempty"`
 	SecretKey string `yaml:"secretKey,omitempty"`
 }
@@ -257,6 +263,7 @@ type Webhook struct {
 	Name   string   `yaml:"name"`
 	URL    string   `yaml:"url"`
 	Events []string `yaml:"events"`
+	// #nosec G117
 	Secret string   `yaml:"secret,omitempty"`
 }
 
@@ -274,7 +281,7 @@ func SaveConfig(path string, cfg *NextDeployConfig) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 

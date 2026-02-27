@@ -86,6 +86,6 @@ func (d *NextDeployDaemon) handleSignals() error {
 func (d *NextDeployDaemon) Shutdown() {
 	d.logger.Println("Shutting down NextDeploy Daemon...")
 	d.cancel()
-	d.socketServer.Close()
+	_ = d.socketServer.Close()
 	d.logger.Println("NextDeploy Daemon shut down gracefully")
 }

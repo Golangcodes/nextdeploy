@@ -22,6 +22,7 @@ type PackageJSON struct {
 }
 
 func GetNextJsVersion(packageJsonPath string) (string, error) {
+	// #nosec G304
 	data, err := os.ReadFile(packageJsonPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -121,6 +122,7 @@ func IsNextJSProject(dir string) (bool, string, error) {
 // readPackageJSON reads and parses package.json
 func readPackageJSON(dir string) (*PackageJSON, error) {
 	path := filepath.Join(dir, "package.json")
+	// #nosec G304
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

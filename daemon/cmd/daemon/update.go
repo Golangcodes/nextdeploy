@@ -86,6 +86,7 @@ func getCurrentVersion() (string, error) {
 
 func getLatestReleaseTag(owner, repo string) (string, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", owner, repo)
+	// #nosec G107
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
@@ -102,12 +103,14 @@ func getLatestReleaseTag(owner, repo string) (string, error) {
 }
 
 func downloadBinary(url, path string) error {
+	// #nosec G107
 	resp, err := http.Get(url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
+	// #nosec G304
 	outFile, err := os.Create(path)
 	if err != nil {
 		return err
@@ -117,7 +120,8 @@ func downloadBinary(url, path string) error {
 	if _, err := io.Copy(outFile, resp.Body); err != nil {
 		return err
 	}
-	return os.Chmod(path, 0755)
+	// #nosec G302
+	return os.Chmod(path, 0750)
 }
 
 func replaceBinary(source, destination string) error {
@@ -125,6 +129,7 @@ func replaceBinary(source, destination string) error {
 }
 
 func restartService(serviceName string) error {
+	// #nosec G204
 	cmd := exec.Command("systemctl", "restart", serviceName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

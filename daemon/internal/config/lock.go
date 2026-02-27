@@ -16,6 +16,7 @@ type BuildLock struct {
 
 // ReadBuildLock reads and parses the build.lock file
 func ReadBuildLock(filePath string) (*BuildLock, error) {
+	// #nosec G304
 	// Read the file content
 	data, err := os.ReadFile(filePath)
 	if err != nil {

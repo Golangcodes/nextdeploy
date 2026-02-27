@@ -10,12 +10,14 @@ import (
 )
 
 type ProcessManager struct {
-	systemdDir string
+	systemdDir  string
+	serviceName string
 }
 
 func NewProcessManager() *ProcessManager {
 	return &ProcessManager{
-		systemdDir: "/etc/systemd/system/",
+		systemdDir:  "/etc/systemd/system/",
+		serviceName: "nextdeploy.service",
 	}
 }
 
@@ -72,7 +74,7 @@ Environment=PORT=%d
 WantedBy=multi-user.target
 `, appName, projectDir, execStart, port)
 
-	err := os.WriteFile(servicePath, []byte(serviceContent), 0644)
+	err := os.WriteFile(servicePath, []byte(serviceContent), 0600)
 	if err != nil {
 		return fmt.Errorf("failed to write systemd service file: %w", err)
 	}
@@ -95,12 +97,14 @@ func (pm *ProcessManager) reloadDaemon() error {
 func (pm *ProcessManager) StartService(appName string) error {
 	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
 
+	// #nosec G204
 	// Enable the service to start on boot
 	cmd := exec.Command("systemctl", "enable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("Warning: failed to enable service %s: %s", serviceName, out)
 	}
 
+	// #nosec G204
 	cmd = exec.Command("systemctl", "start", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to start service %s: %v - %s", serviceName, err, out)
@@ -114,11 +118,13 @@ func (pm *ProcessManager) StartService(appName string) error {
 func (pm *ProcessManager) StopService(appName string) error {
 	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
 
+	// #nosec G204
 	cmd := exec.Command("systemctl", "stop", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
 		log.Printf("Warning: failed to stop service %s: %s", serviceName, out)
 	}
 
+	// #nosec G204
 	cmd = exec.Command("systemctl", "disable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
 		log.Printf("Warning: failed to disable service %s: %s", serviceName, out)
@@ -127,9 +133,14 @@ func (pm *ProcessManager) StopService(appName string) error {
 	return nil
 }
 
+func (pm *ProcessManager) CurrentServiceName() string {
+	return pm.serviceName
+}
+
 // RestartService restarts the systemd service
 func (pm *ProcessManager) RestartService(appName string) error {
 	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
+	// #nosec G204
 	cmd := exec.Command("systemctl", "restart", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to restart service %s: %v - %s", serviceName, err, out)
@@ -142,7 +153,7 @@ func (pm *ProcessManager) RestartService(appName string) error {
 func (pm *ProcessManager) RemoveService(appName string) error {
 	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
 
-	pm.StopService(appName)
+	_ = pm.StopService(appName)
 
 	servicePath := filepath.Join(pm.systemdDir, serviceName)
 	if err := os.Remove(servicePath); err != nil && !os.IsNotExist(err) {

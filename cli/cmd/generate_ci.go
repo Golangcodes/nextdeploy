@@ -67,7 +67,7 @@ jobs:
 
 		// Create .github/workflows directory
 		workflowDir := filepath.Join(".github", "workflows")
-		if err := os.MkdirAll(workflowDir, 0755); err != nil {
+		if err := os.MkdirAll(workflowDir, 0750); err != nil {
 			log.Error("Failed to create .github/workflows directory: %v", err)
 			os.Exit(1)
 		}
@@ -80,7 +80,7 @@ jobs:
 			os.Exit(1)
 		}
 
-		if err := os.WriteFile(workflowPath, []byte(workflowContent), 0644); err != nil {
+		if err := os.WriteFile(workflowPath, []byte(workflowContent), 0600); err != nil {
 			log.Error("Failed to write workflow file: %v", err)
 			os.Exit(1)
 		}

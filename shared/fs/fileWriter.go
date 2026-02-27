@@ -25,7 +25,7 @@ func (fw *FileWriter) Write(path string, content []byte) error {
 		return nil
 	}
 
-	err := os.WriteFile(path, content, 0644)
+	err := os.WriteFile(path, content, 0600)
 	if err != nil {
 		return err
 	}

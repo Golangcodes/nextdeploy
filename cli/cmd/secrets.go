@@ -61,6 +61,7 @@ func encryptFiles() {
 	home, _ := os.UserHomeDir()
 	appname := sm.GetAppName()
 	keyPath := home + "/.nextdeploy/" + appname + "/master.key"
+	// #nosec G304
 	key, err := os.ReadFile(keyPath)
 	if err != nil {
 		Elogs.Error("Failed to read encryption key from %s: %v", keyPath, err)

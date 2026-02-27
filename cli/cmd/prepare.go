@@ -32,8 +32,6 @@ var (
 	streamMode bool
 )
 
-// ── cobra command ─────────────────────────────────────────────────────────────
-
 var prepareCmd = &cobra.Command{
 	Use:   "prepare",
 	Short: "Prepare target server with required tools",
@@ -58,8 +56,6 @@ func init() {
 	rootCmd.AddCommand(prepareCmd)
 }
 
-// ── entry point ───────────────────────────────────────────────────────────────
-
 func runPrepare(cmd *cobra.Command, args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -74,20 +70,18 @@ func runPrepare(cmd *cobra.Command, args []string) {
 
 	out := cmd.OutOrStdout()
 
-	// ── pre-flight: ensure ansible-playbook is available ─────────────────────
 	if err := ensureAnsible(out); err != nil {
 		PrepLogs.Error("Ansible setup failed: %v", err)
 		os.Exit(1)
 	}
 
-	// ── resolve target server from nextdeploy.yml ─────────────────────────────
 	serverName, serverCfg, err := resolveTargetServer()
 	if err != nil {
 		PrepLogs.Error("Failed to resolve target server: %v", err)
 		os.Exit(1)
 	}
 
-	color.New(color.FgCyan).Fprintf(out, "\n📦  Preparing server: %s (%s)\n\n", serverName, serverCfg.Host)
+	_, _ = color.New(color.FgCyan).Fprintf(out, "\n Preparing server: %s (%s)\n\n", serverName, serverCfg.Host)
 	PrepLogs.Info("Starting Ansible-based preparation of server %s", serverName)
 
 	// ── write ephemeral inventory + playbook to a temp dir ────────────────────
@@ -116,17 +110,10 @@ func runPrepare(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	color.New(color.FgGreen, color.Bold).Fprintf(out, "\n✨  Server %s prepared successfully!\n", serverName)
+	_, _ = color.New(color.FgGreen, color.Bold).Fprintf(out, "\n✨  Server %s prepared successfully!\n", serverName)
 	PrepLogs.Success("Server %s prepared successfully!", serverName)
 }
 
-// ── ansible bootstrapper ──────────────────────────────────────────────────────
-
-// ansibleInstallMethod describes a single strategy for installing Ansible.
-// bin + args together form the exact command that will be executed — there is
-// no post-processing needed.  prereq is the binary that must exist in PATH
-// before this method can be used (often the same as bin, but e.g. apt-get
-// methods use "sudo" as bin while prereq is "apt-get").
 type ansibleInstallMethod struct {
 	label  string   // shown to the user
 	prereq string   // binary that must be in PATH for this method to apply
@@ -134,16 +121,7 @@ type ansibleInstallMethod struct {
 	args   []string // arguments passed to bin
 }
 
-// ansibleInstallMethods returns an ordered list of install candidates for the
-// current OS.  The first entry whose prereq binary exists in PATH is used.
-//
-// Ordering rationale:
-//   - pipx always comes first: it creates an isolated venv, never hits PEP 668.
-//   - On Linux, native package managers (apt/dnf/yum) come next — they are
-//     safer than pip on modern Debian/Ubuntu which enforces PEP 668.
-//   - pip3/pip with --break-system-packages is kept as a last resort only.
 func ansibleInstallMethods() []ansibleInstallMethod {
-	// pipx is the cleanest method on every OS.
 	methods := []ansibleInstallMethod{
 		{"pipx install ansible", "pipx", "pipx", []string{"install", "ansible"}},
 	}
@@ -151,11 +129,9 @@ func ansibleInstallMethods() []ansibleInstallMethod {
 	switch runtime.GOOS {
 	case "linux":
 		methods = append(methods,
-			// Native package managers — no PEP 668, no venv needed.
 			ansibleInstallMethod{"sudo apt-get install -y ansible", "apt-get", "sudo", []string{"apt-get", "install", "-y", "ansible"}},
 			ansibleInstallMethod{"sudo dnf install -y ansible", "dnf", "sudo", []string{"dnf", "install", "-y", "ansible"}},
 			ansibleInstallMethod{"sudo yum install -y ansible", "yum", "sudo", []string{"yum", "install", "-y", "ansible"}},
-			// pip fallbacks — --break-system-packages overrides PEP 668 guard.
 			ansibleInstallMethod{"pip3 install --user --break-system-packages ansible", "pip3", "pip3", []string{"install", "--user", "--break-system-packages", "ansible"}},
 			ansibleInstallMethod{"pip install --user --break-system-packages ansible", "pip", "pip", []string{"install", "--user", "--break-system-packages", "ansible"}},
 		)
@@ -174,9 +150,6 @@ func ansibleInstallMethods() []ansibleInstallMethod {
 	return methods
 }
 
-// ensureAnsible checks whether ansible-playbook is in PATH.  If it is not, it
-// detects the best available install method, prompts the user for confirmation,
-// installs Ansible, and then re-checks PATH before returning.
 func ensureAnsible(out io.Writer) error {
 	if _, err := exec.LookPath("ansible-playbook"); err == nil {
 		return nil // already installed
@@ -187,9 +160,8 @@ func ensureAnsible(out io.Writer) error {
 	red := color.New(color.FgRed)
 	green := color.New(color.FgGreen)
 
-	bold.Fprintln(out, "⚠  ansible-playbook not found — it is required to prepare the server.")
+	_, _ = bold.Fprintln(out, "⚠  ansible-playbook not found — it is required to prepare the server.")
 
-	// Find the best install method available on this machine.
 	var chosen *ansibleInstallMethod
 	for _, m := range ansibleInstallMethods() {
 		m := m // capture loop variable
@@ -200,58 +172,51 @@ func ensureAnsible(out io.Writer) error {
 	}
 
 	if chosen == nil {
-		red.Fprintln(out, "❌  Could not find pipx, apt-get, dnf, yum, pip3, or brew to install Ansible.")
-		yellow.Fprintln(out, "   Please install Ansible manually and re-run:")
-		yellow.Fprintln(out, "   https://docs.ansible.com/ansible/latest/installation_guide/")
+		_, _ = red.Fprintln(out, "Could not find pipx, apt-get, dnf, yum, pip3, or brew to install Ansible.")
+		_, _ = yellow.Fprintln(out, "Please install Ansible manually and re-run:")
+		_, _ = yellow.Fprintln(out, "https://docs.ansible.com/ansible/latest/installation_guide/")
 		return fmt.Errorf("no suitable Ansible installer found")
 	}
 
-	yellow.Fprintf(out, "   Suggested install command: %s\n\n", chosen.label)
+	_, _ = yellow.Fprintf(out, "   Suggested install command: %s\n\n", chosen.label)
 
-	// Prompt — no argv transformation needed; bin+args are already correct.
 	fmt.Fprint(out, "   Install it now? [Y/n] ")
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
 	answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
 	if answer != "" && answer != "y" && answer != "yes" {
-		red.Fprintln(out, "   Aborted. Install Ansible manually and re-run nextdeploy prepare.")
+		_, _ = red.Fprintln(out, "   Aborted. Install Ansible manually and re-run nextdeploy prepare.")
 		return fmt.Errorf("user declined Ansible installation")
 	}
 
 	fmt.Fprintln(out)
-	bold.Fprintf(out, "▶  Running: %s %s\n\n", chosen.bin, strings.Join(chosen.args, " "))
+	_, _ = bold.Fprintf(out, "▶  Running: %s %s\n\n", chosen.bin, strings.Join(chosen.args, " "))
 
+	// #nosec G204
 	installCmd := exec.Command(chosen.bin, chosen.args...)
 	installCmd.Stdout = out
 	installCmd.Stderr = out
 	if err := installCmd.Run(); err != nil {
-		red.Fprintf(out, "\n❌  Installation failed: %v\n", err)
-		yellow.Fprintln(out, "   Try running the command above manually, then re-run nextdeploy prepare.")
+		_, _ = red.Fprintf(out, "\n❌  Installation failed: %v\n", err)
+		_, _ = yellow.Fprintln(out, "   Try running the command above manually, then re-run nextdeploy prepare.")
 		return fmt.Errorf("ansible installation failed: %w", err)
 	}
 
-	// Re-check – pipx/pip installs land in ~/.local/bin which may not yet be
-	// in the current process's PATH. Extend it optimistically.
 	if home, err := os.UserHomeDir(); err == nil {
 		localBin := filepath.Join(home, ".local", "bin")
 		_ = os.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+localBin)
 	}
 
 	if _, err := exec.LookPath("ansible-playbook"); err != nil {
-		red.Fprintln(out, "Ansible was installed but ansible-playbook is still not in PATH.")
-		yellow.Fprintln(out, "   Open a new terminal (or run: source ~/.bashrc) and try again.")
+		_, _ = red.Fprintln(out, "Ansible was installed but ansible-playbook is still not in PATH.")
+		_, _ = yellow.Fprintln(out, "   Open a new terminal (or run: source ~/.bashrc) and try again.")
 		return fmt.Errorf("ansible-playbook not in PATH after install")
 	}
 
-	green.Fprintln(out, "✓  Ansible installed successfully.")
+	_, _ = green.Fprintln(out, "✓  Ansible installed successfully.")
 	return nil
 }
 
-// ── server resolution ─────────────────────────────────────────────────────────
-
-// resolveTargetServer loads the nextdeploy config and returns the first
-// matching server: the configured deployment server if set, otherwise the
-// first entry in the servers list.
 func resolveTargetServer() (string, config.ServerConfig, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -261,11 +226,6 @@ func resolveTargetServer() (string, config.ServerConfig, error) {
 	if len(cfg.Servers) == 0 {
 		return "", config.ServerConfig{}, fmt.Errorf("no servers configured in nextdeploy.yml")
 	}
-
-	// Prefer the explicit deployment server when one is set.
-	// Match by name first, then fall back to matching by host IP/address —
-	// the config may store an IP in deployment.server.host even though the
-	// servers list entry uses a human-readable name.
 	if cfg.Deployment.Server.Host != "" {
 		needle := cfg.Deployment.Server.Host
 		for _, s := range cfg.Servers {
@@ -283,11 +243,6 @@ func resolveTargetServer() (string, config.ServerConfig, error) {
 	return first.Name, first, nil
 }
 
-// ── inventory writer ──────────────────────────────────────────────────────────
-
-// writeInventory produces an INI-style Ansible inventory file in tmpDir and
-// returns its path.  SSH credentials are taken directly from the ServerConfig
-// struct (key file path, inline key content, or password).
 func writeInventory(tmpDir, serverName string, cfg config.ServerConfig) (string, error) {
 	port := cfg.Port
 	if port == 0 {
@@ -302,11 +257,9 @@ func writeInventory(tmpDir, serverName string, cfg config.ServerConfig) (string,
 
 	switch {
 	case cfg.KeyPath != "":
-		// Key file already on disk – pass it directly.
 		line += fmt.Sprintf(" ansible_ssh_private_key_file=%s", cfg.KeyPath)
 
 	case cfg.SSHKey != "":
-		// Inline PEM key – write it to a temp file so Ansible can read it.
 		keyFile := filepath.Join(tmpDir, "id_ansible")
 		if err := os.WriteFile(keyFile, []byte(cfg.SSHKey), 0600); err != nil {
 			return "", fmt.Errorf("failed to write inline SSH key: %w", err)
@@ -323,16 +276,10 @@ func writeInventory(tmpDir, serverName string, cfg config.ServerConfig) (string,
 	return inventoryPath, os.WriteFile(inventoryPath, []byte(sb.String()), 0600)
 }
 
-// ── ansible runner ────────────────────────────────────────────────────────────
-
-// runAnsible executes ansible-playbook, streaming its combined stdout/stderr to
-// out.  A context deadline or cancellation will kill the child process.
 func runAnsible(ctx context.Context, inventoryPath, playbookPath string, out io.Writer, verbose bool) error {
 	args := []string{
 		"-i", inventoryPath,
 		playbookPath,
-		// Avoid interactive host-key prompts; keys should already be in
-		// known_hosts (or the user trusts the environment).
 		"--ssh-extra-args=-o StrictHostKeyChecking=accept-new",
 	}
 
@@ -340,10 +287,9 @@ func runAnsible(ctx context.Context, inventoryPath, playbookPath string, out io.
 		args = append(args, "-v")
 	}
 
-	// ANSIBLE_FORCE_COLOR ensures colour output even when Ansible detects that
-	// its stdout is not a TTY (which is the case when we pipe it through Go).
 	env := append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")
 
+	// #nosec G204
 	ap := exec.CommandContext(ctx, "ansible-playbook", args...)
 	ap.Stdout = out
 	ap.Stderr = out
@@ -361,10 +307,6 @@ func runAnsible(ctx context.Context, inventoryPath, playbookPath string, out io.
 	return nil
 }
 
-// CreateAppDirectory is kept as a convenience helper that other commands can
-// call to ensure /opt/nextjs-app exists on the target server without running
-// the full prepare playbook.  It delegates to a minimal inline Ansible
-// ad-hoc command rather than a full playbook.
 func CreateAppDirectory(ctx context.Context, serverName string, cfg config.ServerConfig, out io.Writer) error {
 	const appDir = "/opt/nextjs-app"
 
@@ -387,12 +329,13 @@ func CreateAppDirectory(ctx context.Context, serverName string, cfg config.Serve
 		"-i", inventoryPath,
 		"target",
 		"-m", "ansible.builtin.file",
-		"-a", fmt.Sprintf("path=%s state=directory owner={{ ansible_user_id }} mode=0755", appDir),
+		"-a", fmt.Sprintf("path=%s state=directory owner={{ ansible_user_id }} mode=0750", appDir),
 		"--become",
 		"--ssh-extra-args=-o StrictHostKeyChecking=accept-new",
 	}
 
 	env := append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")
+	// #nosec G204
 	ap := exec.CommandContext(ctx, "ansible", args...)
 	ap.Stdout = out
 	ap.Stderr = out

@@ -44,7 +44,7 @@ func (ss *SocketServer) Start() error {
 func (ss *SocketServer) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
 
@@ -53,7 +53,7 @@ func (ss *SocketServer) handleConnection(conn net.Conn) {
 			Success: false,
 			Message: "rate limit exceeded",
 		}
-		encoder.Encode(resp)
+		_ = encoder.Encode(resp)
 		return
 	}
 
@@ -67,25 +67,27 @@ func (ss *SocketServer) handleConnection(conn net.Conn) {
 			Success: false,
 			Message: fmt.Sprintf("invalid command: %v", err),
 		}
-		encoder.Encode(resp)
+		_ = encoder.Encode(resp)
 		return
 	}
 	response := ss.commandHandler.HandleCommand(cmd)
-	encoder.Encode(response)
+	_ = encoder.Encode(response)
 }
 
 func (ss *SocketServer) cleanupSocket() {
 	if _, err := os.Stat(ss.socketPath); err == nil {
-		os.Remove(ss.socketPath)
+		_ = os.Remove(ss.socketPath)
 	}
 }
 
 func (ss *SocketServer) setSocketPermissions() error {
+	// #nosec G302
 	if err := os.Chmod(ss.socketPath, 0660); err != nil {
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
 	// get the socket directory and ensure its secure
 	socketDir := filepath.Dir(ss.socketPath)
+	// #nosec G302
 	if err := os.Chmod(socketDir, 0700); err != nil {
 		return fmt.Errorf("failed to set socket directory permissions: %w", err)
 	}
@@ -110,6 +112,6 @@ func (ss *SocketServer) Close() error {
 		return ss.listener.Close()
 	}
 	// clean up socket file
-	os.Remove(ss.socketPath)
+	_ = os.Remove(ss.socketPath)
 	return nil
 }

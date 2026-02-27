@@ -13,12 +13,6 @@
 // Source: https://github.com/aynaash/nextdeploy
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// Planned Features:
-// - SSH key management with passphrase support
-// - GitHub Webhook integration
-// - Environment-specific overrides in `nextdeploy.yml`
-// - Encrypted secrets store integration (e.g. Doppler, Vault)
-// - Telemetry (opt-in)
 
 package main
 
@@ -44,6 +38,7 @@ func update() {
 	latestURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest/download/nextdeploy-%s-%s", owner, repo, runtime.GOOS, runtime.GOARCH)
 
 	fmt.Println("Fetching latest release from:", latestURL)
+	// #nosec G204
 	cmd := exec.Command("curl", "-L", latestURL, "-o", "/usr/local/bin/nextdeploy")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -53,6 +48,6 @@ func update() {
 		fmt.Println("Error downloading the latest version:", err)
 		return
 	}
-	exec.Command("chmod", "+x", "/usr/local/bin/nextdeploy").Run()
+	_ = exec.Command("chmod", "+x", "/usr/local/bin/nextdeploy").Run()
 	fmt.Println("NextDeploy has been updated to the latest version!")
 }

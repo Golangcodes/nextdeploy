@@ -14,7 +14,7 @@ func SendCommand(socketPath string, cmd types.Command) (*types.Response, error) 
 		return nil, fmt.Errorf("failed to connect to socket: %w", err)
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	encoder := json.NewEncoder(conn)
 	decoder := json.NewDecoder(conn)

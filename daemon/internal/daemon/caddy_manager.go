@@ -14,7 +14,7 @@ type CaddyManager struct {
 
 func NewCaddyManager() *CaddyManager {
 	dir := "/etc/caddy/nextdeploy.d"
-	os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0750)
 	return &CaddyManager{
 		configDir: dir,
 	}
@@ -59,7 +59,7 @@ func (cm *CaddyManager) GenerateConfig(appName, domain, outputMode string, port 
 	}
 
 	configPath := filepath.Join(cm.configDir, fmt.Sprintf("%s.caddy", appName))
-	err := os.WriteFile(configPath, []byte(caddyConfig), 0644)
+	err := os.WriteFile(configPath, []byte(caddyConfig), 0600)
 	if err != nil {
 		return fmt.Errorf("failed to write caddy config for %s: %w", appName, err)
 	}
@@ -77,7 +77,7 @@ func (cm *CaddyManager) EnsureMainCaddyfile() error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Create it if it doesn't exist at all
-			return os.WriteFile(mainCaddyfile, []byte(importDirective), 0644)
+			return os.WriteFile(mainCaddyfile, []byte(importDirective), 0600)
 		}
 		return fmt.Errorf("failed to read main Caddyfile: %w", err)
 	}
@@ -86,7 +86,7 @@ func (cm *CaddyManager) EnsureMainCaddyfile() error {
 	contentStr := string(content)
 	if !containsStr(contentStr, importDirective) {
 		// Append to the file (safest)
-		f, err := os.OpenFile(mainCaddyfile, os.O_APPEND|os.O_WRONLY, 0644)
+		f, err := os.OpenFile(mainCaddyfile, os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			return fmt.Errorf("failed to open main Caddyfile for appending: %w", err)
 		}
@@ -108,6 +108,16 @@ func (cm *CaddyManager) Reload() error {
 		return fmt.Errorf("failed to reload caddy: %v - %s", err, string(output))
 	}
 	log.Println("Caddy reloaded successfully.")
+	return nil
+}
+
+// Validate checks the syntax of the generated Caddy configuration
+func (cm *CaddyManager) Validate() error {
+	cmd := exec.Command("caddy", "validate", "--config", "/etc/caddy/Caddyfile")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("caddy validation failed: %v - %s", err, string(output))
+	}
 	return nil
 }
 

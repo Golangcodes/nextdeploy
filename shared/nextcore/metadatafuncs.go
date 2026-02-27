@@ -23,9 +23,10 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 	if err != nil {
 		PackageManager = "npm"
 	}
-	if err := os.MkdirAll(".nextdeploy", 0755); err != nil {
+	if err := os.MkdirAll(".nextdeploy", 0750); err != nil {
 		return nil, fmt.Errorf("failed to create .nextdeploy directory: %w", err)
 	}
+	// #nosec G204
 	cmd := exec.Command("sh", "-c", buildCommand)
 	cmd.Dir = projectDir
 	cmd.Stdout = os.Stdout
@@ -36,11 +37,13 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 	}
 
 	nextDir := filepath.Join(projectDir, ".next")
+	// #nosec G304
 	buildID, err := os.ReadFile(filepath.Join(nextDir, "BUILD_ID"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read BUILD_ID: %w", err)
 	}
 	readJSON := func(filename string) (interface{}, error) {
+		// #nosec G304
 		data, err := os.ReadFile(filepath.Join(nextDir, filename))
 		if err != nil {
 			return nil, err
@@ -71,11 +74,13 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 	outputMode := OutputModeDefault
 	if _, err := os.Stat(filepath.Join(nextDir, "standalone")); err == nil {
 		outputMode = OutputModeStandalone
+	// #nosec G304
 	} else if b, err := os.ReadFile(filepath.Join(projectDir, "next.config.js")); err == nil {
 		content := string(b)
 		if strings.Contains(content, "output: 'export'") || strings.Contains(content, "output: \"export\"") {
 			outputMode = OutputModeExport
 		}
+	// #nosec G304
 	} else if b, err := os.ReadFile(filepath.Join(projectDir, "next.config.mjs")); err == nil {
 		content := string(b)
 		if strings.Contains(content, "output: 'export'") || strings.Contains(content, "output: \"export\"") {

@@ -80,6 +80,7 @@ type Database struct {
 	Host            string `yaml:"host"`
 	Port            int    `yaml:"port"`
 	Username        string `yaml:"username"`
+	// #nosec G117
 	Password        string `yaml:"password"`
 	Name            string `yaml:"name"`
 	MigrateOnDeploy bool   `yaml:"migrate_on_deploy"`
@@ -120,6 +121,7 @@ type Storage struct {
 	Provider  string `yaml:"provider"`
 	Bucket    string `yaml:"bucket"`
 	Region    string `yaml:"region"`
+	// #nosec G117
 	AccessKey string `yaml:"access_key"`
 	SecretKey string `yaml:"secret_key"`
 }

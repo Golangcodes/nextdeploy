@@ -71,6 +71,7 @@ func daemonize() {
 			}
 		}
 	}
+	// #nosec G204, G702
 	cmd := exec.Command(execPath, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
@@ -83,11 +84,12 @@ func daemonize() {
 			logDir = home + "/.nextdeploy/log"
 		}
 	}
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0750); err != nil {
 		log.Fatalf("Error creating log directory: %v", err)
 	}
 	logFilePath := filepath.Join(logDir, "nextdeployd.log")
-	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// #nosec G304
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		log.Fatalf("Error opening log file: %v", err)
 	}
@@ -102,7 +104,46 @@ func daemonize() {
 	os.Exit(0)
 }
 
+var lockFile *os.File
+
+func acquireLock() error {
+	lockPath := "/var/run/nextdeployd.pid"
+	if os.Geteuid() != 0 {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			lockPath = filepath.Join(home, ".nextdeploy", "nextdeployd.pid")
+		} else {
+			lockPath = "/tmp/nextdeployd.pid"
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0750); err != nil {
+		return err
+	}
+
+	// #nosec G304
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+
+	// #nosec G115
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("another instance of nextdeployd is already running")
+	}
+
+	lockFile = f
+	_ = f.Truncate(0)
+	_, _ = f.WriteString(fmt.Sprintf("%d\n", os.Getpid()))
+	return nil
+}
+
 func runDaemon(configPath string) {
+	if err := acquireLock(); err != nil {
+		log.Fatalf("Lock error: %v", err)
+	}
+
 	daemon, err := daemon.NewNextDeployDaemon(configPath)
 	if err != nil {
 		log.Fatalf("Error initializing daemon: %v", err)

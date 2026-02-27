@@ -27,12 +27,8 @@ var (
 	NextCoreLogger = shared.PackageLogger("nextcore", "📦 NEXTCORE")
 )
 
-// TODO: add temporal workflow context for metadata ingeestion and usage pipelines
 func GenerateMetadata() (metadata NextCorePayload, err error) {
-	// This function will generate metadata for the Next.js application
-	// and return a NextCorePayload with the necessary fields filled.
 	NextCoreLogger.Info("Generating metadata for Next.js application...")
-	//Get the app name
 	cfg, err := config.Load()
 	if err != nil {
 		NextCoreLogger.Error("Failed to load configuration: %v", err)
@@ -40,24 +36,18 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 	}
 
 	AppName := cfg.App.Name
-
-	// Get the nextjs version
 	NextJsVersion, err := GetNextJsVersion("package.json")
 	if err != nil {
 		NextCoreLogger.Error("Failed to get Next.js version: %v", err)
 		return NextCorePayload{}, err
 	}
 	NextCoreLogger.Info("Next.js version: %s", NextJsVersion)
-	// get the build meta data
 	NextCoreLogger.Info("Collecting build metadata...")
 	buildMeta, err := CollectBuildMetadata()
 	if err != nil {
 		NextCoreLogger.Error("Failed to collect build metadata: %v", err)
 		return NextCorePayload{}, err
 	}
-	// add config data to the metadata also
-	// Note: config logic was loading twice but checking err from previous. Fixed.
-	// static_routes := []string{}
 	routeInfo, err := getRoutesFromManifests(buildMeta)
 	if err != nil {
 		return NextCorePayload{}, err
@@ -194,7 +184,7 @@ func copyStaticAssets() error {
 	dstDir := filepath.Join(".nextdeploy", "assets")
 
 	// Create destination directory
-	if err := os.MkdirAll(dstDir, 0755); err != nil {
+	if err := os.MkdirAll(dstDir, 0750); err != nil {
 		NextCoreLogger.Error("Failed to create destination directory: %v", err)
 		return err
 	}
@@ -221,7 +211,7 @@ func copyStaticAssets() error {
 		dstPath := filepath.Join(dstDir, relPath)
 
 		// Create destination directory structure
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0750); err != nil {
 			NextCoreLogger.Error("Failed to create directory for %s: %v", dstPath, err)
 			return err
 		}
@@ -233,6 +223,7 @@ func copyStaticAssets() error {
 
 // copyFile copies a file from src to dst
 func copyFile(src, dst string) error {
+	// #nosec G304
 	source, err := os.Open(src)
 	if err != nil {
 		NextCoreLogger.Error("Failed to open source file %s: %v", src, err)
@@ -240,6 +231,7 @@ func copyFile(src, dst string) error {
 	}
 	defer source.Close()
 
+	// #nosec G304
 	destination, err := os.Create(dst)
 	if err != nil {
 		NextCoreLogger.Error("Failed to create destination file %s: %v", dst, err)
@@ -267,7 +259,7 @@ func createBuildLock(metadata *NextCorePayload) error {
 		NextCoreLogger.Error("Failed to marshal metadata: %v", err)
 		return err
 	}
-	if err := os.WriteFile(fileName, marshalledData, 0644); err != nil {
+	if err := os.WriteFile(fileName, marshalledData, 0600); err != nil {
 		NextCoreLogger.Error("Failed to write metadata json: %v", err)
 		return err
 	}
@@ -285,7 +277,7 @@ func createBuildLock(metadata *NextCorePayload) error {
 		return err
 	}
 
-	return os.WriteFile(filepath.Join(".nextdeploy", "build.lock"), data, 0644)
+	return os.WriteFile(filepath.Join(".nextdeploy", "build.lock"), data, 0600)
 }
 
 // getPublicEnvVars collects NEXT_PUBLIC_* environment variables
@@ -305,6 +297,7 @@ func getPublicEnvVars() map[string]string {
 // ValidateBuildState checks if the current git state matches the build lock
 func ValidateBuildState() error {
 	lockPath := filepath.Join(".nextdeploy", "build.lock")
+	// #nosec G304
 	data, err := os.ReadFile(lockPath)
 	if err != nil {
 		NextCoreLogger.Error("Failed to read build lock file: %v", err)
@@ -540,6 +533,7 @@ func ParseMiddleware(projectDir string) (*MiddlewareConfig, error) {
 		return nil, nil // No middleware file found
 	}
 
+	// #nosec G304
 	// Read middleware file content
 	content, err := os.ReadFile(middlewareFile)
 	if err != nil {

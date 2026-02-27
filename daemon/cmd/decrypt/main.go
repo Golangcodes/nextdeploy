@@ -39,12 +39,12 @@ func main() {
 	}
 	fmt.Println("Decrypted .env content:\n", string(envfile))
 	// save the decrypted files
-	err = os.WriteFile("nextdeploy.yml", []byte(nextdeployyml), 0644)
+	err = os.WriteFile("nextdeploy.yml", []byte(nextdeployyml), 0600)
 	if err != nil {
 		fmt.Println("Failed to write decrypted nextdeploy.yml:", err)
 		return
 	}
-	err = os.WriteFile(".env", []byte(envfile), 0644)
+	err = os.WriteFile(".env", []byte(envfile), 0600)
 	if err != nil {
 		fmt.Println("Failed to write decrypted .env file:", err)
 		return

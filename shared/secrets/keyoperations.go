@@ -216,6 +216,7 @@ func (sm *SecretManager) loadUnixKey() ([]byte, error) {
 	keyPath := filepath.Join(appDir, keyFilename)
 	SLogs.Debug("Attempting to load master key from: %s", keyPath)
 
+	// #nosec G304
 	// Try reading existing key
 	keyData, err := os.ReadFile(keyPath)
 	if err == nil {

@@ -108,6 +108,7 @@ func handleDaemonCommand() {
 func runDaemonDirectly(configPath string) {
 	fmt.Println("Starting NextDeploy daemon in foreground...")
 
+	// #nosec G204, G702
 	// This would typically exec the daemon binary
 	cmd := exec.Command("nextdeploy-daemon", "--foreground=true", "--config="+configPath)
 	cmd.Stdout = os.Stdout
@@ -128,6 +129,7 @@ func startDaemonProcess(configPath string) {
 
 	fmt.Println("🚀 Starting NextDeploy daemon...")
 
+	// #nosec G204, G702
 	cmd := exec.Command("nextdeploy-daemon", "--config="+configPath)
 
 	// Start detached

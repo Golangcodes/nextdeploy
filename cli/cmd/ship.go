@@ -82,6 +82,7 @@ var shipCmd = &cobra.Command{
 		defer srv.CloseSSHConnection()
 
 		deploymentServer, err := srv.GetDeploymentServer()
+		fmt.Println("deploymentServer", deploymentServer)
 		if err != nil {
 			log.Error("Failed to get deployment server: %v", err)
 			os.Exit(1)
@@ -94,11 +95,13 @@ var shipCmd = &cobra.Command{
 		}
 
 		remotePath := fmt.Sprintf("/tmp/nextdeploy_%s_%d.tar.gz", cfg.App.Name, time.Now().Unix())
+		log.Info("Remote path for artifact is:%s", remotePath)
 
 		log.Info("Uploading %s to %s on %s...", tarballName, remotePath, deploymentServer)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
+		log.Info("Deploying to %s tarball %v and path is %s", deploymentServer, tarballName, remotePath)
 		err = srv.UploadFile(ctx, deploymentServer, tarballName, remotePath)
 		if err != nil {
 			log.Error("Failed to upload tarball: %v", err)

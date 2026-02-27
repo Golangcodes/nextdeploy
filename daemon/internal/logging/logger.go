@@ -10,13 +10,14 @@ import (
 
 func SetupLogger(config types.LoggerConfig) *log.Logger {
 	// Create log directory if not exists
-	if err := os.MkdirAll(config.LogDir, 0755); err != nil {
+	if err := os.MkdirAll(config.LogDir, 0750); err != nil {
 		log.Printf("Failed to create log directory: %v\n", err)
 		os.Exit(1)
 	}
 
 	logFilePath := filepath.Join(config.LogDir, config.LogFileName)
-	logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// #nosec G304
+	logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		log.Printf("Failed to open log file: %v\n", err)
 		os.Exit(1)

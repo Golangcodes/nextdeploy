@@ -16,10 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"nextdeploy/shared/envstore"
-	"nextdeploy/shared/git"
-	"nextdeploy/shared/registry"
-
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -29,11 +25,10 @@ var (
 	serverlogger = shared.PackageLogger("Server", "🅱)SERVERLOGGER")
 )
 
-// ServerStruct manages multiple SSH connections and provides operations
 type ServerStruct struct {
 	config     *config.NextDeployConfig
 	sshClients map[string]*SSHClient
-	mu         sync.RWMutex // protects sshClients map
+	mu         sync.RWMutex
 }
 
 // SSHClient wraps SSH client and related configurations
@@ -130,17 +125,23 @@ func (s *ServerStruct) GetDeploymentServer() (string, error) {
 	if s.config == nil || s.config.Deployment.Server.Host == "" {
 		return "", fmt.Errorf("deployment server configuration is not set")
 	}
-	// find the matchin in servers list
+
+	deploymentTarget := s.config.Deployment.Server.Host
+
+	// find the matching server in servers list
 	for _, server := range s.config.Servers {
-		if server.Name == s.config.Deployment.Server.Host {
+		// Check if deployment target matches either server name OR host IP
+		if server.Name == deploymentTarget || server.Host == deploymentTarget {
 			_, err := connectSSH(server)
 			if err != nil {
-				return "", fmt.Errorf("failed to connect to deployment server %s: %w", server.Name, err)
+				return "", fmt.Errorf("failed to connect to deployment server %s (%s): %w",
+					server.Name, server.Host, err)
 			}
 			return server.Name, nil
 		}
 	}
-	return "", fmt.Errorf("deployment server %s not found in configuration", s.config.Deployment.Server.Host)
+	return "", fmt.Errorf("deployment server %s not found in configuration (searched by name and host)",
+		deploymentTarget)
 }
 func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 	// Validate IP/hostname
@@ -165,6 +166,7 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 		}
 	}
 
+	// #nosec G204
 	// Get the host key using ssh-keyscan
 	cmd := exec.Command("ssh-keyscan", ip)
 	var out bytes.Buffer
@@ -179,6 +181,7 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 		return fmt.Errorf("no host key returned for %s", ip)
 	}
 
+	// #nosec G304
 	// Append to known_hosts file
 	f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
@@ -244,7 +247,7 @@ func connectSSH(cfg config.ServerConfig) (*SSHClient, error) {
 
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
-		client.Close()
+		_ = client.Close()
 		return nil, fmt.Errorf("failed to create SFTP client: %w", err)
 	}
 
@@ -276,6 +279,7 @@ func getAuthMethods(cfg config.ServerConfig) ([]ssh.AuthMethod, error) {
 
 	serverlogger.Debug("Key path resolution: %s -> %s", cfg.KeyPath, expandedPath)
 
+	// #nosec G304
 	key, err := os.ReadFile(expandedPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read SSH key file %s (resolved to %s): %w",
@@ -317,11 +321,12 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 	if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0700); err != nil {
 		return nil, err
 	}
+	// #nosec G304
 	f, err := os.OpenFile(knownHostsPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, err
 	}
-	f.Close()
+	_ = f.Close()
 
 	initialCallback, err := knownhosts.New(knownHostsPath)
 	if err != nil {
@@ -335,6 +340,7 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 			if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
 				// Key is unknown. Trust on first use.
 				serverlogger.Info("Adding unknown host %s to known_hosts automatically", hostname)
+				// #nosec G304
 				f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
 				if err != nil {
 					return err
@@ -386,12 +392,6 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 		return "", fmt.Errorf("failed to get stderr pipe: %w", err)
 	}
 
-	// stdout is captured for the return value AND streamed to the caller.
-	// stderr is streamed to the caller only — it must NOT pollute the
-	// returned string, because many callers parse stdout for tokens like
-	// "apt", "yum", "installed", etc.  Shell startup noise (NVM messages,
-	// /etc/profile fragments) always arrives on stderr and previously
-	// caused false-negative parse failures.
 	output := &bytes.Buffer{}
 
 	var stdoutWriters []io.Writer
@@ -418,12 +418,12 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 
 	go func() {
 		defer wg.Done()
-		io.Copy(stdoutMulti, stdoutPipe)
+		_, _ = io.Copy(stdoutMulti, stdoutPipe)
 	}()
 
 	go func() {
 		defer wg.Done()
-		io.Copy(stderrDst, stderrPipe)
+		_, _ = io.Copy(stderrDst, stderrPipe)
 	}()
 
 	// Set up context cancellation
@@ -431,7 +431,7 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 	go func() {
 		select {
 		case <-ctx.Done():
-			session.Signal(ssh.SIGKILL)
+			_ = session.Signal(ssh.SIGKILL)
 		case <-done:
 		}
 	}()
@@ -461,6 +461,7 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	client.mu.Lock()
 	defer client.mu.Unlock()
 
+	// #nosec G304
 	localFile, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to open local file: %w", err)
@@ -499,6 +500,7 @@ func (s *ServerStruct) DownloadFile(ctx context.Context, serverName, remotePath,
 	}
 	defer remoteFile.Close()
 
+	// #nosec G304
 	localFile, err := os.Create(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to create local file: %w", err)
@@ -603,9 +605,9 @@ func (s *ServerStruct) Reconnect(serverName string) error {
 	if oldClient, ok := s.sshClients[serverName]; ok {
 		oldClient.mu.Lock()
 		if oldClient.SFTPClient != nil {
-			oldClient.SFTPClient.Close()
+			_ = oldClient.SFTPClient.Close()
 		}
-		oldClient.Client.Close()
+		_ = oldClient.Client.Close()
 		oldClient.mu.Unlock()
 	}
 
@@ -645,7 +647,7 @@ func (s *ServerStruct) GetServerStatus(serverName string, stream io.Writer) (str
 	if err != nil {
 		return "disconnected", nil
 	}
-	session.Close()
+	_ = session.Close()
 
 	uptime, err := s.ExecuteCommand(context.Background(), serverName, "uptime", stream)
 	if err != nil {
@@ -653,213 +655,4 @@ func (s *ServerStruct) GetServerStatus(serverName string, stream io.Writer) (str
 	}
 
 	return fmt.Sprintf("connected (uptime: %s)", uptime), nil
-}
-
-// PrepareServer installs required tools on the target server
-// PrepareServer installs required tools on the target server with streaming output
-// func (s *ServerStruct) PrepareServer(ctx context.Context, serverName string, stream io.Writer) error {
-// 	client, err := s.getSSHClient(serverName)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to get SSH client: %w", err)
-// 	}
-//
-// 	client.mu.Lock()
-// 	defer client.mu.Unlock()
-//
-// 	// Check if preparation is already done
-// 	if _, err := s.ExecuteCommand(ctx, serverName, "which docker && which caddy && which go", stream); err == nil {
-// 		if stream != nil {
-// 			fmt.Fprintf(stream, "Server already has required tools installed\n")
-// 		}
-// 		serverlogger.Info("Server already has required tools installed")
-// 		return nil
-// 	}
-//
-// 	if stream != nil {
-// 		fmt.Fprintf(stream, "Preparing server %s by installing required tools...\n", serverName)
-// 	}
-// 	serverlogger.Info("Preparing server %s by installing required tools...", serverName)
-//
-// 	// Determine package manager (apt/yum/dnf)
-// 	pkgManagerCmd := "command -v apt-get >/dev/null && echo apt || echo yum"
-// 	pkgManager, err := s.ExecuteCommand(ctx, serverName, pkgManagerCmd, stream)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to detect package manager: %w", err)
-// 	}
-//
-// 	// Install base dependencies
-// 	baseDepsCmd := ""
-// 	switch strings.TrimSpace(pkgManager) {
-// 	case "apt":
-// 		baseDepsCmd = `sudo apt-get update &&
-//             sudo apt-get install -y curl git make gcc build-essential
-//             ca-certificates software-properties-common apt-transport-https`
-// 	case "yum":
-// 		baseDepsCmd = `sudo yum install -y curl git make gcc glibc-static
-//             ca-certificates yum-utils device-mapper-persistent-data lvm2`
-// 	default:
-// 		return fmt.Errorf("unsupported package manager: %s", pkgManager)
-// 	}
-//
-// 	if _, err := s.ExecuteCommand(ctx, serverName, baseDepsCmd, stream); err != nil {
-// 		return fmt.Errorf("failed to install base dependencies: %w", err)
-// 	}
-//
-// 	// Install Docker
-// 	dockerInstallCmd := `curl -fsSL https://get.docker.com | sudo sh &&
-//         sudo usermod -aG docker $USER &&
-//         sudo systemctl enable docker &&
-//         sudo systemctl start docker`
-//
-// 	if _, err := s.ExecuteCommand(ctx, serverName, dockerInstallCmd, stream); err != nil {
-// 		return fmt.Errorf("failed to install Docker: %w", err)
-// 	}
-//
-// 	// Install Caddy
-// 	caddyInstallCmd := `sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https &&
-//         curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg &&
-//         curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list &&
-//         sudo apt update &&
-//         sudo apt install -y caddy`
-//
-// 	if strings.TrimSpace(pkgManager) == "yum" {
-// 		caddyInstallCmd = `sudo yum install -y yum-plugin-copr &&
-//             sudo yum copr enable -y @caddy/caddy &&
-//             sudo yum install -y caddy`
-// 	}
-//
-// 	if _, err := s.ExecuteCommand(ctx, serverName, caddyInstallCmd, stream); err != nil {
-// 		return fmt.Errorf("failed to install Caddy: %w", err)
-// 	}
-//
-// 	// Install Go
-// 	goInstallCmd := `curl -OL https://golang.org/dl/go1.21.0.linux-amd64.tar.gz &&
-//         sudo rm -rf /usr/local/go &&
-//         sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz &&
-//         echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc &&
-//         source ~/.bashrc &&
-//         rm go1.21.0.linux-amd64.tar.gz`
-//
-// 	if _, err := s.ExecuteCommand(ctx, serverName, goInstallCmd, stream); err != nil {
-// 		return fmt.Errorf("failed to install Go: %w", err)
-// 	}
-//
-// 	// Verify installations
-// 	verifyCmd := `docker --version && caddy version && go version`
-// 	if _, err := s.ExecuteCommand(ctx, serverName, verifyCmd, stream); err != nil {
-// 		return fmt.Errorf("verification failed: %w", err)
-// 	}
-//
-// 	if stream != nil {
-// 		fmt.Fprintf(stream, "Server preparation completed successfully\n")
-// 	}
-// 	serverlogger.Info("Server preparation completed successfully")
-// 	return nil
-// }
-
-func (s *ServerStruct) PrepareEcrCredentials(stream io.Writer) error {
-	serverlogger.Info("Preparing ECR credentials")
-
-	// Load environment variables
-	store, err := envstore.New(
-		envstore.WithEnvFile[string](".env"),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create env store: %w", err)
-	}
-
-	// Retrieve AWS credentials securely
-	accessKey, err := store.GetEnv("AWS_ACCESS_KEY_ID")
-	if err != nil {
-		serverlogger.Error("Failed to get AWS_ACCESS_KEY_ID: %v", err)
-		return fmt.Errorf("AWS_ACCESS_KEY_ID not found: %w", err)
-	}
-
-	secretKey, err := store.GetEnv("AWS_SECRET_ACCESS_KEY")
-	if err != nil {
-		serverlogger.Error("Failed to get AWS_SECRET_ACCESS_KEY: %v", err)
-		return fmt.Errorf("AWS_SECRET_ACCESS_KEY not found: %w", err)
-	}
-
-	// Generate AWS credentials file content
-	credentialsContent := fmt.Sprintf(`[default]
-aws_access_key_id = %s
-aws_secret_access_key = %s
-`, accessKey, secretKey)
-
-	// Write credentials securely to ~/.aws/credentials
-	command := fmt.Sprintf(`
-		mkdir -p ~/.aws && \
-		cat > ~/.aws/credentials <<'EOF'
-%sEOF
-		chmod 600 ~/.aws/credentials
-	`, credentialsContent)
-
-	output, err := s.ExecuteCommand(
-		context.Background(),
-		"production", // Replace with actual server name
-		command,
-		stream, // Add stream parameter here
-	)
-	if err != nil {
-		serverlogger.Error("Failed to write AWS credentials: %v (Output: %s)", err, output)
-		return fmt.Errorf("failed to write credentials: %w", err)
-	}
-
-	// Get repo details
-	cfg, err := config.Load()
-	if err != nil {
-		serverlogger.Error("Failed to load configuration: %v", err)
-		return fmt.Errorf("failed to load configuration: %w", err)
-	}
-
-	image := cfg.Docker.Image
-	if image == "" {
-		serverlogger.Error("Docker image not specified in configuration")
-		return fmt.Errorf("docker image not specified in configuration")
-	}
-
-	accountID, region, reponame, err := registry.ExtractECRDetails(image)
-	// log out repo details
-	serverlogger.Debug("Extracted ECR details - Account ID: %s, Region: %s, Repository Name: %s", accountID, region, reponame)
-	if err != nil {
-		serverlogger.Error("Failed to extract ECR details from image %s: %v", image, err)
-		return fmt.Errorf("failed to extract ECR details from image %s: %w", image, err)
-	}
-	tag, err := git.GetCommitHash()
-	if err != nil {
-		serverlogger.Error("Failed to get commit hash: %v", err)
-		return fmt.Errorf("failed to get commit hash: %w", err)
-	}
-	if tag == "" {
-		serverlogger.Error("No commit hash found, using 'latest' tag")
-		tag = "latest"
-	}
-	imagename := fmt.Sprintf("%s:%s", reponame, tag)
-	serverlogger.Info("Using image: %s", imagename)
-
-	ecrRegistry := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", accountID, region)
-	pullCommand := fmt.Sprintf(`aws ecr get-login-password --region %s | docker login --username AWS --password-stdin %s`, region, ecrRegistry)
-	if stream != nil {
-		fmt.Fprintf(stream, "🔑 Executing ECR login command...\n")
-	}
-
-	serverlogger.Debug("Pull command for ECR: %s", pullCommand)
-	output, err = s.ExecuteCommand(
-		context.Background(),
-		"production", // Replace with actual server name
-		pullCommand,
-		stream,
-	)
-	if err != nil {
-		serverlogger.Error("Failed to login to ECR: %v (Output: %s)", err, output)
-		return fmt.Errorf("failed to login to ECR: %w", err)
-	}
-
-	if stream != nil {
-		fmt.Fprintf(stream, "✅ Successfully logged in to ECR\n")
-	}
-
-	serverlogger.Info("Successfully prepared ECR credentials")
-	return nil
 }

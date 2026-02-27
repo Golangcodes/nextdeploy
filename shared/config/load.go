@@ -3,8 +3,9 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
+
+	"gopkg.in/yaml.v3"
 )
 
 func Save(cfg *NextDeployConfig, path string) error {
@@ -12,7 +13,7 @@ func Save(cfg *NextDeployConfig, path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }
 func Load() (*NextDeployConfig, error) {
 	data, err := os.ReadFile(ConfigFile)

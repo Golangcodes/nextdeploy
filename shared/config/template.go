@@ -180,5 +180,5 @@ deployment:
 func GenerateSampleConfig() error {
 	// Write the sample config to sample.nextdeploy.yml in the current directory
 	path := filepath.Join(".", "nextdeploy.yml")
-	return os.WriteFile(path, []byte(sampleConfig), 0644)
+	return os.WriteFile(path, []byte(sampleConfig), 0600)
 }

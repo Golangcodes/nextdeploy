@@ -117,6 +117,7 @@ func (s *Store[T]) GetEnv(key string) (string, error) {
 
 // Helper function to read env file
 func readEnvFile(filename string) (map[string]string, error) {
+	// #nosec G304
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err

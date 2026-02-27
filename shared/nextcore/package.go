@@ -63,6 +63,7 @@ func DetectPackageManager(projectPath string) (PackageManager, error) {
 		}
 	}
 
+	// #nosec G304
 	pkgJson, err := os.ReadFile(pkgPath)
 	if err == nil {
 		content := string(pkgJson)

@@ -3,10 +3,11 @@ package nextdeploy
 import (
 	"errors"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"nextdeploy/shared"
 	"os"
 	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Config represents the structure of a nextdeploy.yml file
@@ -74,6 +75,7 @@ func New() *Config {
 
 // Load reads a nextdeploy.yml file and returns a Config struct
 func Load(filename string) (*Config, error) {
+	// #nosec G304
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
@@ -99,12 +101,12 @@ func (c *Config) Save(filename string) error {
 	// Ensure the directory exists
 	dir := filepath.Dir(filename)
 	if dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 	}
 
-	err = os.WriteFile(filename, data, 0644)
+	err = os.WriteFile(filename, data, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}

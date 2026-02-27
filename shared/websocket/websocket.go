@@ -98,9 +98,9 @@ func (c *WSClient) Close() error {
 func (c *WSClient) readPump() {
 	defer c.Close()
 
-	c.conn.SetReadDeadline(time.Now().Add(c.pongWait))
+	_ = c.conn.SetReadDeadline(time.Now().Add(c.pongWait))
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(c.pongWait))
+		_ = c.conn.SetReadDeadline(time.Now().Add(c.pongWait))
 		return nil
 	})
 
@@ -121,7 +121,7 @@ func (c *WSClient) writePump() {
 	ticker := time.NewTicker(c.pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.Close()
+		_ = c.Close()
 	}()
 
 	for {
