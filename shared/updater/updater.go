@@ -3,6 +3,7 @@
 package updater
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -170,8 +171,14 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	}
 	defer os.Remove(tmpFile.Name()) //nolint:errcheck
 
-	client := &http.Client{Timeout: 60 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, downloadURL, nil)
+	// Use a long context timeout so large binaries on slow links don't fail.
+	// http.Client.Timeout covers the entire round-trip including body read,
+	// so we use context instead and leave the transport timeout unset.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	client := &http.Client{} // no Timeout — context handles it
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return err
 	}
@@ -184,6 +191,7 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download returned HTTP %d - is release %s published?", resp.StatusCode, latest.TagName)
 	}
+	fmt.Printf("Downloading (this may take a minute on slow connections)...\n")
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
 		return fmt.Errorf("failed writing download: %w", err)
 	}
