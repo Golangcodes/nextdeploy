@@ -10,7 +10,9 @@ import (
 	"strings"
 	"syscall"
 
+	daemoniclient "github.com/Golangcodes/nextdeploy/daemon/internal/client"
 	"github.com/Golangcodes/nextdeploy/daemon/internal/daemon"
+	daemontypes "github.com/Golangcodes/nextdeploy/daemon/internal/types"
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/updater"
 )
@@ -26,6 +28,51 @@ func main() {
 			if err := updater.SelfUpdateDaemon(shared.Version); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
+			}
+			return
+		case "ship":
+			// Parse --tarball and --dopplerToken from remaining args and forward
+			// the ship command over the Unix socket to the running daemon.
+			tarball := ""
+			dopplerToken := ""
+			for _, arg := range os.Args[2:] {
+				if strings.HasPrefix(arg, "--tarball=") {
+					tarball = strings.TrimPrefix(arg, "--tarball=")
+					// strip surrounding quotes if present
+					tarball = strings.Trim(tarball, "\"'")
+				} else if strings.HasPrefix(arg, "--dopplerToken=") {
+					dopplerToken = strings.TrimPrefix(arg, "--dopplerToken=")
+				}
+			}
+			if tarball == "" {
+				fmt.Fprintln(os.Stderr, "Error: --tarball is required")
+				os.Exit(1)
+			}
+			socketPath := "/var/run/nextdeployd.sock"
+			if os.Geteuid() != 0 {
+				home, err := os.UserHomeDir()
+				if err == nil {
+					socketPath = home + "/.nextdeploy/daemon.sock"
+				}
+			}
+			args := map[string]interface{}{"tarball": tarball}
+			if dopplerToken != "" {
+				args["dopplerToken"] = dopplerToken
+			}
+			resp, err := daemoniclient.SendCommand(socketPath, daemontypes.Command{
+				Type: "ship",
+				Args: args,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error contacting daemon: %v\n", err)
+				os.Exit(1)
+			}
+			if resp != nil && !resp.Success {
+				fmt.Fprintf(os.Stderr, "Deployment failed: %s\n", resp.Message)
+				os.Exit(1)
+			}
+			if resp != nil {
+				fmt.Printf("✅ %s\n", resp.Message)
 			}
 			return
 		}
