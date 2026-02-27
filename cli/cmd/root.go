@@ -5,10 +5,11 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/Golangcodes/nextdeploy/shared"
 	"os"
 	"strings"
 
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/updater"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -41,7 +42,7 @@ Deploy your Next.js app to *any* VPS — with SSL, logs, and zero downtime.
 
 %s %s
 `,
-		title("🚀 NextDeploy"), warning("v1.0.0"),
+		title("NextDeploy"), warning(shared.Version),
 		highlight("Simple. Fast. Infrastructure-Agnostic."),
 		highlight("Features:"),
 		success("✓"),
@@ -72,9 +73,12 @@ func Execute() {
 	fmt.Println()
 
 	if versionFlag {
-		fmt.Println("NextDeploy version:", shared.Version)
+		fmt.Printf("nextdeploy %s\n", shared.Version)
 		os.Exit(0)
 	}
+
+	// Run a background update check — never blocks the CLI.
+	go updater.CheckAndPrint(shared.Version)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Printf("\n%s %s\n\n",

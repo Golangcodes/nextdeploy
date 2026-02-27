@@ -1,3 +1,5 @@
 package shared
 
-var Version = "v0.2.0"
+// Version is the current CLI version. It is overridden at build time via
+// ldflags: -X github.com/Golangcodes/nextdeploy/shared.Version=<tag>
+var Version = "dev"

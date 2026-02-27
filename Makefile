@@ -11,7 +11,10 @@ BUILDER ?= $(shell whoami)@$(shell hostname)
 # Go build flags
 export PATH := $(PATH):$(shell go env GOPATH)/bin
 GOFLAGS := -trimpath
-LDFLAGS := -s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_DATE} -X main.builder=${BUILDER}
+LDFLAGS := -s -w \
+	-X github.com/Golangcodes/nextdeploy/shared.Version=$(VERSION) \
+	-X main.commit=$(COMMIT) \
+	-X main.date=$(BUILD_DATE)
 
 # Directories
 BIN_DIR := bin

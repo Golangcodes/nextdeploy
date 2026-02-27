@@ -119,7 +119,7 @@ No black boxes. No middleware. Just you and your server.
 
 * Website: [nextdeploy.one](https://nextdeploy.one)
 * GitHub: [github.com/Golangcodes/nextdeploy](https://github.com/Golangcodes/nextdeploy)
-* Twitter/X: [@nextdeploy](https://twitter.com/nextdeploy)
+* Twitter/X: [@hersiyussuf](https://x.com/hersiyussuf)
 
 ---
 
