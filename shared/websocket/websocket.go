@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared"
 	"time"
 
 	"github.com/gorilla/websocket"

@@ -3,7 +3,7 @@ package config
 
 import (
 	"bufio"
-	"nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared"
 	"strconv"
 
 	"github.com/spf13/cobra"

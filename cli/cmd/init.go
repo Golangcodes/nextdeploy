@@ -6,8 +6,8 @@ package cmd
 //TODO: this commands main job should be to give developers a Scaffolded and opionated NextJS web app templates
 import (
 	"github.com/spf13/cobra"
-	"nextdeploy/cli/internal/initialcommand"
-	"nextdeploy/shared/nextcore"
+	"github.com/Golangcodes/nextdeploy/cli/internal/initialcommand"
+	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
 type PackageManager string

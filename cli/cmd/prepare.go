@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"nextdeploy/shared"
-	"nextdeploy/shared/config"
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/config"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"nextdeploy/daemon/internal/types"
+	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 	"time"
 )
 

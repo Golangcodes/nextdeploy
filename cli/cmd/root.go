@@ -5,7 +5,7 @@ package cmd
 
 import (
 	"fmt"
-	"nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared"
 	"os"
 	"strings"
 

@@ -3,9 +3,9 @@ package serverless
 import (
 	"context"
 	"fmt"
-	"nextdeploy/shared"
-	"nextdeploy/shared/config"
-	"nextdeploy/shared/nextcore"
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
 func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error {

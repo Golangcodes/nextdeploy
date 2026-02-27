@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared"
 	"os"
 	"path/filepath"
 

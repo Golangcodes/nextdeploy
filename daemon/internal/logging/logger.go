@@ -3,7 +3,7 @@ package logging
 import (
 	"io"
 	"log"
-	"nextdeploy/daemon/internal/types"
+	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 	"os"
 	"path/filepath"
 )

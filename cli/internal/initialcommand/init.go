@@ -2,9 +2,9 @@ package initialcommand
 
 import (
 	"fmt"
-	"nextdeploy/shared"
-	"nextdeploy/shared/config"
-	"nextdeploy/shared/nextcore"
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"

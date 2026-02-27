@@ -18,7 +18,7 @@ package main
 
 import (
 	"fmt"
-	"nextdeploy/cli/cmd"
+	"github.com/Golangcodes/nextdeploy/cli/cmd"
 	"os"
 	"os/exec"
 	"runtime"

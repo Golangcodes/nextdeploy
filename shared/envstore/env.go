@@ -3,7 +3,7 @@ package envstore
 import (
 	"bufio"
 	"fmt"
-	"nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared"
 	"os"
 	"strings"
 )

@@ -2,9 +2,9 @@ package build
 
 import (
 	"fmt"
-	"nextdeploy/shared"
-	"nextdeploy/shared/git"
-	"nextdeploy/shared/nextdeploy"
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/git"
+	"github.com/Golangcodes/nextdeploy/shared/nextdeploy"
 	"strings"
 	"time"
 )

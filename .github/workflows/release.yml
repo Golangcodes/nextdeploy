@@ -4,7 +4,7 @@ on:
     branches: ['main']
     tags: ['v*.*.*']
 jobs:
-  build-and-release:
+  build-and-release-local:
     runs-on: ubuntu-latest
     permissions:
       contents: write

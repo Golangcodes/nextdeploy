@@ -3,7 +3,7 @@ package config
 import (
 	"bufio"
 	"fmt"
-	"nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared"
 	"strconv"
 	"strings"
 )

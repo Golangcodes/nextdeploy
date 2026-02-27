@@ -1,8 +1,8 @@
 package secrets
 
 import (
-	"nextdeploy/shared"
-	"nextdeploy/shared/config"
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/config"
 	"os"
 	"path/filepath"
 	"sync"

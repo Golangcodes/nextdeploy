@@ -59,7 +59,7 @@ curl -fsSL https://nextdeploy.one/install.sh | bash
 nextdeploy init       # Scaffold Dockerfile + nextdeploy.yml
 nextdeploy build      # Build production Docker image
 nextdeploy runimage   # Run locally with Doppler secrets
-nextdeploy provision  # Prepare a fresh VPS
+nextdeploy prepare # Prepare a fresh VPS
 nextdeploy ship       # Deploy to your server
 nextdeploy serve      # Serve app online
 ```
@@ -104,7 +104,7 @@ No black boxes. No middleware. Just you and your server.
 
 ## Roadmap
 
-* Docker builds and SSH deploy
+* serverless deployment with aws
 * Doppler integration
 * Logs and metrics
 * runimage for local testing

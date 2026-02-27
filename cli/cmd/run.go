@@ -11,11 +11,11 @@ package cmd
 
 import (
 	"fmt"
-	"nextdeploy/shared"
-	"nextdeploy/shared/failfast"
-	"nextdeploy/shared/git"
-	"nextdeploy/shared/nextdeploy"
-	"nextdeploy/shared/secrets"
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/failfast"
+	"github.com/Golangcodes/nextdeploy/shared/git"
+	"github.com/Golangcodes/nextdeploy/shared/nextdeploy"
+	"github.com/Golangcodes/nextdeploy/shared/secrets"
 	"os"
 	"os/exec"
 	"path/filepath"

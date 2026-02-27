@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"nextdeploy/shared"
-	"nextdeploy/shared/secrets"
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/secrets"
 	"os"
 )
 import (

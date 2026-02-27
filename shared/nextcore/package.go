@@ -2,7 +2,7 @@ package nextcore
 
 import (
 	"fmt"
-	"nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared"
 	"os"
 	"path/filepath"
 	"strings"

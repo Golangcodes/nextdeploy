@@ -3,8 +3,8 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"nextdeploy/daemon/internal/types"
-	"nextdeploy/shared/config"
+	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
+	"github.com/Golangcodes/nextdeploy/shared/config"
 	"os"
 
 	"gopkg.in/yaml.v3"

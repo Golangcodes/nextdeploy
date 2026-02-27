@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"nextdeploy/daemon/internal/client"
-	"nextdeploy/daemon/internal/types"
+	"github.com/Golangcodes/nextdeploy/daemon/internal/client"
+	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 )
 
 var (

@@ -1,7 +1,7 @@
 package failfast
 
 import (
-	"nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared"
 	"os"
 	"runtime"
 )

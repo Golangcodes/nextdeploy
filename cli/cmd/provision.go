@@ -2,7 +2,7 @@
 package cmd
 
 import (
-	"nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared"
 
 	"github.com/spf13/cobra"
 )
