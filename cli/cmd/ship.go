@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"time"
+
 	"github.com/Golangcodes/nextdeploy/cli/internal/server"
 	"github.com/Golangcodes/nextdeploy/cli/internal/serverless"
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
-	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -111,7 +112,8 @@ var shipCmd = &cobra.Command{
 		log.Info("Upload complete. Triggering daemon to process deployment...")
 
 		// Intentionally use nextdeployd client CLI which automatically parses --tarball=... into socket arguments
-		daemonCmd := fmt.Sprintf("nextdeployd ship --tarball=\"%s\"", remotePath)
+		// Run with sudo so it can access the root daemon's socket at /var/run/nextdeployd.sock
+		daemonCmd := fmt.Sprintf("sudo nextdeployd ship --tarball=\"%s\"", remotePath)
 		output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, os.Stdout)
 		if err != nil {
 			log.Error("Failed to trigger daemon (ensure nextdeployd is in PATH): %v\nOutput: %s", err, output)

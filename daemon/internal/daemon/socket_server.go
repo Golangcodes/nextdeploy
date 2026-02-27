@@ -87,11 +87,12 @@ func (ss *SocketServer) setSocketPermissions() error {
 	if err := os.Chmod(ss.socketPath, 0660); err != nil {
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
-	// get the socket directory and ensure its secure
 	socketDir := filepath.Dir(ss.socketPath)
-	// #nosec G302
-	if err := os.Chmod(socketDir, 0700); err != nil {
-		return fmt.Errorf("failed to set socket directory permissions: %w", err)
+	if socketDir != "/var/run" && socketDir != "/run" {
+		// #nosec G302
+		if err := os.Chmod(socketDir, 0700); err != nil {
+			return fmt.Errorf("failed to set socket directory permissions: %w", err)
+		}
 	}
 	return nil
 }
