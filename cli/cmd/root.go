@@ -97,7 +97,6 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().BoolVarP(&versionFlag, "version", "v", false, "Show version information")
 	rootCmd.SetHelpTemplate(fmt.Sprintf(`%s
 %s
 

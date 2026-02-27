@@ -2,11 +2,10 @@
 # NextDeploy Build Makefile
 .PHONY: help build build-cli build-daemon build-all clean test lint security-scan cross-build install
 
-# Build variables
-VERSION ?= $(shell cat version.txt 2>/dev/null || echo "dev")
-COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+# Build variables — VERSION comes from the current git tag (set automatically by CI or manually)
+VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git describe --tags 2>/dev/null || echo "dev")
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-BUILDER ?= $(shell whoami)@$(shell hostname)
 
 # Go build flags
 export PATH := $(PATH):$(shell go env GOPATH)/bin

@@ -62,10 +62,67 @@ func CheckAndPrint(current string) {
 	if err != nil {
 		return
 	}
-	if latest.TagName != "" && latest.TagName != current {
+	if latest.TagName != "" && isNewer(latest.TagName, current) {
 		fmt.Fprintf(os.Stderr, "\n  Update available: %s -> %s\n  Run: nextdeploy update\n  %s\n\n",
 			current, latest.TagName, latest.HTMLURL)
 	}
+}
+
+// isNewer returns true if candidate is strictly newer than current using
+// basic semver comparison (strips leading 'v' before comparing).
+func isNewer(candidate, current string) bool {
+	return semverGT(stripV(candidate), stripV(current))
+}
+
+func stripV(v string) string {
+	if len(v) > 0 && v[0] == 'v' {
+		return v[1:]
+	}
+	return v
+}
+
+// semverGT returns true if a > b using dot-separated integer comparison.
+func semverGT(a, b string) bool {
+	aParts := splitVer(a)
+	bParts := splitVer(b)
+	max := len(aParts)
+	if len(bParts) > max {
+		max = len(bParts)
+	}
+	for i := 0; i < max; i++ {
+		av, bv := 0, 0
+		if i < len(aParts) {
+			av = aParts[i]
+		}
+		if i < len(bParts) {
+			bv = bParts[i]
+		}
+		if av > bv {
+			return true
+		}
+		if av < bv {
+			return false
+		}
+	}
+	return false
+}
+
+func splitVer(v string) []int {
+	parts := []int{}
+	n, cur := 0, 0
+	for _, c := range v {
+		if c == '.' {
+			parts = append(parts, cur)
+			cur, n = 0, 0
+		} else if c >= '0' && c <= '9' {
+			cur = cur*10 + int(c-'0')
+			n++
+		}
+	}
+	if n > 0 {
+		parts = append(parts, cur)
+	}
+	return parts
 }
 
 // SelfUpdate downloads the latest nextdeploy CLI binary and replaces the
@@ -91,6 +148,10 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	}
 	if latest.TagName == current {
 		fmt.Printf("Already up to date (%s).\n", current)
+		return nil
+	}
+	if !isNewer(latest.TagName, current) {
+		fmt.Printf("Already at the latest release (%s is newer than %s). No downgrade performed.\n", current, latest.TagName)
 		return nil
 	}
 
