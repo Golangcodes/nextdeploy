@@ -143,11 +143,14 @@ func runDaemon(configPath string) {
 		log.Fatalf("Lock error: %v", err)
 	}
 
-	daemon, err := daemon.NewNextDeployDaemon(configPath)
+	// Start the expvar/pprof metrics server on localhost only.
+	daemon.StartMetricsServer("127.0.0.1:6060")
+
+	d, err := daemon.NewNextDeployDaemon(configPath)
 	if err != nil {
 		log.Fatalf("Error initializing daemon: %v", err)
 	}
-	if err := daemon.Start(); err != nil {
+	if err := d.Start(); err != nil {
 		log.Fatalf("Error starting daemon: %v", err)
 	}
 

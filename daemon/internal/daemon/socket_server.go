@@ -72,6 +72,7 @@ func (ss *SocketServer) handleConnection(conn net.Conn) {
 		return
 	}
 	response := ss.commandHandler.HandleCommand(cmd)
+	CommandsHandled.Add(1)
 	_ = encoder.Encode(response)
 }
 
