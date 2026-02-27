@@ -461,14 +461,35 @@
       changed_when: false
       failed_when: false
 
-    - name: "Phase 3 | Daemon – always install latest via go install"
+    - name: "Phase 3 | Daemon – fetch latest release tag from GitHub"
+      ansible.builtin.shell: |
+        curl -fsSL --retry 3 --retry-delay 2 \
+          https://api.github.com/repos/Golangcodes/nextdeploy/releases/latest \
+          | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/'
+      register: latest_tag
+      changed_when: false
+
+    - name: "Phase 3 | Daemon – download pre-built binary from release"
+      ansible.builtin.shell: |
+        TAG="{{ latest_tag.stdout | trim }}"
+        ARCH="{{ ansible_architecture | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
+        URL="https://github.com/Golangcodes/nextdeploy/releases/download/${TAG}/nextdeployd-linux-${ARCH}"
+        echo "Downloading nextdeployd ${TAG} (linux/${ARCH})..."
+        curl -fsSL --retry 3 --retry-delay 2 "${URL}" -o /tmp/nextdeployd
+        sudo install -m 0755 /tmp/nextdeployd /usr/local/bin/nextdeployd
+        rm -f /tmp/nextdeployd
+      register: daemon_install
+      when: "latest_tag.stdout | trim != ''"
+
+    - name: "Phase 3 | Daemon – fallback: go install (if no release binary available)"
       ansible.builtin.shell: |
         export GOPATH="${HOME}/go"
         export PATH="${GOPATH}/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        echo "No release binary found — building from source via go install..."
         go install github.com/Golangcodes/nextdeploy/daemon/cmd/nextdeployd@latest
         sudo cp "${GOPATH}/bin/nextdeployd" /usr/local/bin/nextdeployd
         sudo chmod +x /usr/local/bin/nextdeployd
-      register: daemon_install
+      when: "latest_tag.stdout | trim == ''"
 
     - name: "Phase 3 | Daemon – record new version after install"
       ansible.builtin.shell: >
@@ -525,6 +546,7 @@
       ansible.builtin.assert:
         that: "'installed' in daemon_final.stdout"
         fail_msg: "nextdeployd installation failed — binary not found in PATH"
+
 
 
 
