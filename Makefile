@@ -100,16 +100,16 @@ build-daemon: ## Build daemon binary for current platform (Linux)
 	@mkdir -p $(BIN_DIR)
 	@if [ "$$(go env GOOS)" != "linux" ]; then \
 		echo "⚠️  Daemon only supports Linux - building for linux/amd64"; \
-		GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/nextdeployd ./daemon/cmd/daemon; \
+		GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/nextdeployd ./daemon/cmd/nextdeployd; \
 	else \
-		go build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/nextdeployd ./daemon/cmd/daemon; \
+		go build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/nextdeployd ./daemon/cmd/nextdeployd; \
 	fi
 	@echo "✅ Daemon built: $(BIN_DIR)/nextdeployd"
 
 build-daemon-dev: ## Build daemon directly into ~/.nextdeploy/bin for local development
 	@echo "🔨 Building daemon for local dev environment..."
 	@mkdir -p $(HOME)/.nextdeploy/bin
-	@go build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(HOME)/.nextdeploy/bin/nextdeployd ./daemon/cmd/daemon
+	@go build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(HOME)/.nextdeploy/bin/nextdeployd ./daemon/cmd/nextdeployd
 	@echo "✅ Dev Daemon built: $(HOME)/.nextdeploy/bin/nextdeployd"
 
 # Build both binaries
@@ -145,7 +145,7 @@ cross-build-daemon: ## Cross-compile daemon for Linux platforms
 		echo "Building $$OUTPUT_NAME..."; \
 		CGO_ENABLED=0 GOOS=$$GOOS GOARCH=$$GOARCH go build $(GOFLAGS) \
 			-ldflags="$(LDFLAGS)" \
-			-o $(DIST_DIR)/$$OUTPUT_NAME ./daemon/cmd/daemon; \
+			-o $(DIST_DIR)/$$OUTPUT_NAME ./daemon/cmd/nextdeployd; \
 		if command -v sha256sum >/dev/null; then \
 			cd $(DIST_DIR) && sha256sum $$OUTPUT_NAME > $$OUTPUT_NAME.sha256 && cd ..; \
 		fi; \

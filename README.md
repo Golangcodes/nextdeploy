@@ -40,7 +40,7 @@ go install github.com/Golangcodes/nextdeploy/cli@latest
 
 **Install Daemon (Linux only):**
 ```bash
-go install github.com/Golangcodes/nextdeploy/daemon/cmd/daemon@latest
+go install github.com/Golangcodes/nextdeploy/daemon/cmd/nextdeployd@latest
 ```
 
 ### 3. Bash Install Script (Linux Servers)
