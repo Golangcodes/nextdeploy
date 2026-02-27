@@ -12,9 +12,25 @@ import (
 
 	"github.com/Golangcodes/nextdeploy/daemon/internal/daemon"
 	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/updater"
 )
 
 func main() {
+	// Handle subcommands before flag parsing so they work cleanly.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version", "--version", "-v":
+			fmt.Printf("nextdeployd %s\n", shared.Version)
+			return
+		case "update":
+			if err := updater.SelfUpdateDaemon(shared.Version); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	defaultConfig := "/etc/nextdeployd/config.json"
 	if os.Geteuid() != 0 {
 		home, err := os.UserHomeDir()
@@ -23,31 +39,13 @@ func main() {
 		}
 	}
 
-	version := flag.Bool("version", false, "Show version info")
 	configPath := flag.String("config", defaultConfig, "Path to config file")
 	foreground := flag.Bool("foreground", false, "Run in foreground")
 	flag.Parse()
 
-	if *version {
-		fmt.Printf("nextdeployd version %s\n", shared.Version)
-		os.Exit(0)
-	}
+	// Background update hint — never blocks startup.
+	go updater.CheckAndPrint(shared.Version)
 
-	if len(os.Args) > 1 && os.Args[1] == "update" {
-		fmt.Printf("Checking for updates...\n")
-		updateInfo, err := UpdateDaemon()
-		if err != nil {
-			log.Fatalf("Error checking for updates: %v", err)
-			return
-		}
-
-		if updateInfo.Updated {
-			fmt.Printf("Updated to version %s\n", updateInfo.NewVersion)
-		} else {
-			fmt.Printf("Already at the latest version (%s)\n", shared.Version)
-		}
-		return
-	}
 	if !*foreground {
 		daemonize()
 		return
