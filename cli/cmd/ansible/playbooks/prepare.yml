@@ -96,10 +96,13 @@
     # ── Phase 2: Node.js (webi, 3-tier glibc fallback) ─────────────────────────
 
     - name: "Phase 2 | Node.js – check if functional"
-      ansible.builtin.shell: >
-        env -i HOME="$HOME"
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        node --version
+      ansible.builtin.shell: |
+        set +e
+        OUT=$(node --version 2>&1)
+        RC=$?
+        # Treat glibc errors as broken even if exit code is 0
+        echo "$OUT" | grep -qi 'glibc' && exit 1
+        exit $RC
       register: node_pre
       failed_when: false
       changed_when: false
