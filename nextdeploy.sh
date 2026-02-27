@@ -3,7 +3,6 @@ set -e
 
 # NextDeploy CLI Installer for Linux/macOS
 
-VERSION="latest"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 
@@ -15,8 +14,8 @@ esac
 
 echo "Installing NextDeploy CLI for $OS/$ARCH..."
 
-# Define download URL (update this once your release process is established)
-DOWNLOAD_URL="https://github.com/NextDeploy/NextDeploy/releases/download/$VERSION/nextdeploy-$OS-$ARCH"
+# Define download URL
+DOWNLOAD_URL="https://github.com/Golangcodes/nextdeploy/releases/latest/download/nextdeploy-$OS-$ARCH"
 
 if [ "$OS" = "darwin" ]; then
     echo "macOS detected. Downloading..."

@@ -3,7 +3,6 @@ set -e
 
 # NextDeploy Daemon Installer for Ubuntu/Linux Servers
 
-VERSION="latest"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 
@@ -36,7 +35,7 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # Define download URL
-DOWNLOAD_URL="https://github.com/NextDeploy/NextDeploy/releases/download/$VERSION/nextdeployd-$OS-$ARCH"
+DOWNLOAD_URL="https://github.com/Golangcodes/nextdeploy/releases/latest/download/nextdeployd-$OS-$ARCH"
 
 # 2. Download and install binary
 echo "Downloading..."
