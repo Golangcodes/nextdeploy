@@ -7,7 +7,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// NextDeployConfig represents the complete deployment configuration
 type NextDeployConfig struct {
 	Version       string               `yaml:"version"`
 	TargetType    string               `yaml:"target_type"` // e.g., "vps", "serverless"
@@ -29,7 +28,6 @@ type NextDeployConfig struct {
 	CloudProvider *CloudProviderStruct `yaml:"cloud_provider,omitempty"`
 }
 
-// SafeConfig contains no credentials (only app name, domain, port, environment)
 type SafeConfig struct {
 	AppName     string `json:"app_name"`
 	Domain      string `json:"domain"`
@@ -37,7 +35,6 @@ type SafeConfig struct {
 	Environment string `json:"environment"`
 }
 
-// ServerlessConfig defines AWS/Serverless settings
 type ServerlessConfig struct {
 	Provider     string `yaml:"provider"` // e.g., "aws"
 	Region       string `yaml:"region"`
@@ -68,8 +65,8 @@ type SSLConfig struct {
 }
 
 type CloudProviderStruct struct {
-	Name      string `yaml:"name"`
-	Region    string `yaml:"region"`
+	Name   string `yaml:"name"`
+	Region string `yaml:"region"`
 	// #nosec G117
 	AccessKey string `yaml:"access_key,omitempty"`
 	SecretKey string `yaml:"secret_key,omitempty"`
@@ -80,14 +77,12 @@ type ServerConfig struct {
 	Host          string     `yaml:"host"`
 	Port          int        `yaml:"port"`
 	Username      string     `yaml:"username"`
-	// #nosec G117
 	Password      string     `yaml:"password"`
 	KeyPath       string     `yaml:"key_path"`
 	SSHKey        string     `yaml:"ssh_key,omitempty"`
 	KeyPassphrase string     `yaml:"key_passphrase,omitempty"`
 }
 
-// AppConfig contains application-specific settings
 type AppConfig struct {
 	Name        string         `yaml:"name"`
 	Port        int            `yaml:"port"`
@@ -96,15 +91,12 @@ type AppConfig struct {
 	Secrets     *SecretsConfig `yaml:"secrets,omitempty"`
 }
 
-// Repository contains source control configuration
 type Repository struct {
 	URL           string `yaml:"url"`
 	Branch        string `yaml:"branch"`
 	AutoDeploy    bool   `yaml:"autoDeploy"`
 	WebhookSecret string `yaml:"webhookSecret,omitempty"`
 }
-
-// DockerConfig contains containerization settings
 type DockerConfig struct {
 	Image          string      `yaml:"image"`
 	Registry       string      `yaml:"registry,omitempty"`
@@ -112,7 +104,6 @@ type DockerConfig struct {
 	Build          DockerBuild `yaml:"build"`
 	Push           bool        `yaml:"push"`
 	Username       string      `yaml:"username,omitempty"`
-	// #nosec G117
 	Password       string      `yaml:"password,omitempty"`
 	AlwaysPull     bool        `yaml:"alwaysPull,omitempty"`
 	Strategy       string      `yaml:"strategy,omitempty"`
@@ -123,7 +114,6 @@ type DockerConfig struct {
 	Target         string      `yaml:"target,omitempty"`
 }
 
-// DockerBuild contains Docker build parameters
 type DockerBuild struct {
 	Context    string            `yaml:"context"`
 	Dockerfile string            `yaml:"dockerfile"`
@@ -131,13 +121,10 @@ type DockerBuild struct {
 	Args       map[string]string `yaml:"args,omitempty"`
 }
 
-// Deployment contains infrastructure deployment settings
 type Deployment struct {
 	Server    Server    `yaml:"server"`
 	Container Container `yaml:"container"`
 }
-
-// Server contains target server connection details
 type Server struct {
 	Host    string `yaml:"host"`
 	User    string `yaml:"user"`
@@ -145,15 +132,12 @@ type Server struct {
 	UseSudo bool   `yaml:"useSudo"`
 }
 
-// Container contains runtime configuration
 type Container struct {
 	Name        string       `yaml:"name"`
 	Restart     string       `yaml:"restart"`
 	Ports       []string     `yaml:"ports"`
 	HealthCheck *HealthCheck `yaml:"healthCheck,omitempty"`
 }
-
-// HealthCheck defines container health monitoring
 type HealthCheck struct {
 	Test     []string `yaml:"test,omitempty"`
 	Interval string   `yaml:"interval,omitempty"`
@@ -161,18 +145,15 @@ type HealthCheck struct {
 	Retries  int      `yaml:"retries,omitempty"`
 }
 
-// Database contains persistence layer configuration
 type Database struct {
 	Type     string `yaml:"type"`
 	Host     string `yaml:"host"`
 	Port     string `yaml:"port"`
 	Username string `yaml:"username"`
-	// #nosec G117
 	Password string `yaml:"password"`
 	Name     string `yaml:"name"`
 }
 
-// Monitoring contains observability settings
 type Monitoring struct {
 	Enabled  bool   `yaml:"enabled"`
 	Type     string `yaml:"type"`
@@ -180,7 +161,6 @@ type Monitoring struct {
 	Alerts   Alerts `yaml:"alerts,omitempty"`
 }
 
-// Alerts defines monitoring notification rules
 type Alerts struct {
 	CPUThreshold    int    `yaml:"cpuThreshold"`
 	MemoryThreshold int    `yaml:"memoryThreshold"`
@@ -188,7 +168,6 @@ type Alerts struct {
 	SlackWebhook    string `yaml:"slackWebhook,omitempty"`
 }
 
-// SecretsConfig defines secret management
 type SecretsConfig struct {
 	Provider string         `yaml:"provider"`
 	Doppler  *DopplerConfig `yaml:"doppler,omitempty"`
@@ -199,34 +178,28 @@ type SecretsConfig struct {
 	token    string         `yaml:"token,omitempty"`
 }
 
-// DopplerConfig contains Doppler-specific settings
 type DopplerConfig struct {
 	Project string `yaml:"project"`
 	Config  string `yaml:"config"`
 	Token   string `yaml:"token,omitempty"`
 }
 
-// VaultConfig contains HashiCorp Vault settings
 type VaultConfig struct {
 	Address string `yaml:"address"`
 	Token   string `yaml:"token"`
 	Path    string `yaml:"path"`
 }
 
-// SecretFile defines file-based secrets
 type SecretFile struct {
 	Path   string `yaml:"path"`
-	// #nosec G117
 	Secret string `yaml:"secret"`
 }
 
-// Logging contains log management configuration
 type Logging struct {
 	Driver  string            `yaml:"driver"`
 	Options map[string]string `yaml:"options,omitempty"`
 }
 
-// Backup defines data backup policies
 type Backup struct {
 	Enabled   bool    `yaml:"enabled"`
 	Schedule  string  `yaml:"schedule"`
@@ -234,17 +207,14 @@ type Backup struct {
 	Storage   Storage `yaml:"storage"`
 }
 
-// Storage contains backup storage details
 type Storage struct {
 	Type      string `yaml:"type"`
 	Endpoint  string `yaml:"endpoint,omitempty"`
 	Bucket    string `yaml:"bucket"`
-	// #nosec G117
 	AccessKey string `yaml:"accessKey,omitempty"`
 	SecretKey string `yaml:"secretKey,omitempty"`
 }
 
-// SSL contains certificate management
 type SSL struct {
 	Enabled     bool     `yaml:"enabled"`
 	Provider    string   `yaml:"provider"`
@@ -258,23 +228,19 @@ type SSL struct {
 	Domain      string   `yaml:"domain,omitempty"`
 }
 
-// Webhook defines deployment webhooks
 type Webhook struct {
 	Name   string   `yaml:"name"`
 	URL    string   `yaml:"url"`
 	Events []string `yaml:"events"`
-	// #nosec G117
 	Secret string   `yaml:"secret,omitempty"`
 }
 
-// EnvVariable contains environment variables
 type EnvVariable struct {
 	Name   string `yaml:"name"`
 	Value  string `yaml:"value"`
 	Secret bool   `yaml:"secret,omitempty"`
 }
 
-// SaveConfig writes the configuration to a file
 func SaveConfig(path string, cfg *NextDeployConfig) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {

@@ -12,13 +12,11 @@ import (
 	"time"
 )
 
-// CaddyManager provides simplified Caddy server configuration management
 type CaddyManager struct {
-	adminAPI string       // Caddy admin API endpoint (e.g., "http://localhost:2019")
-	client   *http.Client // HTTP client for API requests
+	adminAPI string
+	client   *http.Client
 }
 
-// New creates a new CaddyManager instance
 func New(adminAPI string) *CaddyManager {
 	return &CaddyManager{
 		adminAPI: strings.TrimSuffix(adminAPI, "/"),
@@ -29,8 +27,8 @@ func New(adminAPI string) *CaddyManager {
 }
 
 type Config struct {
-	Content string // The configuration content
-	Format  string // "json" or "caddyfile"
+	Content string
+	Format  string
 }
 
 func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir string) string {
@@ -66,11 +64,8 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	file_server
 }`, domainList, commonHeaders, staticDir)
 	}
-
 	nextStaticDir := filepath.Join(appDir, ".next", "static")
-
 	return fmt.Sprintf(`%s {%s
-	
 	handle_path /_next/static/* {
 		root * %s
 		header Cache-Control "public, max-age=31536000, immutable"
@@ -205,14 +200,11 @@ func (cm *CaddyManager) PatchConfig(ctx context.Context, path string, config int
 	return nil
 }
 
-// LoadConfig loads a configuration from a file
 func (cm *CaddyManager) LoadConfig(ctx context.Context, filePath string) (*Config, error) {
-	// #nosec G304
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
-
 	format := "caddyfile"
 	if strings.HasSuffix(filePath, ".json") {
 		format = "json"

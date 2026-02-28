@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Golangcodes/nextdeploy/cli/internal/server"
@@ -48,6 +49,12 @@ var statusCmd = &cobra.Command{
 		if err != nil {
 			log.Error("Failed to query daemon: %v\nOutput: %s", err, output)
 			os.Exit(1)
+		}
+
+		// Strip shell noise — only keep lines starting from "Status:" header
+		output = strings.TrimSpace(output)
+		if idx := strings.Index(output, "Status:"); idx >= 0 {
+			output = output[idx:]
 		}
 
 		fmt.Printf("\n🚀 NextDeploy Status: %s\n", appName)

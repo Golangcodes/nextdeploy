@@ -1,21 +1,20 @@
 package failfast
 
 import (
-	"github.com/Golangcodes/nextdeploy/shared"
 	"os"
 	"runtime"
+
+	"github.com/Golangcodes/nextdeploy/shared"
 )
 
 type ErrorLevel int
 
 const (
-	Ignore   ErrorLevel = iota // do nothing, just log
-	Warn                       // log a Warning
-	Error                      // log an Error and exit with code 1
-	Critical                   // log a Critical error and exit with code 1
-	Panic                      // log a Panic error and Panic
-	// Note: Panic will stop the program immediately, so use with caution.
-
+	Ignore ErrorLevel = iota
+	Warn
+	Error
+	Critical
+	Panic
 )
 
 var (

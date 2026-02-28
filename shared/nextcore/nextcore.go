@@ -1,4 +1,3 @@
-// TODO: decouple this
 package nextcore
 
 import (
@@ -239,7 +238,6 @@ func copyStaticAssets() error {
 
 // copyFile copies a file from src to dst
 func copyFile(src, dst string) error {
-	// #nosec G304
 	source, err := os.Open(src)
 	if err != nil {
 		NextCoreLogger.Error("Failed to open source file %s: %v", src, err)
@@ -247,7 +245,6 @@ func copyFile(src, dst string) error {
 	}
 	defer source.Close()
 
-	// #nosec G304
 	destination, err := os.Create(dst)
 	if err != nil {
 		NextCoreLogger.Error("Failed to create destination file %s: %v", dst, err)
@@ -757,12 +754,10 @@ func parseImageConfig(images map[string]interface{}) ImageConfig {
 	return result
 }
 
-// detectImageAssets finds all image assets in the Next.js build
 func detectImageAssets(buildMeta *NextBuildMetadata, projectDir string) (*ImageAssets, error) {
 	assets := &ImageAssets{}
 	var err error
 
-	// 1. Find images in public directory
 	publicDir := filepath.Join(projectDir, PublicDir)
 	assets.PublicImages, err = findPublicImages(publicDir, projectDir)
 	if err != nil {
@@ -770,14 +765,12 @@ func detectImageAssets(buildMeta *NextBuildMetadata, projectDir string) (*ImageA
 		return nil, err
 	}
 
-	// 2. Find optimized images from Next.js image manifest
 	if buildMeta.ImagesManifest != nil {
 		if imagesManifest, ok := buildMeta.ImagesManifest.(map[string]interface{}); ok {
 			assets.OptimizedImages = parseImagesManifest(imagesManifest, projectDir)
 		}
 	}
 
-	// 3. Find static image imports from build manifest
 	if buildMeta.BuildManifest != nil {
 		if buildManifest, ok := buildMeta.BuildManifest.(map[string]interface{}); ok {
 			assets.StaticImports = parseStaticImageImports(buildManifest, projectDir)
@@ -787,7 +780,6 @@ func detectImageAssets(buildMeta *NextBuildMetadata, projectDir string) (*ImageA
 	return assets, nil
 }
 
-// findPublicImages scans the public directory for image assets
 func findPublicImages(publicDir, projectDir string) ([]ImageAsset, error) {
 	var images []ImageAsset
 
@@ -830,7 +822,6 @@ func findPublicImages(publicDir, projectDir string) ([]ImageAsset, error) {
 	return images, err
 }
 
-// parseImagesManifest extracts info from Next.js images-manifest.json
 func parseImagesManifest(manifest map[string]interface{}, projectDir string) []ImageAsset {
 	var images []ImageAsset
 
@@ -863,7 +854,6 @@ func parseImagesManifest(manifest map[string]interface{}, projectDir string) []I
 	return images
 }
 
-// parseStaticImageImports finds statically imported images from build manifest
 func parseStaticImageImports(buildManifest map[string]interface{}, projectDir string) []ImageAsset {
 	var images []ImageAsset
 

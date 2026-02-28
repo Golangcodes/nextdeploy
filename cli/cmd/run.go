@@ -24,7 +24,7 @@ var (
 var runimageCmd = &cobra.Command{
 	Use:   "runimage",
 	Short: "Run the built application locally mimicking the production environment",
-	Long: `Loads the build metadata from .nextdeploy/metadata.json and runs the application 
+	Long: `Loads the build metadata from .nextdeploy/metadata.json and runs the application
 natively (no Docker) using the same entrypoint and environment injection as the production daemon.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		runLocal()
@@ -37,14 +37,12 @@ func init() {
 }
 
 func runLocal() {
-	// 1. Load Config
 	cfg, err := config.Load()
 	if err != nil {
 		runLogger.Error("Failed to load configuration: %v", err)
 		os.Exit(1)
 	}
 
-	// 2. Load Metadata
 	metadata, err := nextcore.LoadMetadata()
 	if err != nil {
 		runLogger.Error("Metadata Error: %v", err)
@@ -55,10 +53,7 @@ func runLocal() {
 	runLogger.Info("Simulating production for %s (Version: %s, Mode: %s)",
 		metadata.AppName, metadata.GitCommit[:7], metadata.OutputMode)
 
-	// 3. Prepare Environment
 	env := os.Environ()
-
-	// Load from specified env file if provided
 	if envFile != "" {
 		runLogger.Info("Loading secrets from %s...", envFile)
 		fileEnv, err := loadEnvFile(envFile)
@@ -68,7 +63,6 @@ func runLocal() {
 			env = append(env, fileEnv...)
 		}
 	} else {
-		// Try default .env.nextdeploy if it exists
 		if _, err := os.Stat(".env.nextdeploy"); err == nil {
 			runLogger.Info("Loading secrets from .env.nextdeploy...")
 			fileEnv, _ := loadEnvFile(".env.nextdeploy")
@@ -76,18 +70,14 @@ func runLocal() {
 		}
 	}
 
-	// Always ensure PORT is set
 	port := fmt.Sprintf("%d", cfg.App.Port)
 	if port == "0" {
 		port = "3000"
 	}
 	env = append(env, "PORT="+port)
 	env = append(env, "NODE_ENV=production")
-
-	// 4. Determine Command
 	var runCmd *exec.Cmd
 	cwd, _ := os.Getwd()
-
 	switch metadata.OutputMode {
 	case nextcore.OutputModeStandalone:
 		serverJs := filepath.Join(".next", "standalone", "server.js")
@@ -97,10 +87,6 @@ func runLocal() {
 		}
 		runLogger.Info("Starting native standalone server: node %s", serverJs)
 		runCmd = exec.Command("node", serverJs)
-		// Standalone needs to run from within its directory usually or have paths set
-		// But Next.js standalone is designed to be self-contained.
-		// We set the CWD to standalone if needed, but normally it's fine.
-
 	case nextcore.OutputModeDefault:
 		runLogger.Info("Starting native production server: npm start")
 		runCmd = exec.Command("npm", "start")

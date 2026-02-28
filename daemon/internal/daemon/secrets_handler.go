@@ -170,7 +170,7 @@ func (ch *CommandHandler) saveSecrets(appName string, secrets map[string]string)
 func (ch *CommandHandler) syncAppSecrets(appName string, secrets map[string]string) error {
 	appDir := filepath.Join("/opt/nextdeploy/apps", appName, "current")
 	if _, err := os.Stat(appDir); os.IsNotExist(err) {
-		return nil // App not deployed yet, nothing to sync
+		return nil
 	}
 
 	envFilePath := filepath.Join(appDir, ".env.nextdeploy")
@@ -179,9 +179,6 @@ func (ch *CommandHandler) syncAppSecrets(appName string, secrets map[string]stri
 	for k, v := range secrets {
 		envLines = append(envLines, fmt.Sprintf("%s=%s", k, v))
 	}
-	// Also keep DOPPLER_TOKEN if it was there? Actually, secrets should be the master.
-	// We'll see how to handle Doppler integration later.
-
 	content := strings.Join(envLines, "\n") + "\n"
 	if err := os.WriteFile(envFilePath, []byte(content), 0600); err != nil {
 		return fmt.Errorf("failed to write env file: %w", err)

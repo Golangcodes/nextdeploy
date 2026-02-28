@@ -9,7 +9,6 @@ import (
 	"strings"
 )
 
-// EncryptEnvFile encrypts .env files using OpenSSL
 func (sm *SecretManager) EncryptEnvFile(masterKey string) (map[string]string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {

@@ -6,9 +6,10 @@
 //
 // Typical usage:
 //
-//	nextdeploy init        # Scaffold a Dockerfile and config
-//	nextdeploy ship        # Build and deploy app to server
-//	nextdeploy update      # Update the CLI to the latest version
+//		nextdeploy init        # Scaffold a Dockerfile and config
+//	 nextdeploy build       # Build the app locally
+//		nextdeploy ship        # Build and deploy app to server
+//		nextdeploy update      # Update the CLI to the latest version
 //
 // Author: Yussuf Hersi <yussuf@hersi.dev>
 // License: MIT

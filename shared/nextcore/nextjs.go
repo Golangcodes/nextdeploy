@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// PackageJSON represents the structure of package.json we care about
 type PackageJSON struct {
 	Name            string            `json:"name"`
 	Version         string            `json:"version"`
@@ -22,7 +21,6 @@ type PackageJSON struct {
 }
 
 func GetNextJsVersion(packageJsonPath string) (string, error) {
-	// #nosec G304
 	data, err := os.ReadFile(packageJsonPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -34,7 +32,6 @@ func GetNextJsVersion(packageJsonPath string) (string, error) {
 	if err := json.Unmarshal(data, &pkg); err != nil {
 		return "", fmt.Errorf("error parsing package.json: %w", err)
 	}
-	// check at both dev and regular dependencies
 	if version, exists := pkg.Dependencies["next"]; exists {
 		return version, nil
 	}
@@ -45,7 +42,6 @@ func GetNextJsVersion(packageJsonPath string) (string, error) {
 
 }
 
-// ValidateNextJSProject checks if the current or specified directory is a valid Next.js project
 func ValidateNextJSProject(cmd *cobra.Command, args []string) error {
 	targetDir := "."
 	if len(args) > 0 {
@@ -74,7 +70,6 @@ func ValidateNextJSProject(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// validateDirectory checks if the path exists and is a directory
 func validateDirectory(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -89,10 +84,7 @@ func validateDirectory(path string) error {
 	return nil
 }
 
-// IsNextJSProject performs comprehensive Next.js project validation
-// Returns: (isNextJS bool, reason string, err error)
 func IsNextJSProject(dir string) (bool, string, error) {
-	// Check for package.json first
 	pkg, err := readPackageJSON(dir)
 	if err != nil {
 		return false, "", err
@@ -101,17 +93,14 @@ func IsNextJSProject(dir string) (bool, string, error) {
 		return false, "no package.json found", nil
 	}
 
-	// Check for Next.js in dependencies
 	if hasNextDependency(pkg.Dependencies) || hasNextDependency(pkg.DevDependencies) {
 		return true, "", nil
 	}
 
-	// Check for Next.js in scripts
 	if hasNextScript(pkg.Scripts) {
 		return true, "", nil
 	}
 
-	// Check for Next.js specific files and directories
 	if hasNextJSStructure(dir) {
 		return true, "", nil
 	}
@@ -119,10 +108,8 @@ func IsNextJSProject(dir string) (bool, string, error) {
 	return false, "no Next.js dependencies, scripts, or project structure found", nil
 }
 
-// readPackageJSON reads and parses package.json
 func readPackageJSON(dir string) (*PackageJSON, error) {
 	path := filepath.Join(dir, "package.json")
-	// #nosec G304
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -139,7 +126,6 @@ func readPackageJSON(dir string) (*PackageJSON, error) {
 	return &pkg, nil
 }
 
-// hasNextDependency checks if Next.js is in dependencies
 func hasNextDependency(deps map[string]string) bool {
 	if deps == nil {
 		return false
@@ -148,7 +134,6 @@ func hasNextDependency(deps map[string]string) bool {
 	return exists
 }
 
-// hasNextScript checks if any script contains "next"
 func hasNextScript(scripts map[string]string) bool {
 	if scripts == nil {
 		return false
@@ -161,7 +146,6 @@ func hasNextScript(scripts map[string]string) bool {
 	return false
 }
 
-// hasNextJSStructure checks for Next.js specific files and directories
 func hasNextJSStructure(dir string) bool {
 	nextjsFiles := []string{
 		"next.config.js",
@@ -184,7 +168,6 @@ func hasNextJSStructure(dir string) bool {
 		"public",
 	}
 
-	// More robust directory checking that handles case differences
 	for _, dirPath := range nextjsDirs {
 		if entries, err := os.ReadDir(dir); err == nil {
 			for _, entry := range entries {

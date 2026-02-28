@@ -15,16 +15,12 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 	}
 
 	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
-
-	// Get ActiveState, MainPID, MemoryCurrent
 	cmd := exec.Command("systemctl", "show", serviceName, "--property=ActiveState,MainPID,MemoryCurrent,SubState")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to get service status: %v", err)}
 	}
-
 	props := parseProps(string(out))
-
 	status := "Offline"
 	if props["ActiveState"] == "active" {
 		status = "Online"
@@ -43,14 +39,11 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 	if memory == "[not set]" || memory == "0" || memory == "" {
 		memory = "0MB"
 	} else {
-		// Convert bytes to MB
 		var bytes int64
 		fmt.Sscanf(memory, "%d", &bytes)
 		memory = fmt.Sprintf("%.2fMB", float64(bytes)/(1024*1024))
 	}
-
 	msg := fmt.Sprintf("Status: %s\nPID: %s\nMemory: %s", status, pid, memory)
-
 	return types.Response{
 		Success: true,
 		Message: msg,
@@ -69,17 +62,14 @@ func (ch *CommandHandler) handleLogs(args map[string]interface{}) types.Response
 	}
 
 	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
-
-	// Just check if service exists
 	cmd := exec.Command("systemctl", "list-unit-files", serviceName)
 	out, err := cmd.CombinedOutput()
 	if err != nil || !strings.Contains(string(out), serviceName) {
 		return types.Response{Success: false, Message: fmt.Sprintf("application %s not found (service %s missing)", appName, serviceName)}
 	}
-
 	return types.Response{
 		Success: true,
-		Message: serviceName, // Return the service name for the CLI to use with journalctl
+		Message: serviceName,
 	}
 }
 

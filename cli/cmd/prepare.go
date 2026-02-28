@@ -84,7 +84,6 @@ func runPrepare(cmd *cobra.Command, args []string) {
 	_, _ = color.New(color.FgCyan).Fprintf(out, "\n Preparing server: %s (%s)\n\n", serverName, serverCfg.Host)
 	PrepLogs.Info("Starting Ansible-based preparation of server %s", serverName)
 
-	// ── write ephemeral inventory + playbook to a temp dir ────────────────────
 	tmpDir, err := os.MkdirTemp("", "nextdeploy-prepare-*")
 	if err != nil {
 		PrepLogs.Error("Failed to create temp dir: %v", err)
@@ -104,7 +103,6 @@ func runPrepare(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// ── run ansible-playbook ──────────────────────────────────────────────────
 	if err := runAnsible(ctx, inventoryPath, playbookPath, out, verbose); err != nil {
 		PrepLogs.Error("Preparation failed: %v", err)
 		os.Exit(1)
@@ -115,10 +113,10 @@ func runPrepare(cmd *cobra.Command, args []string) {
 }
 
 type ansibleInstallMethod struct {
-	label  string   // shown to the user
-	prereq string   // binary that must be in PATH for this method to apply
-	bin    string   // executable to run
-	args   []string // arguments passed to bin
+	label  string
+	prereq string
+	bin    string
+	args   []string
 }
 
 func ansibleInstallMethods() []ansibleInstallMethod {
@@ -152,7 +150,7 @@ func ansibleInstallMethods() []ansibleInstallMethod {
 
 func ensureAnsible(out io.Writer) error {
 	if _, err := exec.LookPath("ansible-playbook"); err == nil {
-		return nil // already installed
+		return nil
 	}
 
 	bold := color.New(color.Bold)
@@ -164,7 +162,7 @@ func ensureAnsible(out io.Writer) error {
 
 	var chosen *ansibleInstallMethod
 	for _, m := range ansibleInstallMethods() {
-		m := m // capture loop variable
+		m := m
 		if _, err := exec.LookPath(m.prereq); err == nil {
 			chosen = &m
 			break
@@ -197,7 +195,7 @@ func ensureAnsible(out io.Writer) error {
 	installCmd.Stdout = out
 	installCmd.Stderr = out
 	if err := installCmd.Run(); err != nil {
-		_, _ = red.Fprintf(out, "\n❌  Installation failed: %v\n", err)
+		_, _ = red.Fprintf(out, "\n Installation failed: %v\n", err)
 		_, _ = yellow.Fprintln(out, "   Try running the command above manually, then re-run nextdeploy prepare.")
 		return fmt.Errorf("ansible installation failed: %w", err)
 	}
@@ -213,7 +211,7 @@ func ensureAnsible(out io.Writer) error {
 		return fmt.Errorf("ansible-playbook not in PATH after install")
 	}
 
-	_, _ = green.Fprintln(out, "✓  Ansible installed successfully.")
+	_, _ = green.Fprintln(out, "Ansible installed successfully.")
 	return nil
 }
 

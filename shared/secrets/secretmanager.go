@@ -1,42 +1,39 @@
 package secrets
 
 import (
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/config"
 )
 
 var (
 	SLogs = shared.PackageLogger("Secrets::", "🔐 Secrets Manager::")
 )
 
-// SecretManager handles secure secret storage and retrieval
 type SecretManager struct {
-	keyPath  string                   // Path for key storage
-	cfg      *config.NextDeployConfig // Application configuration
-	secrets  map[string]*Secret       // Map of stored secrets
-	keyCache map[string][]byte        // Cache for derived keys
-	manager  *providerManager         // Manages different secret providers
-	mu       sync.RWMutex             // Mutex for thread safety
+	keyPath  string
+	cfg      *config.NextDeployConfig
+	secrets  map[string]*Secret
+	keyCache map[string][]byte
+	manager  *providerManager
+	mu       sync.RWMutex
 }
 
-// Secret represents a stored secret with metadata
 type Secret struct {
-	Value       string `json:"value"`        // The secret value (may be encrypted)
-	Version     int    `json:"version"`      // Version for rotation
-	CreatedAt   int64  `json:"created_at"`   // Creation timestamp
-	ModifiedAt  int64  `json:"modified_at"`  // Last modification timestamp
-	IsEncrypted bool   `json:"is_encrypted"` // Encryption status flag
+	Value       string `json:"value"`
+	Version     int    `json:"version"`
+	CreatedAt   int64  `json:"created_at"`
+	ModifiedAt  int64  `json:"modified_at"`
+	IsEncrypted bool   `json:"is_encrypted"`
 }
 
-// providerManager handles multiple secret providers
 type providerManager struct {
 	providers map[string]SecretProvider
 }
 
-// SecretProvider defines the interface for secret storage backends
 type SecretProvider interface {
 	GetSecret(key string) (string, error)
 	SetSecret(key, value string) error
@@ -49,17 +46,14 @@ type SecretProvider interface {
 	ValidateSecretFormat(secret string) error
 }
 
-// Option configures a SecretManager
 type Option func(*SecretManager)
 
-// WithConfig provides application configuration
 func WithConfig(cfg *config.NextDeployConfig) Option {
 	return func(sm *SecretManager) {
 		sm.cfg = cfg
 	}
 }
 
-// WithKeyPath sets a custom key storage path
 func WithKeyPath(path string) Option {
 	return func(sm *SecretManager) {
 		if path != "" {
@@ -67,7 +61,6 @@ func WithKeyPath(path string) Option {
 			return
 		}
 
-		// Default path construction
 		homedir, err := os.UserHomeDir()
 		if err != nil {
 			SLogs.Error("Failed to get home directory: %v", err)
@@ -83,7 +76,6 @@ func WithKeyPath(path string) Option {
 	}
 }
 
-// WithProvider registers a new secret provider
 func WithProvider(name string, provider SecretProvider) Option {
 	return func(sm *SecretManager) {
 		sm.ensureProviderManager()
@@ -91,19 +83,16 @@ func WithProvider(name string, provider SecretProvider) Option {
 	}
 }
 
-// NewSecretManager creates a new secret manager with options
 func NewSecretManager(opts ...Option) (*SecretManager, error) {
 	sm := &SecretManager{
 		secrets:  make(map[string]*Secret),
 		keyCache: make(map[string][]byte),
 	}
 
-	// Apply all options
 	for _, opt := range opts {
 		opt(sm)
 	}
 
-	// Load default config if none provided
 	if sm.cfg == nil {
 		cfg, err := config.Load()
 		if err != nil {
@@ -115,7 +104,6 @@ func NewSecretManager(opts ...Option) (*SecretManager, error) {
 	return sm, nil
 }
 
-// ensureProviderManager initializes the provider manager if nil
 func (sm *SecretManager) ensureProviderManager() {
 	if sm.manager == nil {
 		sm.manager = &providerManager{

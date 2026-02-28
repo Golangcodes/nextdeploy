@@ -10,8 +10,6 @@ func getRoutesFromManifests(buildMeta *NextBuildMetadata) (*RouteInfo, error) {
 		ISRRoutes:      make(map[string]string),
 		FallbackRoutes: make(map[string]string),
 	}
-	// process routes from route-manifest.json
-	// Process routes from routes-manifest.json
 	if routesManifest, ok := buildMeta.RoutesManifest.(map[string]interface{}); ok {
 		if staticRoutes, ok := routesManifest["staticRoutes"].([]interface{}); ok {
 			for _, route := range staticRoutes {
@@ -32,7 +30,6 @@ func getRoutesFromManifests(buildMeta *NextBuildMetadata) (*RouteInfo, error) {
 			}
 		}
 	}
-	// Process prerender-manifest.json
 	if prerenderManifest, ok := buildMeta.PrerenderManifest.(map[string]interface{}); ok {
 		if routes, ok := prerenderManifest["routes"].(map[string]interface{}); ok {
 			for route, details := range routes {
@@ -58,7 +55,6 @@ func getRoutesFromManifests(buildMeta *NextBuildMetadata) (*RouteInfo, error) {
 		}
 	}
 
-	// Process middleware routes from build-manifest.json
 	if buildManifest, ok := buildMeta.BuildManifest.(map[string]interface{}); ok {
 		if middleware, ok := buildManifest["middleware"].(map[string]interface{}); ok {
 			for route := range middleware {

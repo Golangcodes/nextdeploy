@@ -27,31 +27,25 @@ func NewSocketServer(socketPath string, commandHandler *CommandHandler) *SocketS
 	return &SocketServer{
 		socketPath:     socketPath,
 		commandHandler: commandHandler,
-		// Allow 10 requests per second, with a burst of 20
-		limiter: rate.NewLimiter(rate.Limit(10), 20),
+		limiter:        rate.NewLimiter(rate.Limit(10), 20),
 	}
 }
 
 func (ss *SocketServer) Start() error {
-	// remove existing scoket file if it exists
 	ss.cleanupSocket()
-
 	listener, err := net.Listen("unix", ss.socketPath)
 	if err != nil {
 		return err
 	}
 	ss.listener = listener
-
 	return ss.setSocketPermissions()
 }
 
 func (ss *SocketServer) handleConnection(conn net.Conn) {
 	defer conn.Close()
-
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
-
 	if !ss.limiter.Allow() {
 		resp := types.Response{
 			Success: false,
@@ -60,9 +54,7 @@ func (ss *SocketServer) handleConnection(conn net.Conn) {
 		_ = encoder.Encode(resp)
 		return
 	}
-
 	var cmd types.Command
-
 	if err := decoder.Decode(&cmd); err != nil {
 		return
 	}
@@ -86,18 +78,13 @@ func (ss *SocketServer) cleanupSocket() {
 }
 
 func (ss *SocketServer) setSocketPermissions() error {
-	// 1. Restrict socket permissions to 0660 (rw-rw----)
-	// #nosec G302
 	if err := os.Chmod(ss.socketPath, 0660); err != nil {
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
-
-	// 2. Change group ownership to 'nextdeploy'
 	g, err := user.LookupGroup("nextdeploy")
 	var gid int
 	if err == nil {
 		gid, _ = strconv.Atoi(g.Gid)
-		// We keep UID as root (0) but change GID to nextdeploy
 		if chownErr := os.Chown(ss.socketPath, 0, gid); chownErr != nil {
 			log.Printf("[socket] Warning: failed to chown socket to nextdeploy group: %v", chownErr)
 		}
@@ -105,10 +92,8 @@ func (ss *SocketServer) setSocketPermissions() error {
 		log.Printf("[socket] Warning: nextdeploy group not found, socket group ownership not set: %v", err)
 	}
 
-	// 3. Restrict directory permissions
 	socketDir := filepath.Dir(ss.socketPath)
 	if socketDir != "/var/run" && socketDir != "/run" {
-		// #nosec G302
 		if err := os.Chmod(socketDir, 0770); err != nil {
 			return fmt.Errorf("failed to set socket directory permissions: %w", err)
 		}

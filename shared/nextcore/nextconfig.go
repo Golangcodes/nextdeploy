@@ -7,16 +7,10 @@ import (
 	"strings"
 )
 
-// ParseNextConfig dynamically reads and parses Next.js configuration files
-
-// extractConfigObject extracts the Next.js config object from file content
 func extractConfigObject(content string) (map[string]interface{}, error) {
-	// First try to find explicit nextConfig declaration
 	if configStr, err := extractExplicitConfig(content); err == nil {
 		return parseConfigString(configStr)
 	}
-
-	// Fallback to extracting exported object
 	if configStr, err := extractExportedConfig(content); err == nil {
 		return parseConfigString(configStr)
 	}
@@ -24,22 +18,16 @@ func extractConfigObject(content string) (map[string]interface{}, error) {
 	return nil, fmt.Errorf("could not find valid config object in content")
 }
 
-// extractExplicitConfig finds const nextConfig = {...} declarations
 func extractExplicitConfig(content string) (string, error) {
-	// Find the start of the config object
 	start := strings.Index(content, "const nextConfig =")
 	if start == -1 {
 		return "", fmt.Errorf("nextConfig declaration not found")
 	}
-
-	// Find the opening brace
 	openBrace := strings.Index(content[start:], "{")
 	if openBrace == -1 {
 		return "", fmt.Errorf("config object not properly formatted")
 	}
 	openBrace += start
-
-	// Find matching closing brace
 	configContent, err := extractBalancedBraces(content[openBrace:])
 	if err != nil {
 		NextCoreLogger.Error("Failed to extract balanced braces from config content: %s", err)
@@ -49,7 +37,6 @@ func extractExplicitConfig(content string) (string, error) {
 	return normalizeToJSON(configContent), nil
 }
 
-// extractExportedConfig finds module.exports or export default
 func extractExportedConfig(content string) (string, error) {
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`module\.exports\s*=\s*({[\s\S]*?})\s*;`),
@@ -65,7 +52,6 @@ func extractExportedConfig(content string) (string, error) {
 	return "", fmt.Errorf("no exported config found")
 }
 
-// extractBalancedBraces extracts content between balanced braces
 func extractBalancedBraces(content string) (string, error) {
 	braceCount := 1
 	closeBrace := 1
@@ -85,42 +71,27 @@ func extractBalancedBraces(content string) (string, error) {
 	return content[:closeBrace], nil
 }
 
-// normalizeToJSON converts JavaScript object to JSON-compatible format
 func normalizeToJSON(js string) string {
-	// Normalize whitespace
 	js = strings.ReplaceAll(js, "\r\n", "\n")
 	js = strings.ReplaceAll(js, "\t", " ")
 	js = strings.ReplaceAll(js, "\n", "\\n")
-
-	// Strip comments
 	js = stripComments(js)
-
-	// Normalize quotes
 	js = strings.ReplaceAll(js, "`", `"`)
 	js = strings.ReplaceAll(js, `'`, `"`)
-
-	// Remove trailing commas
 	js = regexp.MustCompile(`,\s*([}\]])`).ReplaceAllString(js, "$1")
-
-	// Quote unquoted keys
 	js = regexp.MustCompile(`([{\[,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:`).ReplaceAllString(js, `$1"$2":`)
-
-	// Escape function bodies into strings
 	js = escapeFunctions(js)
 
 	return js
 }
 
 func stripComments(code string) string {
-	// Multi-line
 	code = regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(code, "")
-	// Single-line
 	code = regexp.MustCompile(`(?m)//.*$`).ReplaceAllString(code, "")
 	return code
 }
 
 func escapeFunctions(js string) string {
-	// Arrow functions: webpack: (x) => {...}
 	arrowFn := regexp.MustCompile(`(\b(?:webpack|experimental|config)\b\s*:\s*)\([^)]*\)\s*=>\s*{[^}]*}`)
 	js = arrowFn.ReplaceAllStringFunc(js, func(match string) string {
 		parts := strings.SplitN(match, ":", 2)
@@ -128,7 +99,6 @@ func escapeFunctions(js string) string {
 		return parts[0] + `: "` + strings.TrimSpace(escaped) + `"`
 	})
 
-	// Regular functions: webpack: function(x) {...}
 	regFn := regexp.MustCompile(`(\b(?:webpack|experimental|config)\b\s*:\s*)function\s*\([^)]*\)\s*{[^}]*}`)
 	js = regFn.ReplaceAllStringFunc(js, func(match string) string {
 		parts := strings.SplitN(match, ":", 2)
@@ -139,7 +109,6 @@ func escapeFunctions(js string) string {
 	return js
 }
 
-// parseConfigString parses normalized JSON config string
 func parseConfigString(configStr string) (map[string]interface{}, error) {
 	var result map[string]interface{}
 	if err := json.Unmarshal([]byte(configStr), &result); err != nil {
@@ -147,11 +116,9 @@ func parseConfigString(configStr string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to parse config JSON: %w", err)
 	}
 
-	// Unescape function strings
 	for k, v := range result {
 		if str, ok := v.(string); ok {
 			if strings.Contains(str, "function") || strings.Contains(str, "=>") {
-				// Unescape newlines and quotes
 				unescaped := strings.ReplaceAll(str, "\\n", "\n")
 				unescaped = strings.ReplaceAll(unescaped, "\\\"", "\"")
 				result[k] = unescaped
@@ -162,19 +129,13 @@ func parseConfigString(configStr string) (map[string]interface{}, error) {
 	return result, nil
 }
 
-// transpileTypeScriptConfig removes TypeScript-specific syntax
 func transpileTypeScriptConfig(content string) string {
-	// Remove type annotations
 	content = regexp.MustCompile(`(?m)^\s*\/\*\*.*?\*\/\s*$`).ReplaceAllString(content, "")
 	content = regexp.MustCompile(`:\s*\w+\s*([,;}])`).ReplaceAllString(content, "$1")
-
-	// Remove import statements
 	content = regexp.MustCompile(`(?m)^\s*import\s+.*?;\s*$`).ReplaceAllString(content, "")
-
 	return content
 }
 
-// parseEdgeRegions extracts edge regions from config content
 func parseEdgeRegions(content string) []string {
 	regionsRegex := regexp.MustCompile(`regions:\s*(\[[^\]]+\])`)
 	matches := regionsRegex.FindStringSubmatch(content)
@@ -188,7 +149,6 @@ func parseEdgeRegions(content string) []string {
 	return nil
 }
 
-// parseConfigObject converts raw config map to structured NextConfig
 func parseConfigObject(config map[string]interface{}) (*NextConfig, error) {
 	result := &NextConfig{
 		Env:                 make(map[string]string),
@@ -196,7 +156,6 @@ func parseConfigObject(config map[string]interface{}) (*NextConfig, error) {
 		ServerRuntimeConfig: make(map[string]interface{}),
 	}
 
-	// Helper functions to safely extract values
 	getString := func(key string) string {
 		if val, ok := config[key].(string); ok {
 			return val
@@ -212,7 +171,6 @@ func parseConfigObject(config map[string]interface{}) (*NextConfig, error) {
 	}
 	if webpack, ok := config["webpack"]; ok {
 		if webpackStr, ok := webpack.(string); ok && webpackStr == "webpack_function" {
-			// This was a function we converted to a string
 			result.Webpack = nil
 		} else {
 			result.Webpack = webpack
@@ -232,7 +190,6 @@ func parseConfigObject(config map[string]interface{}) (*NextConfig, error) {
 		return nil
 	}
 
-	// Parse basic configuration
 	result.BasePath = getString("basePath")
 	result.Output = getString("output")
 	result.ReactStrictMode = getBool("reactStrictMode")
@@ -251,8 +208,6 @@ func parseConfigObject(config map[string]interface{}) (*NextConfig, error) {
 	result.AnalyticsId = getString("analyticsId")
 	result.MdxRs = getBool("mdxRs")
 	result.EdgeRuntime = getString("edgeRuntime")
-
-	// Parse nested configurations
 	if images, ok := config["images"].(map[string]interface{}); ok {
 		result.Images = &ImageConfig{
 			Domains:               getStringSliceFromMap(images, "domains"),
@@ -339,7 +294,6 @@ func parseConfigObject(config map[string]interface{}) (*NextConfig, error) {
 		}
 	}
 
-	// Parse other sections
 	if env, ok := config["env"].(map[string]interface{}); ok {
 		for k, v := range env {
 			if s, ok := v.(string); ok {
@@ -375,7 +329,6 @@ func parseConfigObject(config map[string]interface{}) (*NextConfig, error) {
 	return result, nil
 }
 
-// Helper functions
 func getStringFromMap(m map[string]interface{}, key string) string {
 	if val, ok := m[key].(string); ok {
 		return val

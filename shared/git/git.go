@@ -34,22 +34,17 @@ func GetRepositoryInfo() (*RepositoryInfo, error) {
 	}, nil
 }
 
-// GetCurrentBranch returns the name of the current Git branch in the working directory.
-// Returns an error if the directory is not a Git repository or if the command fails.
 func GetCurrentBranch() (string, error) {
-	// Check if git is installed and available in PATH
 	if _, err := exec.LookPath("git"); err != nil {
 		return "", errors.New("git command not found")
 	}
 
-	// Run git command to get the current branch
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", errors.New("not a git repository or unable to get branch: " + err.Error())
 	}
 
-	// Clean up the output (remove newlines and whitespace)
 	branch := strings.TrimSpace(string(output))
 	if branch == "" {
 		return "", errors.New("could not determine current branch")
@@ -58,29 +53,22 @@ func GetCurrentBranch() (string, error) {
 	return branch, nil
 }
 
-// GetSecondLatestCommitHash returns the second latest commit hash in the current repository
 func GetSecondLatestCommitHash() (string, error) {
-	// Run git log command to get the last two commits
 	cmd := exec.Command("git", "log", "--pretty=format:%H", "-n", "2")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get git log: %w", err)
 	}
-
-	// Split the output by newlines to get individual commit hashes
 	commits := strings.Split(strings.TrimSpace(string(output)), "\n")
 
 	if len(commits) < 2 {
 		return "", fmt.Errorf("not enough commits in repository (need at least 2, got %d)", len(commits))
 	}
 
-	// The second commit is at index 1 (index 0 is the latest)
 	return commits[1], nil
 }
 
-// Alternative version using git rev-parse for better performance
 func GetSecondLatestCommitHashAlt() (string, error) {
-	// Get the parent of the latest commit (which would be the second latest)
 	cmd := exec.Command("git", "rev-parse", "HEAD~1")
 	output, err := cmd.Output()
 	if err != nil {

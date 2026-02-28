@@ -42,7 +42,6 @@ var logsCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		// Get the service name from the daemon
 		ctx := context.Background()
 		daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd logs --appName=%s", appName)
 		serviceName, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
@@ -51,10 +50,19 @@ var logsCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		serviceName = strings.TrimSpace(serviceName)
+		if lines := strings.Split(serviceName, "\n"); len(lines) > 1 {
+			for i := len(lines) - 1; i >= 0; i-- {
+				line := strings.TrimSpace(lines[i])
+				if line != "" && strings.HasSuffix(line, ".service") {
+					serviceName = line
+					break
+				}
+			}
+		}
 
-		fmt.Printf("🚀 NextDeploy Logs: %s (Service: %s)\n", appName, serviceName)
+		fmt.Printf("NextDeploy Logs: %s (Service: %s)\n", appName, serviceName)
 		if routeFilter != "" {
-			fmt.Printf("🔍 Route Filter: %s\n", routeFilter)
+			fmt.Printf("Route Filter: %s\n", routeFilter)
 		}
 		fmt.Println("──────────────────────────────────────────────────")
 

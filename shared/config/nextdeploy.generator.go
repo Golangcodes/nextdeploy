@@ -9,7 +9,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// PromptForConfig collects user input for the nextdeploy configuration
 func PromptForConfig(reader *bufio.Reader) (*NextDeployConfig, error) {
 	cfg := &NextDeployConfig{
 		Version: "1.0",
@@ -33,27 +32,22 @@ func PromptForConfig(reader *bufio.Reader) (*NextDeployConfig, error) {
 		},
 	}
 
-	// Basic app configuration
 	if err := PromptAppConfig(reader, cfg); err != nil {
 		return nil, fmt.Errorf("app configuration error: %w", err)
 	}
 
-	// Repository configuration
 	if err := PromptRepositoryConfig(reader, cfg); err != nil {
 		return nil, fmt.Errorf("repository configuration error: %w", err)
 	}
 
-	// Docker configuration
 	if err := PromptDockerConfig(reader, cfg); err != nil {
 		return nil, fmt.Errorf("docker configuration error: %w", err)
 	}
 
-	// Deployment configuration
 	if err := PromptDeploymentConfig(reader, cfg); err != nil {
 		return nil, fmt.Errorf("deployment configuration error: %w", err)
 	}
 
-	// Optional configurations
 	if PromptYesNo(reader, "Configure database?") {
 		dbConfig, err := PromptDatabaseConfig(reader)
 		if err != nil {
@@ -197,9 +191,6 @@ func PromptDatabaseConfig(reader *bufio.Reader) (Database, error) {
 	if err != nil {
 		return db, err
 	}
-	// Convert port to int (error handling omitted for brevity)
-	// db.Port = portInt
-
 	fmt.Print("Database username: ")
 	username, err := ReadRequiredInput(reader)
 	if err != nil {
@@ -267,14 +258,11 @@ func ReadRequiredInput(reader *bufio.Reader) (string, error) {
 	return input, nil
 }
 
-// WriteConfig writes the configuration to a YAML file
 func WriteConfig(filename string, cfg *NextDeployConfig) error {
-	// Implementation using yaml.Marshal would go here
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-	// #nosec G703
 	if err := os.WriteFile(filename, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
@@ -305,27 +293,22 @@ func PromptForConfigs(reader *bufio.Reader) (*NextDeployConfig, error) {
 		},
 	}
 
-	// Basic app configuration
 	if err := PromptAppConfig(reader, cfg); err != nil {
 		return nil, fmt.Errorf("app configuration error: %w", err)
 	}
 
-	// Repository configuration
 	if err := PromptRepositoryConfig(reader, cfg); err != nil {
 		return nil, fmt.Errorf("repository configuration error: %w", err)
 	}
 
-	// Docker configuration
 	if err := PromptDockerConfig(reader, cfg); err != nil {
 		return nil, fmt.Errorf("docker configuration error: %w", err)
 	}
 
-	// Deployment configuration
 	if err := PromptDeploymentConfig(reader, cfg); err != nil {
 		return nil, fmt.Errorf("deployment configuration error: %w", err)
 	}
 
-	// Optional configurations
 	if PromptYesNo(reader, "Configure database?") {
 		dbConfig, err := PromptDatabaseConfig(reader)
 		if err != nil {

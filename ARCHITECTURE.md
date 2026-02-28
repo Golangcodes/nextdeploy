@@ -103,7 +103,7 @@ NextDeploy is a deployment engine that allows developers to deploy and manage fu
 | Target VPS (Daemon)   |
 | --------------------- |
 | - Go Daemons          |
-| - Docker Runtime      |
+| - Node/Bun Runtime      |
 | - Caddy Reverse Proxy |
 +------------------------+
          |

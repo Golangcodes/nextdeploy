@@ -7,14 +7,15 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/config"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -338,9 +339,7 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 		if err != nil {
 			var keyErr *knownhosts.KeyError
 			if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
-				// Key is unknown. Trust on first use.
 				serverlogger.Info("Adding unknown host %s to known_hosts automatically", hostname)
-				// #nosec G304
 				f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
 				if err != nil {
 					return err
@@ -365,23 +364,18 @@ func (s *ServerStruct) BasicCaddySetup(ctx context.Context, serverName string, s
 
 }
 
-// ExecuteCommand runs a command on the specified server with context support and streaming
 func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command string, stream io.Writer) (string, error) {
 	client, err := s.getSSHClient(serverName)
 	if err != nil {
 		return "", err
 	}
-
 	client.mu.Lock()
 	defer client.mu.Unlock()
-
 	session, err := client.Client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 	defer session.Close()
-
-	// Set up output pipes
 	stdoutPipe, err := session.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("failed to get stdout pipe: %w", err)
@@ -406,13 +400,11 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 		stderrDst = stream
 	}
 
-	// Start command
 	err = session.Start(command)
 	if err != nil {
 		return "", fmt.Errorf("failed to start command: %w", err)
 	}
 
-	// Stream output in goroutines
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -426,7 +418,6 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 		_, _ = io.Copy(stderrDst, stderrPipe)
 	}()
 
-	// Set up context cancellation
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -436,7 +427,6 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 		}
 	}()
 
-	// Wait for command completion
 	err = session.Wait()
 	close(done)
 	wg.Wait()
@@ -451,7 +441,6 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 	return output.String(), nil
 }
 
-// UploadFile uploads a file to the remote server using SFTP
 func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, remotePath string) error {
 	client, err := s.getSSHClient(serverName)
 	if err != nil {
@@ -461,7 +450,6 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	client.mu.Lock()
 	defer client.mu.Unlock()
 
-	// #nosec G304
 	localFile, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to open local file: %w", err)
@@ -484,7 +472,6 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	return nil
 }
 
-// DownloadFile downloads a file from the remote server using SFTP
 func (s *ServerStruct) DownloadFile(ctx context.Context, serverName, remotePath, localPath string) error {
 	client, err := s.getSSHClient(serverName)
 	if err != nil {
@@ -500,7 +487,6 @@ func (s *ServerStruct) DownloadFile(ctx context.Context, serverName, remotePath,
 	}
 	defer remoteFile.Close()
 
-	// #nosec G304
 	localFile, err := os.Create(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to create local file: %w", err)
@@ -517,7 +503,6 @@ func (s *ServerStruct) DownloadFile(ctx context.Context, serverName, remotePath,
 	return nil
 }
 
-// PingServer checks if the server is reachable
 func (s *ServerStruct) PingServer(serverName string) error {
 	client, err := s.getSSHClient(serverName)
 	if err != nil {
@@ -542,7 +527,6 @@ func (s *ServerStruct) PingServer(serverName string) error {
 	return nil
 }
 
-// CloseSSHConnections closes all active SSH connections
 func (s *ServerStruct) CloseSSHConnection() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -568,7 +552,6 @@ func (s *ServerStruct) CloseSSHConnection() error {
 	return nil
 }
 
-// getSSHClient safely retrieves an SSH client from the map
 func (s *ServerStruct) getSSHClient(serverName string) (*SSHClient, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -579,8 +562,6 @@ func (s *ServerStruct) getSSHClient(serverName string) (*SSHClient, error) {
 	}
 	return client, nil
 }
-
-// Reconnect re-establishes connection to a server
 func (s *ServerStruct) Reconnect(serverName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -601,7 +582,6 @@ func (s *ServerStruct) Reconnect(serverName string) error {
 		return fmt.Errorf("server configuration not found for %s", serverName)
 	}
 
-	// Close existing connection if it exists
 	if oldClient, ok := s.sshClients[serverName]; ok {
 		oldClient.mu.Lock()
 		if oldClient.SFTPClient != nil {
@@ -621,7 +601,6 @@ func (s *ServerStruct) Reconnect(serverName string) error {
 	return nil
 }
 
-// ListServers returns a list of configured server names
 func (s *ServerStruct) ListServers() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -633,7 +612,6 @@ func (s *ServerStruct) ListServers() []string {
 	return servers
 }
 
-// GetServerStatus returns connection status of a server
 func (s *ServerStruct) GetServerStatus(serverName string, stream io.Writer) (string, error) {
 	client, err := s.getSSHClient(serverName)
 	if err != nil {

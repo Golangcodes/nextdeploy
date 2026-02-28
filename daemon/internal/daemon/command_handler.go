@@ -490,6 +490,19 @@ func copyDir(src, dst string) error {
 		if d.IsDir() {
 			return os.MkdirAll(target, 0750)
 		}
+		// Preserve symlinks rather than trying to copy them as regular files.
+		// Without this, symlinked directories (common in node_modules/.pnpm)
+		// cause "copy_file_range: is a directory" errors.
+		if d.Type()&os.ModeSymlink != 0 {
+			linkTarget, err := os.Readlink(path)
+			if err != nil {
+				return fmt.Errorf("readlink %s: %w", path, err)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
+				return err
+			}
+			return os.Symlink(linkTarget, target)
+		}
 		return copyFile(path, target)
 	})
 }

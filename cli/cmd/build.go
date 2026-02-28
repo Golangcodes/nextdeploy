@@ -239,12 +239,10 @@ func createTarball(sourceDir, targetTar string, outputMode nextcore.OutputMode, 
 		}
 
 		if d.IsDir() {
-			// In standalone mode, we NEED the node_modules that Next.js puts in .next/standalone/node_modules
 			if outputMode != nextcore.OutputModeStandalone && shouldExcludeDir(d.Name()) {
 				log.Info("[tarball] Skip dir (excluded): %s", relPath)
 				return filepath.SkipDir // prune entire subtree — DFS optimisation
 			}
-			// Even in standalone mode, we might want to exclude .git, .nextdeploy etc.
 			if outputMode == nextcore.OutputModeStandalone && (d.Name() == ".git" || d.Name() == ".nextdeploy") {
 				log.Info("[tarball] Skip dir (excluded): %s", relPath)
 				return filepath.SkipDir
@@ -261,7 +259,6 @@ func createTarball(sourceDir, targetTar string, outputMode nextcore.OutputMode, 
 			dirHeaders = append(dirHeaders, *h)
 			return nil
 		}
-
 		if outputMode == nextcore.OutputModeDefault {
 			if skip, reason := shouldExcludeFile(d.Name(), relPath); skip {
 				log.Info("[tarball] Skip file (%s): %s", reason, relPath)
@@ -341,7 +338,6 @@ func createTarball(sourceDir, targetTar string, outputMode nextcore.OutputMode, 
 
 		heap.Push(h, result)
 
-		// Drain all consecutive results we now have
 		for h.Len() > 0 && (*h)[0].job.index == nextExpected {
 			r := heap.Pop(h).(fileResult)
 
@@ -377,7 +373,6 @@ func createTarball(sourceDir, targetTar string, outputMode nextcore.OutputMode, 
 	}
 
 	log.Info("[tarball] Renaming %s → %s", tempName, targetTar)
-	// #nosec G703
 	if err := os.Rename(tempName, targetTar); err != nil {
 		if strings.Contains(err.Error(), "invalid cross-device link") {
 			log.Info("[tarball] Cross-device rename detected, falling back to copy...")
@@ -403,7 +398,7 @@ func readFile(job fileJob, pool *sync.Pool, workerID int, log logger) fileResult
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Info("[tarball] worker-%d file vanished: %s", workerID, job.relPath)
-			return fileResult{job: job} // info=nil signals the writer to skip
+			return fileResult{job: job}
 		}
 		return fileResult{job: job, err: fmt.Errorf("lstat: %w", err)}
 	}
@@ -458,7 +453,7 @@ func writeTarEntry(tw *tar.Writer, r fileResult, log logger) error {
 	}
 
 	if !r.info.Mode().IsRegular() {
-		return nil // symlinks and dirs have no content block
+		return nil
 	}
 
 	if r.data != nil {
@@ -554,7 +549,6 @@ func fileCopyAndRemove(src, dst string) error {
 	if _, err := io.Copy(destination, source); err != nil {
 		return fmt.Errorf("copy %s → %s: %w", src, dst, err)
 	}
-	// #nosec G703
 	_ = os.Remove(src)
 	return nil
 }
