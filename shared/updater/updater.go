@@ -112,6 +112,9 @@ func splitVer(v string) []int {
 	parts := []int{}
 	n, cur := 0, 0
 	for _, c := range v {
+		if c == '-' {
+			break
+		}
 		if c == '.' {
 			parts = append(parts, cur)
 			cur, n = 0, 0
