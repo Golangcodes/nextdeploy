@@ -1,9 +1,7 @@
----
-
 # NextDeploy
 
 NextDeploy is an open-source CLI and daemon for deploying and managing Next.js applications on your own infrastructure.
-No lock-in. No magic. Just Docker, SSH, and full control.
+No lock-in. No magic. Just Native Execution, SSH, and full control.
 
 > [!WARNING]
 > **Experimental / Hobby Project**: NextDeploy is currently a hobby project and is **not intended for production use** as of now. Use it at your own risk for testing and personal projects.
@@ -12,16 +10,14 @@ No lock-in. No magic. Just Docker, SSH, and full control.
 
 ## Why NextDeploy?
 
-* Builds Docker images optimized for Next.js
-* Ships to any VPS (Hetzner, DigitalOcean, AWS, bare metal) via SSH
-* Injects secrets securely with Doppler
-* Streams logs and metrics from running containers
-* Runimage: test production builds locally with real secrets
-* Daemon support: health checks, logs, and automation on servers
+* **Native Execution**: No Docker overhead. Runs as a managed systemd service.
+* **VPS & Serverless**: Ship to any VPS (Hetzner, DigitalOcean, AWS) or AWS Serverless.
+* **Secret Management**: Integrated remote secrets (`set`, `get`, `unset`, `list`).
+* **Live Logs**: Real-time log streaming from the daemon via SSH.
+* **Status Metrics**: Real-time PID and memory tracking for your apps.
+* **Security**: Non-root execution with systemd sandboxing.
 
 One tool. One config. Full transparency.
-
----
 
 ## Installation
 
@@ -59,61 +55,46 @@ curl -fsSL https://nextdeploy.one/install.sh | bash
 ## Quick Start
 
 ```bash
-nextdeploy init       # Scaffold Dockerfile + nextdeploy.yml
-nextdeploy build      # Build production Docker image
-nextdeploy runimage   # Run locally with Doppler secrets
-nextdeploy prepare # Prepare a fresh VPS
+nextdeploy init       # Scaffold nextdeploy.yml
+nextdeploy build      # Build production assets natively
+nextdeploy prepare    # Provision a fresh VPS with security hardening
 nextdeploy ship       # Deploy to your server
-nextdeploy serve      # Serve app online
-```
-
-Test with production config before shipping:
-
-```bash
-nextdeploy runimage --prod
+nextdeploy status     # Check app PID, memory, and health
+nextdeploy logs       # Stream real-time logs from the daemon
+nextdeploy secrets set KEY=VALUE # Manage secrets remotely
 ```
 
 ---
 
 ## Secrets Done Right
 
-NextDeploy is Doppler-first. No more `.env` files:
+NextDeploy provides a secure, remote secret management system. No manual `.env` file editing on the server:
 
-* Secrets injected at deploy/runtime
-* Fully encrypted and scoped (dev/staging/prod)
-* Update, restart, done
-* Works the same locally and in CI
+* **Remote Management**: Set, get, list, and unset secrets from your local CLI.
+* **Auto-Sync**: Daemon automatically updates application environment and restarts services.
+* **Secure Storage**: Secrets are stored safely on the server, handled as systemd `EnvironmentFile`.
+* **Zero-Leak**: Secrets never touch your git history or CI build logs.
 
 ---
 
 ## Philosophy
 
-Other platforms abstract until you lose control. NextDeploy flips that. You own the pipeline. You see every step.
+Other platforms abstract until you lose control. NextDeploy flips that. You own the pipeline. You see every step. No black boxes. Just you and your server.
 
-No black boxes. No middleware. Just you and your server.
-
-**Inspired by**: [Kamal](https://kamal-deploy.org/) - We loved their approach to self-hosted deployments and specialized it for Next.js.
-
----
-
-## Perfect For Developers Who
-
-* Deploy Next.js or full-stack apps to VPS/bare metal
-* Want transparent, auditable DevOps
-* Need strong security practices without complexity
-* Care about simplicity over vendor lock-in
+**Inspired by**: [Kamal](https://kamal-deploy.org/) - We loved their approach to self-hosted deployments and specialized it for Next.js native execution.
 
 ---
 
 ## Roadmap
 
-* serverless deployment with aws
-* Doppler integration
-* Logs and metrics
-* runimage for local testing
-* CI/CD via GitHub webhooks
-* Rollbacks and release tracking
-* Stack plugins (Rails, Go, Bun, Astro...)
+* [x] Native VPS Deployment (systemd)
+* [x] AWS Serverless support (Lambda + CloudFront)
+* [x] Integrated Secret Management
+* [x] Live Logs and Status metrics
+* [ ] CI/CD via GitHub Actions / Webhooks
+* [ ] Rollbacks and release tracking
+* [ ] Multi-tenant server support
+* [ ] Plugin system (Go, Bun, Astro...)
 * Dashboard and multitenant support
 
 ---
@@ -134,7 +115,4 @@ We welcome contributors:
 * Security reviewers
 * Product-minded devs
 
----
 NextDeploy — Transparent Deployment, Under Your Control.
----
-
