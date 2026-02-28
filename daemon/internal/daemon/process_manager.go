@@ -141,22 +141,31 @@ WantedBy=multi-user.target
 }
 
 func resolveBinary(name string) string {
-	switch name {
-	case "node":
-		return "/usr/local/bin/node"
-	case "bun":
-		return "/usr/local/bin/bun"
-	case "npm":
-		return "/usr/local/bin/npm"
-	case "yarn":
-		return "/usr/local/bin/yarn"
-	case "pnpm":
-		return "/usr/local/bin/pnpm"
-	case "doppler":
-		return "/usr/local/bin/doppler"
-	default:
-		return name
+	candidates := map[string]string{
+		"node":    "/usr/local/bin/node",
+		"bun":     "/usr/local/bin/bun",
+		"npm":     "/usr/local/bin/npm",
+		"yarn":    "/usr/local/bin/yarn",
+		"pnpm":    "/usr/local/bin/pnpm",
+		"doppler": "/usr/local/bin/doppler",
 	}
+
+	// Try the preferred path first
+	if path, ok := candidates[name]; ok {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	// Fall back to PATH lookup
+	if path, err := exec.LookPath(name); err == nil {
+		log.Printf("[process] Resolved %s via PATH: %s", name, path)
+		return path
+	}
+
+	// Last resort: return the name and let systemd try
+	log.Printf("[process] Warning: could not resolve binary %q, using name directly", name)
+	return name
 }
 
 func (pm *ProcessManager) reloadDaemon() error {
