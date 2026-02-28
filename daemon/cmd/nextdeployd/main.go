@@ -49,10 +49,10 @@ func main() {
 				os.Exit(1)
 			}
 			socketPath := "/var/run/nextdeployd.sock"
-			if os.Geteuid() != 0 {
+			if _, err := os.Stat(socketPath); os.IsNotExist(err) && os.Geteuid() != 0 {
 				home, err := os.UserHomeDir()
 				if err == nil {
-					socketPath = home + "/.nextdeploy/daemon.sock"
+					socketPath = filepath.Join(home, ".nextdeploy", "daemon.sock")
 				}
 			}
 			args := map[string]interface{}{"tarball": tarball}

@@ -84,7 +84,7 @@ func (ss *SocketServer) cleanupSocket() {
 
 func (ss *SocketServer) setSocketPermissions() error {
 	// #nosec G302
-	if err := os.Chmod(ss.socketPath, 0660); err != nil {
+	if err := os.Chmod(ss.socketPath, 0666); err != nil {
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
 	socketDir := filepath.Dir(ss.socketPath)

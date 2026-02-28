@@ -112,8 +112,8 @@ var shipCmd = &cobra.Command{
 		log.Info("Upload complete. Triggering daemon to process deployment...")
 
 		// Intentionally use nextdeployd client CLI which automatically parses --tarball=... into socket arguments
-		// Run with sudo so it can access the root daemon's socket at /var/run/nextdeployd.sock
-		daemonCmd := fmt.Sprintf("sudo nextdeployd ship --tarball=\"%s\"", remotePath)
+		// No longer using sudo because socket is accessible by non-root users
+		daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd ship --tarball=\"%s\"", remotePath)
 		output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, os.Stdout)
 		if err != nil {
 			log.Error("Failed to trigger daemon (ensure nextdeployd is in PATH): %v\nOutput: %s", err, output)
