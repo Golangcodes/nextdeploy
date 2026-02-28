@@ -119,6 +119,13 @@ var buildCmd = &cobra.Command{
 		log := shared.PackageLogger("build", "BUILD")
 		log.Info("Starting NextDeploy build process...")
 
+		if err := nextcore.ValidateBuildState(); err == nil {
+			log.Info("Git commit unchanged. Skipping build (Incremental build state matched).")
+			os.Exit(0)
+		} else {
+			log.Info("Build state validation returned: %v. Proceeding with full build.", err)
+		}
+
 		payload, err := nextcore.GenerateMetadata()
 		if err != nil {
 			log.Error("Failed to generate metadata: %v", err)

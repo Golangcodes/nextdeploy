@@ -17,7 +17,7 @@ type NextCorePayload struct {
 	NextVersion       string            `json:"next_version"`
 	NextBuildMetadata NextBuildMetadata `json:"nextbuildmetadata"`
 	StaticRoutes      []string          `json:"static_routes"`
-	Dynamic           []string          `json:"dymanic_routes"`
+	DynamicRoutes     []string          `json:"dynamic_routes"`
 	BuildCommand      string            `json:"build_command"`
 	StartCommand      string            `json:"start_command"`
 	HasImageAssets    bool              `json:"has_image_assets"`

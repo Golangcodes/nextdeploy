@@ -2,10 +2,11 @@ package initialcommand
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
-	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"
@@ -37,8 +38,8 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	log.Info("Scanning your routes...")
 
 	log.Info("  ✓ %d static routes", len(payload.StaticRoutes))
-	if len(payload.Dynamic) > 0 {
-		log.Info("  ✓ %d dynamic routes", len(payload.Dynamic))
+	if len(payload.DynamicRoutes) > 0 {
+		log.Info("  ✓ %d dynamic routes", len(payload.DynamicRoutes))
 	}
 	if payload.Middleware != nil {
 		log.Info("  ✓ Middleware route detected")

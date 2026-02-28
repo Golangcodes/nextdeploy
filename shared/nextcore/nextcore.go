@@ -78,7 +78,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		NextCoreLogger.Error("Failed to detect image assets: %v", err)
 		return NextCorePayload{}, err
 	}
-	if imagesAssets == nil {
+	if len(imagesAssets.PublicImages) == 0 && len(imagesAssets.OptimizedImages) == 0 && len(imagesAssets.StaticImports) == 0 {
 		NextCoreLogger.Info("No image assets found in the Next.js build")
 	} else {
 		HasImageAssets = true
@@ -143,9 +143,11 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		StartCommand:     startCommand,
 		Entrypoint:       deriveEntrypoint(buildMeta.OutputMode, "."),
 		HasImageAssets:   HasImageAssets,
-		CDNEnabled:       false,
+		CDNEnabled:       cfg.App.CDNEnabled,
 		Domain:           domainName,
 		RouteInfo:        *routeInfo,
+		StaticRoutes:     routeInfo.StaticRoutes,
+		DynamicRoutes:    routeInfo.DynamicRoutes,
 		Middleware:       middlewareConfig,
 		StaticAssets:     StaticAssets,
 		GitCommit:        gitCommt,
@@ -156,7 +158,22 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		AssetsOutputDir:  AssetsOutputDir,
 		PackageManager:   packageManager.String(),
 		RootDir:          cwd,
+		WorkingDir:       cwd,
 		OutputMode:       buildMeta.OutputMode,
+		ImageAssets:      *imagesAssets,
+		NextBuild: NextBuild{
+			HasAppRouter: buildMeta.HasAppRouter,
+			RootFiles: RootFiles{
+				BuildManifest:      filepath.Join(cwd, ".next", "build-manifest.json"),
+				PackageJSON:        filepath.Join(cwd, "package.json"),
+				LastBuildTimestamp: time.Now().Format(time.RFC3339),
+			},
+			BuildMetadata: BuildMetadata{
+				NextVersion: NextJsVersion,
+				BuildID:     buildMeta.BuildID,
+				OutputMode:  buildMeta.OutputMode,
+			},
+		},
 	}
 
 	if err := createBuildLock(&metadata); err != nil {

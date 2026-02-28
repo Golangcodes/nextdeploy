@@ -88,6 +88,7 @@ type AppConfig struct {
 	Port        int            `yaml:"port"`
 	Environment string         `yaml:"environment"`
 	Domain      string         `yaml:"domain,omitempty"`
+	CDNEnabled  bool           `yaml:"cdn_enabled,omitempty"`
 	Secrets     *SecretsConfig `yaml:"secrets,omitempty"`
 }
 

@@ -10,7 +10,6 @@ import (
 	"io"
 )
 
-// encrypt data using aes-gcm with provided key
 func Encrypt(plaintext []byte, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -29,7 +28,6 @@ func Encrypt(plaintext []byte, key []byte) ([]byte, error) {
 	return []byte(base64.StdEncoding.EncodeToString(ciphertext)), nil
 }
 
-// decrypt data using aes-gcm with provided key
 func Decrypt(ciphertext []byte, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {

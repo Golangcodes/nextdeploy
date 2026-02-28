@@ -53,7 +53,10 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 	}
 
 	buildManifest, _ := readJSON("build-manifest.json")
-	appBuildManifest, _ := readJSON("app-build-manifest.json")
+	appBuildManifest, err := readJSON("app-build-manifest.json")
+	if err != nil {
+		appBuildManifest, _ = readJSON("server/app-build-manifest.json")
+	}
 	prerenderManifest, _ := readJSON("prerender-manifest.json")
 	routesManifest, _ := readJSON("routes-manifest.json")
 	imagesManifest, _ := readJSON("images-manifest.json")

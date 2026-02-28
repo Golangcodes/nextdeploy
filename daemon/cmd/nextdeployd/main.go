@@ -18,7 +18,6 @@ import (
 )
 
 func main() {
-	// Handle subcommands before flag parsing so they work cleanly.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version", "--version", "-v":
@@ -57,7 +56,6 @@ func main() {
 	foreground := flag.Bool("foreground", false, "Run in foreground")
 	flag.Parse()
 
-	// Background update hint — never blocks startup.
 	go updater.CheckAndPrint(shared.Version)
 
 	if !*foreground {
