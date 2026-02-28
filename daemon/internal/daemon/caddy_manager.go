@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/Golangcodes/nextdeploy/shared/caddy"
 )
 
 type CaddyManager struct {
@@ -22,41 +24,7 @@ func NewCaddyManager() *CaddyManager {
 
 // GenerateConfig creates a Caddyfile block for a specific Next.js app
 func (cm *CaddyManager) GenerateConfig(appName, domain, outputMode string, port int, appDir string) error {
-	var caddyConfig string
-
-	commonHeaders := `
-	encode zstd gzip
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "SAMEORIGIN"
-		Referrer-Policy "strict-origin-when-cross-origin"
-	}`
-
-	if outputMode == "export" {
-		// Static site hosting
-		staticDir := filepath.Join(appDir, "out")
-		caddyConfig = fmt.Sprintf(`%s {%s
-	root * %s
-	file_server
-}`, domain, commonHeaders, staticDir)
-	} else {
-		// Reverse proxy for standalone or default mode
-		nextStaticDir := filepath.Join(appDir, ".next", "static")
-
-		caddyConfig = fmt.Sprintf(`%s {%s
-	
-	handle_path /_next/static/* {
-		root * %s
-		header Cache-Control "public, max-age=31536000, immutable"
-		file_server
-	}
-
-	handle {
-		reverse_proxy localhost:%d
-	}
-}`, domain, commonHeaders, nextStaticDir, port)
-	}
+	caddyConfig := caddy.GenerateCaddyfile(appName, domain, outputMode, port, appDir)
 
 	configPath := filepath.Join(cm.configDir, fmt.Sprintf("%s.caddy", appName))
 	err := os.WriteFile(configPath, []byte(caddyConfig), 0600)
@@ -102,12 +70,25 @@ func (cm *CaddyManager) EnsureMainCaddyfile() error {
 
 // Reload reloads the Caddy daemon via systemctl
 func (cm *CaddyManager) Reload() error {
+	// 1. Try systemctl reload first (the standard way)
 	cmd := exec.Command("systemctl", "reload", "caddy")
 	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to reload caddy: %v - %s", err, string(output))
+	if err == nil {
+		log.Println("Caddy reloaded successfully via systemctl.")
+		return nil
 	}
-	log.Println("Caddy reloaded successfully.")
+
+	log.Printf("Warning: systemctl reload caddy failed (%v), falling back to direct caddy reload...", err)
+
+	// 2. Fallback to direct 'caddy reload' if systemctl fails
+	// We use the same config path as in the systemd unit
+	fallbackCmd := exec.Command("caddy", "reload", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile")
+	output, err = fallbackCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("caddy reload failed (systemctl and fallback): %v - %s", err, string(output))
+	}
+
+	log.Println("Caddy reloaded successfully via direct fallback command.")
 	return nil
 }
 

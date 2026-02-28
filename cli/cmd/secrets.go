@@ -1,110 +1,135 @@
 package cmd
 
 import (
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/secrets"
-	"os"
-)
-import (
+	"context"
 	"fmt"
+	"os"
+	"strings"
+	"time"
 
+	"github.com/Golangcodes/nextdeploy/cli/internal/server"
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/spf13/cobra"
 )
 
-var (
-	Elogs = shared.PackageLogger("EncryptFiles::", "🔐 Encrypt Files::")
-)
-var (
-	encryptfiles = &cobra.Command{
-		Use:   "secrets",
-		Short: "Encrypt files for secure storage",
-		Long: `
-       Encrypt files using AES encryption for secure storage. 
-			 This command allows you to specify the files to encrypt and the output location.
-		`,
-		PreRun: func(cmd *cobra.Command, args []string) {
-			// make sure context of the files exists
-			filesContextExist() // This function should check if the context for files exists
-		},
-		Run: func(cmd *cobra.Command, args []string) {
-			encryptFiles()
-			fmt.Println("Files encrypted successfully!")
-		},
-	}
-)
-
-func encryptFiles() {
-	// Initialize the secret manager
-	sm, err := secrets.NewSecretManager()
-	if err != nil {
-		Elogs.Error("Failed to initialize SecretManager: %v", err)
-		os.Exit(1)
-	}
-
-	// Check if Doppler is enabled
-	if sm.IsDopplerEnabled() {
-		Elogs.Info("Doppler is enabled, no need for this whole process...")
-	}
-	// first check if the key exist
-	if sm.IsKeyExist() {
-		Elogs.Info("Encryption key already exists, using existing key for encryption.")
-	} else {
-		Elogs.Info("No existing encryption key found, generating a new key.")
-		key, err := sm.GeneratePlatformKey()
-		if err != nil {
-			Elogs.Error("Failed to generate encryption key:%v", err)
-			os.Exit(1)
-		}
-		Elogs.Info("Encryption key generated successfully: %s", key)
-	}
-	// Get the key now since it exists
-	home, _ := os.UserHomeDir()
-	appname := sm.GetAppName()
-	keyPath := home + "/.nextdeploy/" + appname + "/master.key"
-	// #nosec G304
-	key, err := os.ReadFile(keyPath)
-	if err != nil {
-		Elogs.Error("Failed to read encryption key from %s: %v", keyPath, err)
-		os.Exit(1)
-	}
-	// Encrypt the encrypt
-	if err := sm.EncryptFile("nextdeploy.yml", key); err != nil {
-		Elogs.Error("Failed to encrypt files: %v", err)
-		os.Exit(1)
-	}
-	// Encrypt the .env file
-	if err := sm.EncryptFile(".env", key); err != nil {
-		Elogs.Error("Failed to encrpt env files:%s", err)
-		os.Exit(1)
-	}
-
-	// write files to gitignore
-
-	Elogs.Info("Files encrypted successfully.")
-
+var secretsCmd = &cobra.Command{
+	Use:   "secrets",
+	Short: "Manage application secrets and environment variables",
+	Long:  "Allows you to set, get, list, and unset environment variables for your deployed application. Secrets are securely synced to the daemon.",
 }
 
-func filesContextExist() {
-	// Placeholder for checking if the files context exists
-	// This function should implement the logic to verify the existence of the files context
-	Elogs.Info("Checking if files context exists...")
-	// For now, we assume it always exists
-	// check for nextdeploy.yml file exists
-	if _, err := os.Stat("nextdeploy.yml"); os.IsNotExist(err) {
-		Elogs.Error("nextdeploy.yml file does not exist. Please run 'nextdeploy init' first.")
+var secretsSetCmd = &cobra.Command{
+	Use:   "set KEY=VALUE...",
+	Short: "Set one or more secrets",
+	Args:  cobra.MinimumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		runSecretAction("set", args)
+	},
+}
+
+var secretsGetCmd = &cobra.Command{
+	Use:   "get KEY",
+	Short: "Get a secret value",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		runSecretAction("get", args)
+	},
+}
+
+var secretsListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all secret names",
+	Run: func(cmd *cobra.Command, args []string) {
+		runSecretAction("list", args)
+	},
+}
+
+var secretsUnsetCmd = &cobra.Command{
+	Use:   "unset KEY...",
+	Short: "Remove one or more secrets",
+	Args:  cobra.MinimumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		runSecretAction("unset", args)
+	},
+}
+
+func runSecretAction(action string, args []string) {
+	log := shared.PackageLogger("secrets", "🔐 SECRETS")
+	cfg, err := config.Load()
+	if err != nil {
+		log.Error("Failed to load config: %v", err)
 		os.Exit(1)
-	} else {
-		Elogs.Info("Files context exists, proceeding with encryption.")
 	}
-	// check env files exist
-	if _, err := os.Stat(".env"); os.IsNotExist(err) {
-		Elogs.Error(".env file does not exist. Please create it before running this command.")
+
+	appName := cfg.App.Name
+	srv, err := server.New(server.WithConfig(), server.WithSSH())
+	if err != nil {
+		log.Error("Failed to initialize server connection: %v", err)
 		os.Exit(1)
-	} else {
-		Elogs.Info(".env file exists, proceeding with encryption.")
+	}
+	defer srv.CloseSSHConnection()
+
+	deploymentServer, err := srv.GetDeploymentServer()
+	if err != nil {
+		log.Error("Failed to get deployment server: %v", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	switch action {
+	case "set":
+		for _, arg := range args {
+			parts := strings.SplitN(arg, "=", 2)
+			if len(parts) != 2 {
+				log.Warn("Invalid format for '%s', expected KEY=VALUE", arg)
+				continue
+			}
+			key, value := parts[0], parts[1]
+			daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd secrets --action=set --appName=%s --key=%s --value='%s'", appName, key, value)
+			output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
+			if err != nil {
+				log.Error("Failed to set secret %s: %v\nOutput: %s", key, err, output)
+			} else {
+				log.Success("✅ Secret %s set", key)
+			}
+		}
+	case "get":
+		key := args[0]
+		daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd secrets --action=get --appName=%s --key=%s", appName, key)
+		output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
+		if err != nil {
+			log.Error("Failed to get secret %s: %v\nOutput: %s", key, err, output)
+		} else {
+			fmt.Printf("%s=%s\n", key, strings.TrimSpace(output))
+		}
+	case "list":
+		daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd secrets --action=list --appName=%s", appName)
+		output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
+		if err != nil {
+			log.Error("Failed to list secrets: %v\nOutput: %s", err, output)
+		} else {
+			fmt.Printf("Secrets for %s:\n%s\n", appName, output)
+		}
+	case "unset":
+		for _, key := range args {
+			daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd secrets --action=unset --appName=%s --key=%s", appName, key)
+			output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
+			if err != nil {
+				log.Error("Failed to unset secret %s: %v\nOutput: %s", key, err, output)
+			} else {
+				log.Success("✅ Secret %s removed", key)
+			}
+		}
 	}
 }
 
 func init() {
-	rootCmd.AddCommand(encryptfiles)
+	secretsCmd.AddCommand(secretsSetCmd)
+	secretsCmd.AddCommand(secretsGetCmd)
+	secretsCmd.AddCommand(secretsListCmd)
+	secretsCmd.AddCommand(secretsUnsetCmd)
+	rootCmd.AddCommand(secretsCmd)
 }

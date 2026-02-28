@@ -37,6 +37,9 @@ var allowedCommands = map[string]struct{}{
 	"stopdaemon":    {},
 	"restartDaemon": {},
 	"ship":          {},
+	"secrets":       {},
+	"status":        {},
+	"logs":          {},
 }
 
 func (ch *CommandHandler) ValidateCommand(cmd types.Command) error {
@@ -57,6 +60,12 @@ func (ch *CommandHandler) HandleCommand(cmd types.Command) types.Response {
 		return ch.restartDaemon(cmd.Args)
 	case "ship":
 		return ch.handleShip(cmd.Args)
+	case "secrets":
+		return ch.handleSecrets(cmd.Args)
+	case "status":
+		return ch.handleStatus(cmd.Args)
+	case "logs":
+		return ch.handleLogs(cmd.Args)
 	default:
 		return types.Response{
 			Success: false,

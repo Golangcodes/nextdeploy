@@ -239,9 +239,15 @@ func createTarball(sourceDir, targetTar string, outputMode nextcore.OutputMode, 
 		}
 
 		if d.IsDir() {
-			if shouldExcludeDir(d.Name()) {
+			// In standalone mode, we NEED the node_modules that Next.js puts in .next/standalone/node_modules
+			if outputMode != nextcore.OutputModeStandalone && shouldExcludeDir(d.Name()) {
 				log.Info("[tarball] Skip dir (excluded): %s", relPath)
 				return filepath.SkipDir // prune entire subtree — DFS optimisation
+			}
+			// Even in standalone mode, we might want to exclude .git, .nextdeploy etc.
+			if outputMode == nextcore.OutputModeStandalone && (d.Name() == ".git" || d.Name() == ".nextdeploy") {
+				log.Info("[tarball] Skip dir (excluded): %s", relPath)
+				return filepath.SkipDir
 			}
 			info, err := d.Info()
 			if err != nil {

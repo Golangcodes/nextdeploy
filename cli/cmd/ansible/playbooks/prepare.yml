@@ -16,11 +16,36 @@
   vars:
     node22_version: "22.22.0"
     go_version: "1.26.0"
-    app_dir: /opt/nextjs-app
+    app_root: /opt/nextdeploy
+    app_dir: /opt/nextdeploy/apps
     caddy_fallback_version: "2.8.4"
 
   # ── Phase 1: prerequisites ──────────────────────────────────────────────────
   tasks:
+    - name: "Phase 1 | Security | Create nextdeploy group"
+      ansible.builtin.group:
+        name: nextdeploy
+        state: present
+        system: true
+      become: true
+
+    - name: "Phase 1 | Security | Create nextdeploy user"
+      ansible.builtin.user:
+        name: nextdeploy
+        group: nextdeploy
+        shell: /sbin/nologin
+        system: true
+        create_home: false
+        state: present
+      become: true
+
+    - name: "Phase 1 | Security | Add ansible user to nextdeploy group"
+      ansible.builtin.user:
+        name: "{{ ansible_user_id }}"
+        groups: nextdeploy
+        append: true
+      become: true
+
     - name: "Phase 1 | System information"
       ansible.builtin.command: uname -a
       register: uname_out
@@ -390,6 +415,7 @@
           [Service]
           User=root
           ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+          ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
           Restart=on-failure
           LimitNOFILE=1048576
 
@@ -516,12 +542,21 @@
 
           [Service]
           Type=simple
+          User=root
           ExecStart=/usr/local/bin/nextdeployd --foreground=true
           Restart=on-failure
           RestartSec=5s
           StandardOutput=journal
           StandardError=journal
           SyslogIdentifier=nextdeployd
+
+          # Security Sandboxing
+          ProtectSystem=strict
+          ProtectHome=yes
+          PrivateTmp=yes
+          NoNewPrivileges=yes
+          CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_NET_BIND_SERVICE
+          ReadWritePaths=/opt/nextdeploy /etc/systemd/system /etc/caddy /tmp /var/run
 
           [Install]
           WantedBy=multi-user.target
@@ -610,13 +645,18 @@
 
     # ── Phase 4: app directory ─────────────────────────────────────────────────
 
-    - name: "Phase 4 | Create application directory {{ app_dir }}"
+    - name: "Phase 4 | Create application root directory {{ app_root }}"
       ansible.builtin.file:
-        path: "{{ app_dir }}"
+        path: "{{ item }}"
         state: directory
-        owner: "{{ ansible_user_id }}"
-        mode: "0755"
+        owner: nextdeploy
+        group: nextdeploy
+        mode: "0770"
       become: true
+      loop:
+        - "{{ app_root }}"
+        - "{{ app_dir }}"
+        - "{{ app_root }}/uploads"
 
     # ── Phase 4: summary ───────────────────────────────────────────────────────
 

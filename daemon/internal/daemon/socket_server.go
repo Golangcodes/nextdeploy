@@ -3,9 +3,12 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
@@ -83,15 +86,34 @@ func (ss *SocketServer) cleanupSocket() {
 }
 
 func (ss *SocketServer) setSocketPermissions() error {
+	// 1. Restrict socket permissions to 0660 (rw-rw----)
 	// #nosec G302
-	if err := os.Chmod(ss.socketPath, 0666); err != nil {
+	if err := os.Chmod(ss.socketPath, 0660); err != nil {
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
+
+	// 2. Change group ownership to 'nextdeploy'
+	g, err := user.LookupGroup("nextdeploy")
+	var gid int
+	if err == nil {
+		gid, _ = strconv.Atoi(g.Gid)
+		// We keep UID as root (0) but change GID to nextdeploy
+		if chownErr := os.Chown(ss.socketPath, 0, gid); chownErr != nil {
+			log.Printf("[socket] Warning: failed to chown socket to nextdeploy group: %v", chownErr)
+		}
+	} else {
+		log.Printf("[socket] Warning: nextdeploy group not found, socket group ownership not set: %v", err)
+	}
+
+	// 3. Restrict directory permissions
 	socketDir := filepath.Dir(ss.socketPath)
 	if socketDir != "/var/run" && socketDir != "/run" {
 		// #nosec G302
-		if err := os.Chmod(socketDir, 0700); err != nil {
+		if err := os.Chmod(socketDir, 0770); err != nil {
 			return fmt.Errorf("failed to set socket directory permissions: %w", err)
+		}
+		if g != nil {
+			_ = os.Chown(socketDir, 0, gid)
 		}
 	}
 	return nil

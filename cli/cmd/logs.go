@@ -1,8 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"strings"
 
+	"github.com/Golangcodes/nextdeploy/cli/internal/server"
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/spf13/cobra"
 )
 
@@ -11,10 +17,56 @@ var logsCmd = &cobra.Command{
 	Short: "Stream application logs natively from the daemon",
 	Long:  "Streams systemd journal logs natively with capabilities to filter by specific Next.js routes.",
 	Run: func(cmd *cobra.Command, args []string) {
+		log := shared.PackageLogger("logs", "🚀 LOGS")
+		cfg, err := config.Load()
+		if err != nil {
+			log.Error("Failed to load config: %v", err)
+			os.Exit(1)
+		}
+
+		appName := cfg.App.Name
 		routeFilter, _ := cmd.Flags().GetString("route")
 
-		fmt.Printf("🚀 NextDeploy Logs (Route Filter: %s)\n", routeFilter)
-		fmt.Println("// TODO: Yusuf - Hook into the daemon's log streaming websocket/SSE to tail logs accurately.")
+		log.Info("Streaming logs for %s...", appName)
+
+		srv, err := server.New(server.WithConfig(), server.WithSSH())
+		if err != nil {
+			log.Error("Failed to initialize server connection: %v", err)
+			os.Exit(1)
+		}
+		defer srv.CloseSSHConnection()
+
+		deploymentServer, err := srv.GetDeploymentServer()
+		if err != nil {
+			log.Error("Failed to get deployment server: %v", err)
+			os.Exit(1)
+		}
+
+		// Get the service name from the daemon
+		ctx := context.Background()
+		daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd logs --appName=%s", appName)
+		serviceName, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
+		if err != nil {
+			log.Error("Failed to resolve service name: %v\nOutput: %s", err, serviceName)
+			os.Exit(1)
+		}
+		serviceName = strings.TrimSpace(serviceName)
+
+		fmt.Printf("🚀 NextDeploy Logs: %s (Service: %s)\n", appName, serviceName)
+		if routeFilter != "" {
+			fmt.Printf("🔍 Route Filter: %s\n", routeFilter)
+		}
+		fmt.Println("──────────────────────────────────────────────────")
+
+		journalCmd := fmt.Sprintf("journalctl -u %s -f -n 50", serviceName)
+		if routeFilter != "" {
+			journalCmd += fmt.Sprintf(" | grep \"%s\"", routeFilter)
+		}
+
+		_, err = srv.ExecuteCommand(ctx, deploymentServer, journalCmd, os.Stdout)
+		if err != nil {
+			log.Error("Logs stream interrupted: %v", err)
+		}
 	},
 }
 

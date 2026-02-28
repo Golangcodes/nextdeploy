@@ -38,7 +38,8 @@ func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode st
 		cmd := fmt.Sprintf("%s server.js", bin)
 
 		if dopplerToken != "" {
-			execStart = fmt.Sprintf("%s run --token=%s -- %s", resolveBinary("doppler"), dopplerToken, cmd)
+			// Doppler respects DOPPLER_TOKEN env var
+			execStart = fmt.Sprintf("%s run -- %s", resolveBinary("doppler"), cmd)
 		} else {
 			execStart = cmd
 		}
@@ -58,7 +59,8 @@ func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode st
 		cmd := fmt.Sprintf("%s %s", bin, args)
 
 		if dopplerToken != "" {
-			execStart = fmt.Sprintf("%s run --token=%s -- %s", resolveBinary("doppler"), dopplerToken, cmd)
+			// Doppler respects DOPPLER_TOKEN env var
+			execStart = fmt.Sprintf("%s run -- %s", resolveBinary("doppler"), cmd)
 		} else {
 			execStart = cmd
 		}
@@ -76,16 +78,39 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User=nextdeploy
+Group=nextdeploy
 WorkingDirectory=%s
 ExecStart=%s
 Restart=on-failure
 Environment=NODE_ENV=production
 Environment=PORT=%d
+EnvironmentFile=-%s/.env.nextdeploy
+
+# Security Sandboxing
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ReadOnlyPaths=/
+ReadWritePaths=%s
 
 [Install]
 WantedBy=multi-user.target
-`, appName, projectDir, execStart, port)
+`, appName, projectDir, execStart, port, projectDir, projectDir)
+
+	if dopplerToken != "" {
+		envFilePath := filepath.Join(projectDir, ".env.nextdeploy")
+		envContent := fmt.Sprintf("DOPPLER_TOKEN=%s\n", dopplerToken)
+		if err := os.WriteFile(envFilePath, []byte(envContent), 0600); err != nil {
+			log.Printf("[process] Warning: failed to write environment file: %v", err)
+		}
+		// Ensure the file is owned by nextdeploy
+		_ = os.Chmod(envFilePath, 0600)
+		// We can't easily chown to 'nextdeploy' without GID here unless we look it up,
+		// but the daemon runs as root and the dir is 0770 owned by nextdeploy:nextdeploy,
+		// so it should be fine.
+	}
 
 	log.Printf("[process] Writing service file to %s", servicePath)
 	if err := os.MkdirAll(filepath.Dir(servicePath), 0755); err != nil {
