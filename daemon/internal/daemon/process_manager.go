@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type ProcessManager struct {
@@ -25,6 +26,9 @@ func NewProcessManager() *ProcessManager {
 func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode string, dopplerToken string, port int, packageManager string) error {
 	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
 	servicePath := filepath.Join(pm.systemdDir, serviceName)
+
+	log.Printf("[process] Generating service file: %s (mode=%s, dir=%s, port=%d, pkg=%s)",
+		servicePath, outputMode, projectDir, port, packageManager)
 
 	var execStart string
 	if outputMode == "standalone" {
@@ -53,7 +57,7 @@ func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode st
 		}
 	} else {
 		// export mode doesn't need a process
-		log.Printf("Export mode detected for %s; no systemd service needed.", appName)
+		log.Printf("[process] Export mode detected for %s; no systemd service needed.", appName)
 		return nil
 	}
 
@@ -74,22 +78,41 @@ Environment=PORT=%d
 WantedBy=multi-user.target
 `, appName, projectDir, execStart, port)
 
-	err := os.WriteFile(servicePath, []byte(serviceContent), 0600)
-	if err != nil {
-		return fmt.Errorf("failed to write systemd service file: %w", err)
+	log.Printf("[process] Writing service file to %s", servicePath)
+	if err := os.MkdirAll(filepath.Dir(servicePath), 0755); err != nil {
+		return fmt.Errorf("failed to create systemd dir: %w", err)
 	}
 
-	log.Printf("Created systemd service file %s for %s", serviceName, appName)
+	err := os.WriteFile(servicePath, []byte(serviceContent), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write systemd service file %s: %w", servicePath, err)
+	}
+
+	// Verify the file was actually written
+	if _, statErr := os.Stat(servicePath); statErr != nil {
+		return fmt.Errorf("service file written but not found on disk: %w", statErr)
+	}
+
+	log.Printf("[process] Created systemd service file %s for %s", serviceName, appName)
 
 	// Reload systemd to recognize new service
-	return pm.reloadDaemon()
+	if err := pm.reloadDaemon(); err != nil {
+		return fmt.Errorf("daemon-reload after writing %s: %w", serviceName, err)
+	}
+
+	// Give systemd a moment to fully index the new unit
+	time.Sleep(500 * time.Millisecond)
+
+	return nil
 }
 
 func (pm *ProcessManager) reloadDaemon() error {
+	log.Printf("[process] Running systemctl daemon-reload")
 	cmd := exec.Command("systemctl", "daemon-reload")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to reload systemd daemon: %v - %s", err, out)
 	}
+	log.Printf("[process] systemctl daemon-reload succeeded")
 	return nil
 }
 
@@ -97,20 +120,24 @@ func (pm *ProcessManager) reloadDaemon() error {
 func (pm *ProcessManager) StartService(appName string) error {
 	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
 
+	log.Printf("[process] Enabling service %s", serviceName)
+
 	// #nosec G204
 	// Enable the service to start on boot
 	cmd := exec.Command("systemctl", "enable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("Warning: failed to enable service %s: %s", serviceName, out)
+		log.Printf("[process] Warning: failed to enable service %s: %v - %s", serviceName, err, string(out))
 	}
+
+	log.Printf("[process] Starting service %s", serviceName)
 
 	// #nosec G204
 	cmd = exec.Command("systemctl", "start", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to start service %s: %v - %s", serviceName, err, out)
+		return fmt.Errorf("failed to start service %s: %v - %s", serviceName, err, string(out))
 	}
 
-	log.Printf("Started systemd service %s", serviceName)
+	log.Printf("[process] Started systemd service %s", serviceName)
 	return nil
 }
 
