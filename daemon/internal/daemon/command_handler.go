@@ -238,6 +238,7 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	log.Printf("[ship] current → %s", releaseDir)
 
 	dopplerToken, _ := stringArg(args, "dopplerToken")
+	oldServiceName := ch.processManager.CurrentServiceName()
 
 	serviceGenerated, err := ch.processManager.GenerateServiceFile(
 		appName, currentSymlink, outputMode, dopplerToken, port, meta.PackageManager,

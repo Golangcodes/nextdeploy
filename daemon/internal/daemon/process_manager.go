@@ -31,26 +31,34 @@ func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode st
 
 	var execStart string
 	if outputMode == "standalone" {
-		cmd := "node server.js"
+		bin := resolveBinary("node")
 		if packageManager == "bun" {
-			cmd = "bun server.js"
+			bin = resolveBinary("bun")
 		}
+		cmd := fmt.Sprintf("%s server.js", bin)
+
 		if dopplerToken != "" {
-			execStart = fmt.Sprintf("doppler run --token=%s -- %s", dopplerToken, cmd)
+			execStart = fmt.Sprintf("%s run --token=%s -- %s", resolveBinary("doppler"), dopplerToken, cmd)
 		} else {
 			execStart = cmd
 		}
 	} else if outputMode == "default" {
-		cmd := "npm start"
+		bin := resolveBinary("npm")
+		args := "start"
 		if packageManager == "bun" {
-			cmd = "bun run start"
+			bin = resolveBinary("bun")
+			args = "run start"
 		} else if packageManager == "yarn" {
-			cmd = "yarn start"
+			bin = resolveBinary("yarn")
+			args = "start"
 		} else if packageManager == "pnpm" {
-			cmd = "pnpm start"
+			bin = resolveBinary("pnpm")
+			args = "start"
 		}
+		cmd := fmt.Sprintf("%s %s", bin, args)
+
 		if dopplerToken != "" {
-			execStart = fmt.Sprintf("doppler run --token=%s -- %s", dopplerToken, cmd)
+			execStart = fmt.Sprintf("%s run --token=%s -- %s", resolveBinary("doppler"), dopplerToken, cmd)
 		} else {
 			execStart = cmd
 		}
@@ -105,6 +113,25 @@ WantedBy=multi-user.target
 	time.Sleep(500 * time.Millisecond)
 
 	return true, nil
+}
+
+func resolveBinary(name string) string {
+	switch name {
+	case "node":
+		return "/usr/local/bin/node"
+	case "bun":
+		return "/usr/local/bin/bun"
+	case "npm":
+		return "/usr/local/bin/npm"
+	case "yarn":
+		return "/usr/local/bin/yarn"
+	case "pnpm":
+		return "/usr/local/bin/pnpm"
+	case "doppler":
+		return "/usr/local/bin/doppler"
+	default:
+		return name
+	}
 }
 
 func (pm *ProcessManager) reloadDaemon() error {
