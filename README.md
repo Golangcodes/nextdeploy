@@ -5,6 +5,9 @@
 NextDeploy is an open-source CLI and daemon for deploying and managing Next.js applications on your own infrastructure.
 No lock-in. No magic. Just Docker, SSH, and full control.
 
+> [!WARNING]
+> **Experimental / Hobby Project**: NextDeploy is currently a hobby project and is **not intended for production use** as of now. Use it at your own risk for testing and personal projects.
+
 ---
 
 ## Why NextDeploy?

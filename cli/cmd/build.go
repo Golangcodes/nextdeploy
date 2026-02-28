@@ -7,8 +7,6 @@ import (
 	"container/heap"
 	"fmt"
 	"io"
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,6 +14,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 
 	"github.com/spf13/cobra"
 )
@@ -152,6 +153,11 @@ var buildCmd = &cobra.Command{
 			}
 		default:
 			releaseDir = "."
+			log.Info("Copying deployment metadata for default mode...")
+			if err := copyFile(".nextdeploy/metadata.json", "metadata.json"); err != nil {
+				log.Error("Failed to copy metadata.json: %v", err)
+				os.Exit(1)
+			}
 		}
 
 		log.Info("Release directory: %s", releaseDir)
