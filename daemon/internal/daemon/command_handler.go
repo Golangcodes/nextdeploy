@@ -8,13 +8,14 @@ import (
 	"io"
 	"log"
 	"net"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
+	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
 type CommandHandler struct {
@@ -238,16 +239,17 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 
 	dopplerToken, _ := stringArg(args, "dopplerToken")
 
-	if err := ch.processManager.GenerateServiceFile(
+	serviceGenerated, err := ch.processManager.GenerateServiceFile(
 		appName, currentSymlink, outputMode, dopplerToken, port, meta.PackageManager,
-	); err != nil {
+	)
+	if err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to generate service file: %v", err)}
 	}
 
-	oldServiceName := ch.processManager.CurrentServiceName()
-
-	if err := ch.processManager.StartService(appName); err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("failed to start service: %v", err)}
+	if serviceGenerated {
+		if err := ch.processManager.StartService(appName); err != nil {
+			return types.Response{Success: false, Message: fmt.Sprintf("failed to start service: %v", err)}
+		}
 	}
 
 	log.Printf("[ship] Waiting for app to become healthy on port %d...", port)

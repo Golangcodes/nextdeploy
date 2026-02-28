@@ -22,8 +22,7 @@ func NewProcessManager() *ProcessManager {
 	}
 }
 
-// GenerateServiceFile creates a systemd service file for the Next.js app
-func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode string, dopplerToken string, port int, packageManager string) error {
+func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode string, dopplerToken string, port int, packageManager string) (bool, error) {
 	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
 	servicePath := filepath.Join(pm.systemdDir, serviceName)
 
@@ -55,10 +54,12 @@ func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode st
 		} else {
 			execStart = cmd
 		}
-	} else {
+	} else if outputMode == "export" {
 		// export mode doesn't need a process
 		log.Printf("[process] Export mode detected for %s; no systemd service needed.", appName)
-		return nil
+		return false, nil
+	} else {
+		return false, fmt.Errorf("unknown or unsupported output mode: %q (check your next.config.js output setting)", outputMode)
 	}
 
 	serviceContent := fmt.Sprintf(`[Unit]
@@ -80,30 +81,30 @@ WantedBy=multi-user.target
 
 	log.Printf("[process] Writing service file to %s", servicePath)
 	if err := os.MkdirAll(filepath.Dir(servicePath), 0755); err != nil {
-		return fmt.Errorf("failed to create systemd dir: %w", err)
+		return false, fmt.Errorf("failed to create systemd dir: %w", err)
 	}
 
 	err := os.WriteFile(servicePath, []byte(serviceContent), 0644)
 	if err != nil {
-		return fmt.Errorf("failed to write systemd service file %s: %w", servicePath, err)
+		return false, fmt.Errorf("failed to write systemd service file %s: %w", servicePath, err)
 	}
 
 	// Verify the file was actually written
 	if _, statErr := os.Stat(servicePath); statErr != nil {
-		return fmt.Errorf("service file written but not found on disk: %w", statErr)
+		return false, fmt.Errorf("service file written but not found on disk: %w", statErr)
 	}
 
 	log.Printf("[process] Created systemd service file %s for %s", serviceName, appName)
 
 	// Reload systemd to recognize new service
 	if err := pm.reloadDaemon(); err != nil {
-		return fmt.Errorf("daemon-reload after writing %s: %w", serviceName, err)
+		return false, fmt.Errorf("daemon-reload after writing %s: %w", serviceName, err)
 	}
 
 	// Give systemd a moment to fully index the new unit
 	time.Sleep(500 * time.Millisecond)
 
-	return nil
+	return true, nil
 }
 
 func (pm *ProcessManager) reloadDaemon() error {
