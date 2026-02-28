@@ -31,49 +31,16 @@ func main() {
 			}
 			return
 		case "ship":
-			// Parse --tarball and --dopplerToken from remaining args and forward
-			// the ship command over the Unix socket to the running daemon.
-			tarball := ""
-			dopplerToken := ""
-			for _, arg := range os.Args[2:] {
-				if strings.HasPrefix(arg, "--tarball=") {
-					tarball = strings.TrimPrefix(arg, "--tarball=")
-					// strip surrounding quotes if present
-					tarball = strings.Trim(tarball, "\"'")
-				} else if strings.HasPrefix(arg, "--dopplerToken=") {
-					dopplerToken = strings.TrimPrefix(arg, "--dopplerToken=")
-				}
-			}
-			if tarball == "" {
-				fmt.Fprintln(os.Stderr, "Error: --tarball is required")
-				os.Exit(1)
-			}
-			socketPath := "/var/run/nextdeployd.sock"
-			if _, err := os.Stat(socketPath); os.IsNotExist(err) && os.Geteuid() != 0 {
-				home, err := os.UserHomeDir()
-				if err == nil {
-					socketPath = filepath.Join(home, ".nextdeploy", "daemon.sock")
-				}
-			}
-			args := map[string]interface{}{"tarball": tarball}
-			if dopplerToken != "" {
-				args["dopplerToken"] = dopplerToken
-			}
-			resp, err := daemoniclient.SendCommand(socketPath, daemontypes.Command{
-				Type: "ship",
-				Args: args,
-			})
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error contacting daemon: %v\n", err)
-				os.Exit(1)
-			}
-			if resp != nil && !resp.Success {
-				fmt.Fprintf(os.Stderr, "Deployment failed: %s\n", resp.Message)
-				os.Exit(1)
-			}
-			if resp != nil {
-				fmt.Printf("✅ %s\n", resp.Message)
-			}
+			handleShipSubcommand()
+			return
+		case "secrets":
+			handleSecretsSubcommand()
+			return
+		case "status":
+			handleStatusSubcommand()
+			return
+		case "logs":
+			handleLogsSubcommand()
 			return
 		}
 	}
@@ -101,28 +68,119 @@ func main() {
 	runDaemon(*configPath)
 }
 
+func getSocketPath() string {
+	socketPath := "/var/run/nextdeployd.sock"
+	if _, err := os.Stat(socketPath); os.IsNotExist(err) && os.Geteuid() != 0 {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			socketPath = filepath.Join(home, ".nextdeploy", "daemon.sock")
+		}
+	}
+	return socketPath
+}
+
+func sendDaemonCommand(cmd daemontypes.Command) {
+	socketPath := getSocketPath()
+	resp, err := daemoniclient.SendCommand(socketPath, cmd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error contacting daemon: %v (Is nextdeployd running?)\n", err)
+		os.Exit(1)
+	}
+	if resp != nil {
+		if !resp.Success {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Message)
+			os.Exit(1)
+		}
+		fmt.Print(resp.Message)
+		if !strings.HasSuffix(resp.Message, "\n") {
+			fmt.Println()
+		}
+	}
+}
+
+func handleShipSubcommand() {
+	tarball := ""
+	dopplerToken := ""
+	for _, arg := range os.Args[2:] {
+		if strings.HasPrefix(arg, "--tarball=") {
+			tarball = strings.TrimPrefix(arg, "--tarball=")
+			tarball = strings.Trim(tarball, "\"'")
+		} else if strings.HasPrefix(arg, "--dopplerToken=") {
+			dopplerToken = strings.TrimPrefix(arg, "--dopplerToken=")
+		}
+	}
+	if tarball == "" {
+		fmt.Fprintln(os.Stderr, "Error: --tarball is required")
+		os.Exit(1)
+	}
+	args := map[string]interface{}{"tarball": tarball}
+	if dopplerToken != "" {
+		args["dopplerToken"] = dopplerToken
+	}
+	sendDaemonCommand(daemontypes.Command{Type: "ship", Args: args})
+}
+
+func handleSecretsSubcommand() {
+	action := ""
+	appName := ""
+	key := ""
+	value := ""
+	for _, arg := range os.Args[2:] {
+		if strings.HasPrefix(arg, "--action=") {
+			action = strings.TrimPrefix(arg, "--action=")
+		} else if strings.HasPrefix(arg, "--appName=") {
+			appName = strings.TrimPrefix(arg, "--appName=")
+		} else if strings.HasPrefix(arg, "--key=") {
+			key = strings.TrimPrefix(arg, "--key=")
+		} else if strings.HasPrefix(arg, "--value=") {
+			value = strings.TrimPrefix(arg, "--value=")
+			value = strings.Trim(value, "\"'")
+		}
+	}
+	args := map[string]interface{}{
+		"action":  action,
+		"appName": appName,
+		"key":     key,
+		"value":   value,
+	}
+	sendDaemonCommand(daemontypes.Command{Type: "secrets", Args: args})
+}
+
+func handleStatusSubcommand() {
+	appName := ""
+	for _, arg := range os.Args[2:] {
+		if strings.HasPrefix(arg, "--appName=") {
+			appName = strings.TrimPrefix(arg, "--appName=")
+		}
+	}
+	sendDaemonCommand(daemontypes.Command{Type: "status", Args: map[string]interface{}{"appName": appName}})
+}
+
+func handleLogsSubcommand() {
+	appName := ""
+	for _, arg := range os.Args[2:] {
+		if strings.HasPrefix(arg, "--appName=") {
+			appName = strings.TrimPrefix(arg, "--appName=")
+		}
+	}
+	sendDaemonCommand(daemontypes.Command{Type: "logs", Args: map[string]interface{}{"appName": appName}})
+}
+
 func daemonize() {
-	// get the executable path
 	execPath, err := os.Executable()
 	if err != nil {
 		log.Fatalf("Error getting executable path: %v", err)
 	}
-	// return ourselves in foreground
 	args := []string{"--foreground=true"}
 	if len(os.Args) > 1 {
-		// preserver other args like config path
-		for _, arg := range os.Args[2:] {
+		for _, arg := range os.Args[1:] {
 			if arg != "--foreground" && !strings.HasPrefix(arg, "--foreground=") {
 				args = append(args, arg)
 			}
 		}
 	}
-	// #nosec G204, G702
 	cmd := exec.Command(execPath, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
-	// redirect output to log file
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	logDir := "/var/log/nextdeployd"
 	if os.Geteuid() != 0 {
 		home, err := os.UserHomeDir()
@@ -134,7 +192,6 @@ func daemonize() {
 		log.Fatalf("Error creating log directory: %v", err)
 	}
 	logFilePath := filepath.Join(logDir, "nextdeployd.log")
-	// #nosec G304
 	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		log.Fatalf("Error opening log file: %v", err)
@@ -150,8 +207,6 @@ func daemonize() {
 	os.Exit(0)
 }
 
-var lockFile *os.File
-
 func acquireLock() error {
 	lockPath := "/var/run/nextdeployd.pid"
 	if os.Geteuid() != 0 {
@@ -162,24 +217,17 @@ func acquireLock() error {
 			lockPath = "/tmp/nextdeployd.pid"
 		}
 	}
-
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0750); err != nil {
 		return err
 	}
-
-	// #nosec G304
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
 	}
-
-	// #nosec G115
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("another instance of nextdeployd is already running")
 	}
-
-	lockFile = f
 	_ = f.Truncate(0)
 	_, _ = f.WriteString(fmt.Sprintf("%d\n", os.Getpid()))
 	return nil
@@ -189,10 +237,7 @@ func runDaemon(configPath string) {
 	if err := acquireLock(); err != nil {
 		log.Fatalf("Lock error: %v", err)
 	}
-
-	// Start the expvar/pprof metrics server on localhost only.
 	daemon.StartMetricsServer("127.0.0.1:6060")
-
 	d, err := daemon.NewNextDeployDaemon(configPath)
 	if err != nil {
 		log.Fatalf("Error initializing daemon: %v", err)
@@ -200,5 +245,4 @@ func runDaemon(configPath string) {
 	if err := d.Start(); err != nil {
 		log.Fatalf("Error starting daemon: %v", err)
 	}
-
 }
