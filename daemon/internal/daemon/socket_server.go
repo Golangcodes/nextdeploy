@@ -43,7 +43,7 @@ func (ss *SocketServer) Start() error {
 
 func (ss *SocketServer) handleConnection(conn net.Conn) {
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Minute))
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
 	if !ss.limiter.Allow() {

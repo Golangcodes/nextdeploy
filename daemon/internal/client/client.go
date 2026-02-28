@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 	"time"
+
+	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 )
 
 func SendCommand(socketPath string, cmd types.Command) (*types.Response, error) {
@@ -14,7 +15,7 @@ func SendCommand(socketPath string, cmd types.Command) (*types.Response, error) 
 		return nil, fmt.Errorf("failed to connect to socket: %w", err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Minute))
 
 	encoder := json.NewEncoder(conn)
 	decoder := json.NewDecoder(conn)

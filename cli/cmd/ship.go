@@ -74,11 +74,11 @@ var shipCmd = &cobra.Command{
 		defer srv.CloseSSHConnection()
 
 		deploymentServer, err := srv.GetDeploymentServer()
-		fmt.Println("deploymentServer", deploymentServer)
 		if err != nil {
 			log.Error("Failed to get deployment server: %v", err)
 			os.Exit(1)
 		}
+		log.Info("Deployment server: %s", deploymentServer)
 
 		tarballName := "app.tar.gz"
 		if _, err := os.Stat(tarballName); os.IsNotExist(err) {
@@ -87,13 +87,12 @@ var shipCmd = &cobra.Command{
 		}
 
 		remotePath := fmt.Sprintf("/opt/nextdeploy/uploads/nextdeploy_%s_%d.tar.gz", cfg.App.Name, time.Now().Unix())
-		log.Info("Remote path for artifact is:%s", remotePath)
+		log.Info("Remote path for artifact: %s", remotePath)
 
 		log.Info("Uploading %s to %s on %s...", tarballName, remotePath, deploymentServer)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		log.Info("Deploying to %s tarball %v and path is %s", deploymentServer, tarballName, remotePath)
 		err = srv.UploadFile(ctx, deploymentServer, tarballName, remotePath)
 		if err != nil {
 			log.Error("Failed to upload tarball: %v", err)
@@ -102,7 +101,7 @@ var shipCmd = &cobra.Command{
 
 		log.Info("Upload complete. Triggering daemon to process deployment...")
 
-		daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd ship --tarball=\"%s\"", remotePath)
+		daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd ship --tarball=\"%s\"", remotePath)
 		output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, os.Stdout)
 		if err != nil {
 			log.Error("Failed to trigger daemon (ensure nextdeployd is in PATH): %v\nOutput: %s", err, output)
