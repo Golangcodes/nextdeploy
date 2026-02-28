@@ -6,14 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/git"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/Golangcodes/nextdeploy/shared/git"
 )
 
 const (
@@ -156,6 +157,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		AssetsOutputDir:  AssetsOutputDir,
 		PackageManager:   packageManager.String(),
 		RootDir:          cwd,
+		OutputMode:       buildMeta.OutputMode,
 	}
 
 	if err := createBuildLock(&metadata); err != nil {
