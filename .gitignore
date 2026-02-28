@@ -6,3 +6,15 @@
 
 /daemon.md
 .secrets
+
+# Root-level binaries
+/nextdeploy
+/nextdeployd
+
+# Test artifacts
+test*.go
+testfile*
+testdir*/
+testsym*
+testwalk/
+test_src_dir/
