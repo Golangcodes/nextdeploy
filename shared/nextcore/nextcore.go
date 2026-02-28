@@ -168,6 +168,20 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 	return metadata, nil
 }
 
+func LoadMetadata() (NextCorePayload, error) {
+	data, err := os.ReadFile(MetadataFileName)
+	if err != nil {
+		return NextCorePayload{}, fmt.Errorf("failed to read metadata file: %w (did you run 'nextdeploy build'?)", err)
+	}
+
+	var metadata NextCorePayload
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return NextCorePayload{}, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+
+	return metadata, nil
+}
+
 func deriveEntrypoint(outputMode OutputMode, releaseDir string) string {
 	switch outputMode {
 	case OutputModeStandalone:
