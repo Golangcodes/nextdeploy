@@ -205,6 +205,7 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 
 	log.Printf("[ship] App=%s domain=%s mode=%s pkg=%s", appName, domain, outputMode, meta.PackageManager)
 
+	timestamp := time.Now().Unix()
 	releaseID := fmt.Sprintf("%d", timestamp)
 	releaseDir := filepath.Join("/opt/nextdeploy/apps", appName, "releases", releaseID)
 	currentSymlink := filepath.Join("/opt/nextdeploy/apps", appName, "current")
