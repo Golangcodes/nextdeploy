@@ -129,10 +129,13 @@ func splitVer(v string) []int {
 	return parts
 }
 
-// SelfUpdate downloads the latest nextdeploy CLI binary and replaces the
-// binary at /usr/local/bin/nextdeploy.
+// currently running binary.
 func SelfUpdate(current string) error {
-	return selfUpdateBinary(current, "nextdeploy", "/usr/local/bin/nextdeploy", false)
+	dest, err := os.Executable()
+	if err != nil {
+		dest = "/usr/local/bin/nextdeploy"
+	}
+	return selfUpdateBinary(current, "nextdeploy", dest, false)
 }
 
 // SelfUpdateDaemon downloads the latest nextdeployd binary, replaces the binary
