@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ var allowedCommands = map[string]struct{}{
 	"stopdaemon":    {},
 	"restartDaemon": {},
 	"ship":          {},
+	"rollback":      {},
 	"secrets":       {},
 	"status":        {},
 	"logs":          {},
@@ -58,6 +60,8 @@ func (ch *CommandHandler) HandleCommand(cmd types.Command) types.Response {
 		return ch.restartDaemon(cmd.Args)
 	case "ship":
 		return ch.handleShip(cmd.Args)
+	case "rollback":
+		return ch.handleRollback(cmd.Args)
 	case "secrets":
 		return ch.handleSecrets(cmd.Args)
 	case "status":
@@ -208,7 +212,6 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	timestamp := time.Now().Unix()
 	releaseID := fmt.Sprintf("%d", timestamp)
 	releaseDir := filepath.Join("/opt/nextdeploy/apps", appName, "releases", releaseID)
-	currentSymlink := filepath.Join("/opt/nextdeploy/apps", appName, "current")
 
 	if err := os.MkdirAll(filepath.Dir(releaseDir), 0755); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to create releases dir: %v", err)}
@@ -233,15 +236,22 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	// Fix permissions and ownership for the release directory
 	ch.ensureDirPermissions(releaseDir)
 
+	dopplerToken, _ := StringArg(args, "dopplerToken")
+	log.Printf("[ship] %s extracted to %s, activating...", appName, releaseDir)
+	return ch.activateRelease(appName, domain, releaseDir, releaseID, outputMode, dopplerToken, meta.PackageManager, tarballPath)
+}
+
+func (ch *CommandHandler) activateRelease(appName, domain, releaseDir, releaseID, outputMode, dopplerToken, packageManager, tarballPath string) types.Response {
+	currentSymlink := filepath.Join("/opt/nextdeploy/apps", appName, "current")
+
 	port, err := findFreePort()
 	if err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to allocate port: %v", err)}
 	}
-	log.Printf("[ship] Allocated port %d for new release", port)
+	log.Printf("[activate] Allocated port %d for release %s", port, releaseID)
 
-	dopplerToken, _ := StringArg(args, "dopplerToken")
 	serviceName, serviceGenerated, err := ch.processManager.GenerateServiceFile(
-		appName, releaseDir, outputMode, dopplerToken, port, meta.PackageManager, releaseID,
+		appName, releaseDir, outputMode, dopplerToken, port, packageManager, releaseID,
 	)
 	if err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to generate service file: %v", err)}
@@ -253,62 +263,92 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 		}
 	}
 
-	log.Printf("[ship] Waiting for app to become healthy on port %d (timeout 5m)...", port)
+	log.Printf("[activate] Waiting for app to become healthy on port %d...", port)
 	if err := waitForHealthy(port, 5*time.Minute); err != nil {
 		if serviceGenerated {
 			_ = ch.processManager.RemoveService(serviceName)
 		}
-		log.Printf("[ship] Health check failed, cleaned up new service: %v", err)
 		return types.Response{Success: false, Message: fmt.Sprintf("health check failed: %v", err)}
 	}
-	log.Printf("[ship] App is healthy on port %d", port)
 
-	// Update symlink only after health check passes
+	// Switch traffic
 	_ = os.Remove(currentSymlink)
 	if err := os.Symlink(releaseDir, currentSymlink); err != nil {
-		log.Printf("[ship] Warning: failed to update current symlink: %v", err)
+		log.Printf("[activate] Warning: failed to update current symlink: %v", err)
 	}
 
 	if err := ch.caddyManager.GenerateConfig(appName, domain, outputMode, port, currentSymlink); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to configure Caddy: %v", err)}
 	}
-	if err := ch.caddyManager.EnsureMainCaddyfile(); err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("failed to write main Caddyfile: %v", err)}
-	}
-
-	// Validate before reloading
+	_ = ch.caddyManager.EnsureMainCaddyfile()
 	if err := ch.caddyManager.Validate(); err != nil {
-		log.Printf("[ship] Caddy validation failed: %v", err)
-		return types.Response{Success: false, Message: fmt.Sprintf("Caddy config validation failed: %v", err)}
+		return types.Response{Success: false, Message: fmt.Sprintf("Caddy validation failed: %v", err)}
 	}
+	_ = ch.caddyManager.Reload()
 
-	if err := ch.caddyManager.Reload(); err != nil {
-		log.Printf("[ship] Warning: Caddy reload failed: %v", err)
-	}
-
-	// Cleanup old services
+	// Cleanup old services for this app
 	if services, err := ch.processManager.FindAppServices(appName); err == nil {
 		for _, s := range services {
 			if s != serviceName {
-				log.Printf("[ship] Stopping and removing old service: %s", s)
+				log.Printf("[activate] Cleaning up old service: %s", s)
 				_ = ch.processManager.RemoveService(s)
 			}
 		}
 	}
 
 	if err := pruneReleases(appName, 5); err != nil {
-		log.Printf("[ship] Warning: failed to prune old releases: %v", err)
+		log.Printf("[activate] Warning: failed to prune releases: %v", err)
 	}
 
-	if err := os.Remove(tarballPath); err != nil {
-		log.Printf("[ship] Warning: failed to remove tarball %s: %v", tarballPath, err)
+	if tarballPath != "" {
+		_ = os.Remove(tarballPath)
 	}
 
-	log.Printf("[ship] %s deployed successfully to %s (port %d)", appName, domain, port)
 	return types.Response{
 		Success: true,
-		Message: fmt.Sprintf("deployed %s to %s", appName, domain),
+		Message: fmt.Sprintf("Successfully activated release %s for %s", releaseID, appName),
 	}
+}
+
+func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Response {
+	appName, ok := StringArg(args, "appName")
+	if !ok {
+		return types.Response{Success: false, Message: "missing 'appName' argument"}
+	}
+
+	releasesDir := filepath.Join("/opt/nextdeploy/apps", appName, "releases")
+	entries, err := os.ReadDir(releasesDir)
+	if err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to read releases: %v", err)}
+	}
+
+	var releases []string
+	for _, e := range entries {
+		if e.IsDir() {
+			releases = append(releases, e.Name())
+		}
+	}
+
+	if len(releases) < 2 {
+		return types.Response{Success: false, Message: "not enough releases to rollback"}
+	}
+
+	// Sort releases (they are timestamps)
+	sort.Strings(releases)
+	previousReleaseID := releases[len(releases)-2]
+	previousReleaseDir := filepath.Join(releasesDir, previousReleaseID)
+
+	meta, err := readMetadata(previousReleaseDir)
+	if err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to read metadata of previous release: %v", err)}
+	}
+
+	domain := Coalesce(meta.Domain, "localhost")
+	outputMode := string(meta.OutputMode)
+	dopplerToken, _ := StringArg(args, "dopplerToken")
+
+	log.Printf("[rollback] Reverting %s to release %s", appName, previousReleaseID)
+	return ch.activateRelease(appName, domain, previousReleaseDir, previousReleaseID, outputMode, dopplerToken, meta.PackageManager, "")
 }
 
 func extractTarGz(src, dest string) error {

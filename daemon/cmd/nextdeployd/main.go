@@ -41,6 +41,9 @@ func main() {
 		case "logs":
 			handleLogsSubcommand()
 			return
+		case "rollback":
+			handleRollbackSubcommand()
+			return
 		}
 	}
 
@@ -162,6 +165,27 @@ func handleLogsSubcommand() {
 		}
 	}
 	sendDaemonCommand(daemontypes.Command{Type: "logs", Args: map[string]interface{}{"appName": appName}})
+}
+
+func handleRollbackSubcommand() {
+	appName := ""
+	dopplerToken := ""
+	for _, arg := range os.Args[2:] {
+		if strings.HasPrefix(arg, "--appName=") {
+			appName = strings.TrimPrefix(arg, "--appName=")
+		} else if strings.HasPrefix(arg, "--dopplerToken=") {
+			dopplerToken = strings.TrimPrefix(arg, "--dopplerToken=")
+		}
+	}
+	if appName == "" {
+		fmt.Fprintln(os.Stderr, "Error: --appName is required")
+		os.Exit(1)
+	}
+	args := map[string]interface{}{"appName": appName}
+	if dopplerToken != "" {
+		args["dopplerToken"] = dopplerToken
+	}
+	sendDaemonCommand(daemontypes.Command{Type: "rollback", Args: args})
 }
 
 func daemonize() {
