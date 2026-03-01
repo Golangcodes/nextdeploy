@@ -171,7 +171,7 @@ func (ch *CommandHandler) setUpCaddy(args map[string]interface{}) types.Response
 }
 
 func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response {
-	tarballPath, ok := stringArg(args, "tarball")
+	tarballPath, ok := StringArg(args, "tarball")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'tarball' argument"}
 	}
@@ -199,14 +199,14 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 		return types.Response{Success: false, Message: fmt.Sprintf("metadata error: %v", err)}
 	}
 
-	appName := coalesce(meta.AppName, "default-app")
-	domain := coalesce(meta.Domain, "localhost")
+	appName := Coalesce(meta.AppName, "default-app")
+	domain := Coalesce(meta.Domain, "localhost")
 	outputMode := string(meta.OutputMode)
 
 	log.Printf("[ship] App=%s domain=%s mode=%s pkg=%s", appName, domain, outputMode, meta.PackageManager)
 
-	timestamp := time.Now().Unix()
-	releaseDir := filepath.Join("/opt/nextdeploy/apps", appName, "releases", fmt.Sprintf("%d", timestamp))
+	releaseID := fmt.Sprintf("%d", timestamp)
+	releaseDir := filepath.Join("/opt/nextdeploy/apps", appName, "releases", releaseID)
 	currentSymlink := filepath.Join("/opt/nextdeploy/apps", appName, "current")
 
 	if err := os.MkdirAll(filepath.Dir(releaseDir), 0755); err != nil {
@@ -238,52 +238,35 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	}
 	log.Printf("[ship] Allocated port %d for new release", port)
 
-	// Read the existing symlink before replacing it, for rollback purposes
-	var oldReleaseTarget string
-	if target, err := os.Readlink(currentSymlink); err == nil {
-		oldReleaseTarget = target
-	}
-
-	_ = os.Remove(currentSymlink)
-	if err := os.Symlink(releaseDir, currentSymlink); err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("failed to update current symlink: %v", err)}
-	}
-	log.Printf("[ship] current → %s", releaseDir)
-
-	dopplerToken, _ := stringArg(args, "dopplerToken")
-	oldServiceName := ch.processManager.CurrentServiceName()
-
-	serviceGenerated, err := ch.processManager.GenerateServiceFile(
-		appName, currentSymlink, outputMode, dopplerToken, port, meta.PackageManager,
+	dopplerToken, _ := StringArg(args, "dopplerToken")
+	serviceName, serviceGenerated, err := ch.processManager.GenerateServiceFile(
+		appName, releaseDir, outputMode, dopplerToken, port, meta.PackageManager, releaseID,
 	)
 	if err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to generate service file: %v", err)}
 	}
 
 	if serviceGenerated {
-		if err := ch.processManager.StartService(appName); err != nil {
+		if err := ch.processManager.StartService(serviceName); err != nil {
 			return types.Response{Success: false, Message: fmt.Sprintf("failed to start service: %v", err)}
 		}
 	}
 
 	log.Printf("[ship] Waiting for app to become healthy on port %d (timeout 5m)...", port)
 	if err := waitForHealthy(port, 5*time.Minute); err != nil {
-		_ = ch.processManager.StopService(appName)
-		log.Printf("[ship] Health check failed, rolling back: %v", err)
-
-		// Rollback logic
-		_ = os.Remove(currentSymlink)
-		if oldReleaseTarget != "" {
-			_ = os.Symlink(oldReleaseTarget, currentSymlink)
-			if oldServiceName != "" {
-				_ = ch.processManager.StartService(appName)
-			}
-			log.Printf("[ship] Rolled back current symlink to %s", oldReleaseTarget)
+		if serviceGenerated {
+			_ = ch.processManager.RemoveService(serviceName)
 		}
-
+		log.Printf("[ship] Health check failed, cleaned up new service: %v", err)
 		return types.Response{Success: false, Message: fmt.Sprintf("health check failed: %v", err)}
 	}
 	log.Printf("[ship] App is healthy on port %d", port)
+
+	// Update symlink only after health check passes
+	_ = os.Remove(currentSymlink)
+	if err := os.Symlink(releaseDir, currentSymlink); err != nil {
+		log.Printf("[ship] Warning: failed to update current symlink: %v", err)
+	}
 
 	if err := ch.caddyManager.GenerateConfig(appName, domain, outputMode, port, currentSymlink); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to configure Caddy: %v", err)}
@@ -302,10 +285,13 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 		log.Printf("[ship] Warning: Caddy reload failed: %v", err)
 	}
 
-	if oldServiceName != "" {
-		log.Printf("[ship] Stopping old service: %s", oldServiceName)
-		if err := ch.processManager.RemoveService(oldServiceName); err != nil {
-			log.Printf("[ship] Warning: failed to stop old service %s: %v", oldServiceName, err)
+	// Cleanup old services
+	if services, err := ch.processManager.FindAppServices(appName); err == nil {
+		for _, s := range services {
+			if s != serviceName {
+				log.Printf("[ship] Stopping and removing old service: %s", s)
+				_ = ch.processManager.RemoveService(s)
+			}
 		}
 	}
 
@@ -490,7 +476,7 @@ func (ch *CommandHandler) ensureDirPermissions(root string) {
 	}
 }
 
-func stringArg(args map[string]interface{}, key string) (string, bool) {
+func StringArg(args map[string]interface{}, key string) (string, bool) {
 	v, ok := args[key]
 	if !ok {
 		return "", false
@@ -499,7 +485,7 @@ func stringArg(args map[string]interface{}, key string) (string, bool) {
 	return s, ok
 }
 
-func coalesce(values ...string) string {
+func Coalesce(values ...string) string {
 	for _, v := range values {
 		if v != "" {
 			return v

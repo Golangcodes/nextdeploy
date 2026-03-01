@@ -9,7 +9,7 @@ import (
 )
 
 func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Response {
-	appName, ok := stringArg(args, "appName")
+	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
 	}
@@ -56,7 +56,7 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 }
 
 func (ch *CommandHandler) handleLogs(args map[string]interface{}) types.Response {
-	appName, ok := stringArg(args, "appName")
+	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
 	}

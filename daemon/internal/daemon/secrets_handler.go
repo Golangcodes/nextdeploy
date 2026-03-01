@@ -15,12 +15,12 @@ import (
 const secretsDir = "/opt/nextdeploy/secrets"
 
 func (ch *CommandHandler) handleSecrets(args map[string]interface{}) types.Response {
-	action, ok := stringArg(args, "action")
+	action, ok := StringArg(args, "action")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'action' argument"}
 	}
 
-	appName, ok := stringArg(args, "appName")
+	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
 	}
@@ -40,11 +40,11 @@ func (ch *CommandHandler) handleSecrets(args map[string]interface{}) types.Respo
 }
 
 func (ch *CommandHandler) setSecret(appName string, args map[string]interface{}) types.Response {
-	key, ok := stringArg(args, "key")
+	key, ok := StringArg(args, "key")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'key' argument"}
 	}
-	value, ok := stringArg(args, "value")
+	value, ok := StringArg(args, "value")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'value' argument"}
 	}
@@ -69,7 +69,7 @@ func (ch *CommandHandler) setSecret(appName string, args map[string]interface{})
 }
 
 func (ch *CommandHandler) getSecret(appName string, args map[string]interface{}) types.Response {
-	key, ok := stringArg(args, "key")
+	key, ok := StringArg(args, "key")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'key' argument"}
 	}
@@ -88,7 +88,7 @@ func (ch *CommandHandler) getSecret(appName string, args map[string]interface{})
 }
 
 func (ch *CommandHandler) unsetSecret(appName string, args map[string]interface{}) types.Response {
-	key, ok := stringArg(args, "key")
+	key, ok := StringArg(args, "key")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'key' argument"}
 	}

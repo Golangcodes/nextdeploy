@@ -22,8 +22,8 @@ func NewProcessManager() *ProcessManager {
 	}
 }
 
-func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode string, dopplerToken string, port int, packageManager string) (bool, error) {
-	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
+func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode string, dopplerToken string, port int, packageManager string, releaseID string) (string, bool, error) {
+	serviceName := fmt.Sprintf("nextdeploy-%s-%s.service", appName, releaseID)
 	servicePath := filepath.Join(pm.systemdDir, serviceName)
 
 	log.Printf("[process] Generating service file: %s (mode=%s, dir=%s, port=%d, pkg=%s)",
@@ -67,9 +67,9 @@ func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode st
 	} else if outputMode == "export" {
 		// export mode doesn't need a process
 		log.Printf("[process] Export mode detected for %s; no systemd service needed.", appName)
-		return false, nil
+		return "", false, nil
 	} else {
-		return false, fmt.Errorf("unknown or unsupported output mode: %q (check your next.config.js output setting)", outputMode)
+		return "", false, fmt.Errorf("unknown or unsupported output mode: %q (check your next.config.js output setting)", outputMode)
 	}
 
 	serviceContent := fmt.Sprintf(`[Unit]
@@ -114,30 +114,30 @@ WantedBy=multi-user.target
 
 	log.Printf("[process] Writing service file to %s", servicePath)
 	if err := os.MkdirAll(filepath.Dir(servicePath), 0755); err != nil {
-		return false, fmt.Errorf("failed to create systemd dir: %w", err)
+		return "", false, fmt.Errorf("failed to create systemd dir: %w", err)
 	}
 
 	err := os.WriteFile(servicePath, []byte(serviceContent), 0644)
 	if err != nil {
-		return false, fmt.Errorf("failed to write systemd service file %s: %w", servicePath, err)
+		return "", false, fmt.Errorf("failed to write systemd service file %s: %w", servicePath, err)
 	}
 
 	// Verify the file was actually written
 	if _, statErr := os.Stat(servicePath); statErr != nil {
-		return false, fmt.Errorf("service file written but not found on disk: %w", statErr)
+		return "", false, fmt.Errorf("service file written but not found on disk: %w", statErr)
 	}
 
 	log.Printf("[process] Created systemd service file %s for %s", serviceName, appName)
 
 	// Reload systemd to recognize new service
 	if err := pm.reloadDaemon(); err != nil {
-		return false, fmt.Errorf("daemon-reload after writing %s: %w", serviceName, err)
+		return "", false, fmt.Errorf("daemon-reload after writing %s: %w", serviceName, err)
 	}
 
 	// Give systemd a moment to fully index the new unit
 	time.Sleep(500 * time.Millisecond)
 
-	return true, nil
+	return serviceName, true, nil
 }
 
 func resolveBinary(name string) string {
@@ -179,8 +179,7 @@ func (pm *ProcessManager) reloadDaemon() error {
 }
 
 // StartService enables and starts the systemd service
-func (pm *ProcessManager) StartService(appName string) error {
-	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
+func (pm *ProcessManager) StartService(serviceName string) error {
 
 	log.Printf("[process] Enabling service %s", serviceName)
 
@@ -204,8 +203,7 @@ func (pm *ProcessManager) StartService(appName string) error {
 }
 
 // StopService stops and disables the systemd service
-func (pm *ProcessManager) StopService(appName string) error {
-	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
+func (pm *ProcessManager) StopService(serviceName string) error {
 
 	// #nosec G204
 	cmd := exec.Command("systemctl", "stop", serviceName)
@@ -227,8 +225,7 @@ func (pm *ProcessManager) CurrentServiceName() string {
 }
 
 // RestartService restarts the systemd service
-func (pm *ProcessManager) RestartService(appName string) error {
-	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
+func (pm *ProcessManager) RestartService(serviceName string) error {
 	// #nosec G204
 	cmd := exec.Command("systemctl", "restart", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -239,10 +236,8 @@ func (pm *ProcessManager) RestartService(appName string) error {
 }
 
 // RemoveService stops, disables, and deletes the systemd service
-func (pm *ProcessManager) RemoveService(appName string) error {
-	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
-
-	_ = pm.StopService(appName)
+func (pm *ProcessManager) RemoveService(serviceName string) error {
+	_ = pm.StopService(serviceName)
 
 	servicePath := filepath.Join(pm.systemdDir, serviceName)
 	if err := os.Remove(servicePath); err != nil && !os.IsNotExist(err) {
@@ -250,4 +245,27 @@ func (pm *ProcessManager) RemoveService(appName string) error {
 	}
 
 	return pm.reloadDaemon()
+}
+
+// FindAppServices returns a list of all service names for a given app
+func (pm *ProcessManager) FindAppServices(appName string) ([]string, error) {
+	files, err := os.ReadDir(pm.systemdDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var services []string
+	prefix := fmt.Sprintf("nextdeploy-%s-", appName)
+	// Also check for legacy service name without timestamp
+	legacyName := fmt.Sprintf("nextdeploy-%s.service", appName)
+
+	for _, f := range files {
+		name := f.Name()
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".service") {
+			services = append(services, name)
+		} else if name == legacyName {
+			services = append(services, name)
+		}
+	}
+	return services, nil
 }
