@@ -10,7 +10,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -211,9 +213,12 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	releaseDir := filepath.Join("/opt/nextdeploy/apps", appName, "releases", fmt.Sprintf("%d", timestamp))
 	currentSymlink := filepath.Join("/opt/nextdeploy/apps", appName, "current")
 
-	if err := os.MkdirAll(filepath.Dir(releaseDir), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(releaseDir), 0755); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to create releases dir: %v", err)}
 	}
+
+	// Ensure the app directory is owned by nextdeploy
+	ch.ensureAppDirOwnership(appName)
 
 	if err := os.Rename(tmpDir, releaseDir); err != nil {
 		if isCrossDevice(err) {
@@ -227,6 +232,9 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 		}
 	}
 	cleanupTmp = false
+
+	// Fix permissions and ownership for the release directory
+	ch.ensureDirPermissions(releaseDir)
 
 	port, err := findFreePort()
 	if err != nil {
@@ -357,7 +365,7 @@ func extractTarGz(src, dest string) error {
 		switch header.Typeflag {
 		case tar.TypeDir:
 			// #nosec G703
-			if err := os.MkdirAll(target, 0750); err != nil {
+			if err := os.MkdirAll(target, 0755); err != nil {
 				return fmt.Errorf("mkdir %s: %w", target, err)
 			}
 
@@ -372,7 +380,7 @@ func extractTarGz(src, dest string) error {
 			}
 
 			// #nosec G703
-			if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return fmt.Errorf("mkdir parent of %s: %w", target, err)
 			}
 
@@ -488,7 +496,7 @@ func copyDir(src, dst string) error {
 		}
 		target := filepath.Join(dst, rel)
 		if d.IsDir() {
-			return os.MkdirAll(target, 0750)
+			return os.MkdirAll(target, 0755)
 		}
 		// Preserve symlinks rather than trying to copy them as regular files.
 		// Without this, symlinked directories (common in node_modules/.pnpm)
@@ -498,7 +506,7 @@ func copyDir(src, dst string) error {
 			if err != nil {
 				return fmt.Errorf("readlink %s: %w", path, err)
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
 			return os.Symlink(linkTarget, target)
@@ -515,7 +523,7 @@ func copyFile(src, dst string) error {
 	}
 	defer in.Close()
 
-	if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
 	// #nosec G304
@@ -531,6 +539,54 @@ func copyFile(src, dst string) error {
 
 func isCrossDevice(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "invalid cross-device link")
+}
+
+func (ch *CommandHandler) ensureAppDirOwnership(appName string) {
+	appDir := filepath.Join("/opt/nextdeploy/apps", appName)
+	ch.ensureDirPermissions(appDir)
+}
+
+func (ch *CommandHandler) ensureDirPermissions(root string) {
+	u, err := user.Lookup("nextdeploy")
+	if err != nil {
+		log.Printf("[ship] Warning: could not find nextdeploy user: %v", err)
+		return
+	}
+	uid, _ := strconv.Atoi(u.Uid)
+	gid, _ := strconv.Atoi(u.Gid)
+
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Change ownership
+		if err := os.Chown(path, uid, gid); err != nil {
+			log.Printf("[ship] Warning: failed to chown %s: %v", path, err)
+		}
+
+		// Change permissions
+		info, err := d.Info()
+		if err == nil {
+			mode := info.Mode()
+			if d.IsDir() {
+				if mode.Perm() != 0755 {
+					_ = os.Chmod(path, 0755)
+				}
+			} else if mode.IsRegular() {
+				// Ensure it's at least readable by the group/others if needed,
+				// but 0644 is a good default for files.
+				if mode.Perm()&0444 == 0 {
+					_ = os.Chmod(path, mode.Perm()|0444)
+				}
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Printf("[ship] Warning: failed to fix permissions for %s: %v", root, err)
+	}
 }
 
 func stringArg(args map[string]interface{}, key string) (string, bool) {
