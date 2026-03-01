@@ -1,4 +1,10 @@
-# NextDeploy
+## 📚 Documentation
+
+For a deep dive into the architecture, commands, and security of NextDeploy, visit our **[Documentation Site](docs/README.md)**.
+
+- **[Introduction](docs/INTRODUCTION.md)**: Why NextDeploy?
+- **[Architecture](docs/ARCHITECTURE.md)**: How it works under the hood.
+- **[Command Reference](docs/COMMANDS.md)**: Complete CLI guide.
 
 NextDeploy is an open-source CLI and daemon for deploying and managing Next.js applications on your own infrastructure.
 No lock-in. No magic. Just Native Execution, SSH, and full control.

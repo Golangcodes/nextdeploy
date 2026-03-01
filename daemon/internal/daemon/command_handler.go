@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,9 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -270,8 +266,8 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 		}
 	}
 
-	log.Printf("[ship] Waiting for app to become healthy on port %d...", port)
-	if err := waitForHealthy(port, 30*time.Second); err != nil {
+	log.Printf("[ship] Waiting for app to become healthy on port %d (timeout 5m)...", port)
+	if err := waitForHealthy(port, 5*time.Minute); err != nil {
 		_ = ch.processManager.StopService(appName)
 		log.Printf("[ship] Health check failed, rolling back: %v", err)
 
@@ -329,88 +325,15 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 }
 
 func extractTarGz(src, dest string) error {
-	// #nosec G304
-	f, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("open tarball: %w", err)
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dest, err)
 	}
-	defer f.Close()
 
-	gr, err := gzip.NewReader(f)
-	if err != nil {
-		return fmt.Errorf("create gzip reader: %w", err)
-	}
-	defer gr.Close()
-
-	tr := tar.NewReader(gr)
-	cleanDest := filepath.Clean(dest) + string(os.PathSeparator)
-
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("read tar entry: %w", err)
-		}
-
-		// #nosec G305
-		target := filepath.Join(dest, header.Name)
-		if !strings.HasPrefix(target, cleanDest) {
-			// #nosec G706
-			log.Printf("[extract] Skipping unsafe path: %s", header.Name)
-			continue
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			// #nosec G703
-			if err := os.MkdirAll(target, 0755); err != nil {
-				return fmt.Errorf("mkdir %s: %w", target, err)
-			}
-
-		case tar.TypeReg:
-			// #nosec G115
-			mode := os.FileMode(header.Mode)
-			if mode&^os.ModePerm != 0 {
-				mode = mode & os.ModePerm
-			}
-			if mode == 0 {
-				mode = 0600
-			}
-
-			// #nosec G703
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return fmt.Errorf("mkdir parent of %s: %w", target, err)
-			}
-
-			// #nosec G304, G703
-			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-			if err != nil {
-				return fmt.Errorf("create %s: %w", target, err)
-			}
-
-			// #nosec G110
-			_, copyErr := io.CopyBuffer(outFile, tr, make([]byte, 32*1024))
-			_ = outFile.Close()
-			if copyErr != nil {
-				return fmt.Errorf("write %s: %w", target, copyErr)
-			}
-
-		case tar.TypeSymlink:
-			// #nosec G305
-			linkTarget := filepath.Join(filepath.Dir(target), header.Linkname)
-			if !strings.HasPrefix(filepath.Clean(linkTarget), cleanDest) {
-				// #nosec G706
-				log.Printf("[extract] Skipping unsafe symlink: %s -> %s", header.Name, header.Linkname)
-				continue
-			}
-			// #nosec G703
-			_ = os.Remove(target) // remove existing before creating
-			if err := os.Symlink(header.Linkname, target); err != nil {
-				return fmt.Errorf("symlink %s: %w", target, err)
-			}
-		}
+	log.Printf("[extract] Using system tar for faster extraction: %s -> %s", src, dest)
+	// #nosec G204
+	cmd := exec.Command("tar", "-xzf", src, "-C", dest)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tar extraction failed: %v - %s", err, string(out))
 	}
 	return nil
 }
@@ -547,45 +470,23 @@ func (ch *CommandHandler) ensureAppDirOwnership(appName string) {
 }
 
 func (ch *CommandHandler) ensureDirPermissions(root string) {
-	u, err := user.Lookup("nextdeploy")
-	if err != nil {
-		log.Printf("[ship] Warning: could not find nextdeploy user: %v", err)
-		return
+	log.Printf("[ship] Fixing permissions recursively for %s", root)
+	// #nosec G204
+	chownCmd := exec.Command("chown", "-R", "nextdeploy:nextdeploy", root)
+	if out, err := chownCmd.CombinedOutput(); err != nil {
+		log.Printf("[ship] Warning: failed to chown %s: %v - %s", root, err, string(out))
 	}
-	uid, _ := strconv.Atoi(u.Uid)
-	gid, _ := strconv.Atoi(u.Gid)
 
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
+	// #nosec G204
+	chmodDirCmd := exec.Command("find", root, "-type", "d", "-exec", "chmod", "0755", "{}", "+")
+	if out, err := chmodDirCmd.CombinedOutput(); err != nil {
+		log.Printf("[ship] Warning: failed to chmod dirs in %s: %v - %s", root, err, string(out))
+	}
 
-		// Change ownership
-		if err := os.Chown(path, uid, gid); err != nil {
-			log.Printf("[ship] Warning: failed to chown %s: %v", path, err)
-		}
-
-		// Change permissions
-		info, err := d.Info()
-		if err == nil {
-			mode := info.Mode()
-			if d.IsDir() {
-				if mode.Perm() != 0755 {
-					_ = os.Chmod(path, 0755)
-				}
-			} else if mode.IsRegular() {
-				// Ensure it's at least readable by the group/others if needed,
-				// but 0644 is a good default for files.
-				if mode.Perm()&0444 == 0 {
-					_ = os.Chmod(path, mode.Perm()|0444)
-				}
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
-		log.Printf("[ship] Warning: failed to fix permissions for %s: %v", root, err)
+	// #nosec G204
+	chmodFileCmd := exec.Command("find", root, "-type", "f", "-exec", "chmod", "0644", "{}", "+")
+	if out, err := chmodFileCmd.CombinedOutput(); err != nil {
+		log.Printf("[ship] Warning: failed to chmod files in %s: %v - %s", root, err, string(out))
 	}
 }
 

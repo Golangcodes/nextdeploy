@@ -138,8 +138,6 @@ func SelfUpdate(current string) error {
 	return selfUpdateBinary(current, "nextdeploy", dest, false)
 }
 
-// SelfUpdateDaemon downloads the latest nextdeployd binary, replaces the binary
-// at /usr/local/bin/nextdeployd, and restarts the systemd service.
 func SelfUpdateDaemon(current string) error {
 	return selfUpdateBinary(current, "nextdeployd", "/usr/local/bin/nextdeployd", true)
 }
@@ -177,9 +175,6 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	}
 	defer os.Remove(tmpFile.Name()) //nolint:errcheck
 
-	// Use a long context timeout so large binaries on slow links don't fail.
-	// http.Client.Timeout covers the entire round-trip including body read,
-	// so we use context instead and leave the transport timeout unset.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
