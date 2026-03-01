@@ -88,7 +88,7 @@ func runSecretAction(action string, args []string) {
 				continue
 			}
 			key, value := parts[0], parts[1]
-			daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd secrets --action=set --appName=%s --key=%s --value='%s'", appName, key, value)
+			daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd secrets --action=set --appName=%s --key=%s --value='%s'", appName, key, value)
 			output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
 			if err != nil {
 				log.Error("Failed to set secret %s: %v\nOutput: %s", key, err, output)
@@ -98,7 +98,7 @@ func runSecretAction(action string, args []string) {
 		}
 	case "get":
 		key := args[0]
-		daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd secrets --action=get --appName=%s --key=%s", appName, key)
+		daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd secrets --action=get --appName=%s --key=%s", appName, key)
 		output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
 		if err != nil {
 			log.Error("Failed to get secret %s: %v\nOutput: %s", key, err, output)
@@ -106,7 +106,7 @@ func runSecretAction(action string, args []string) {
 			fmt.Printf("%s=%s\n", key, strings.TrimSpace(output))
 		}
 	case "list":
-		daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd secrets --action=list --appName=%s", appName)
+		daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd secrets --action=list --appName=%s", appName)
 		output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
 		if err != nil {
 			log.Error("Failed to list secrets: %v\nOutput: %s", err, output)
@@ -115,7 +115,7 @@ func runSecretAction(action string, args []string) {
 		}
 	case "unset":
 		for _, key := range args {
-			daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd secrets --action=unset --appName=%s --key=%s", appName, key)
+			daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd secrets --action=unset --appName=%s --key=%s", appName, key)
 			output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
 			if err != nil {
 				log.Error("Failed to unset secret %s: %v\nOutput: %s", key, err, output)

@@ -44,7 +44,7 @@ var statusCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd status --appName=%s", appName)
+		daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd status --appName=%s", appName)
 		output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
 		if err != nil {
 			log.Error("Failed to query daemon: %v\nOutput: %s", err, output)

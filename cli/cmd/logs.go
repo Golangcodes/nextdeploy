@@ -43,7 +43,7 @@ var logsCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		daemonCmd := fmt.Sprintf("/usr/local/bin/nextdeployd logs --appName=%s", appName)
+		daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd logs --appName=%s", appName)
 		serviceName, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
 		if err != nil {
 			log.Error("Failed to resolve service name: %v\nOutput: %s", err, serviceName)
@@ -71,7 +71,7 @@ var logsCmd = &cobra.Command{
 			journalCmd += fmt.Sprintf(" | grep \"%s\"", routeFilter)
 		}
 
-		_, err = srv.ExecuteCommand(ctx, deploymentServer, journalCmd, os.Stdout)
+		_, err = srv.ExecuteCommand(ctx, deploymentServer, "sudo "+journalCmd, os.Stdout)
 		if err != nil {
 			log.Error("Logs stream interrupted: %v", err)
 		}
