@@ -3,8 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-context"
-	"fmt"
 	"os"
 
 	"github.com/Golangcodes/nextdeploy/cli/internal/server"

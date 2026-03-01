@@ -202,25 +202,22 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 		return fmt.Errorf("chmod failed: %w", err)
 	}
 
-	// Try with sudo first, then fall back (for root execution).
-	// #nosec G204
-	mv := exec.Command("sudo", "mv", tmpFile.Name(), dest)
+	mv := exec.Command("mv", tmpFile.Name(), dest)
 	mv.Stdout = os.Stdout
 	mv.Stderr = os.Stderr
 	if err := mv.Run(); err != nil {
+		fmt.Println("Permission denied, attempting with sudo...")
 		// #nosec G204
-		mv2 := exec.Command("mv", tmpFile.Name(), dest)
-		mv2.Stdout = os.Stdout
-		mv2.Stderr = os.Stderr
-		if err2 := mv2.Run(); err2 != nil {
-			return fmt.Errorf("could not move binary (try running with sudo): %w", err)
+		mvSudo := exec.Command("sudo", "mv", tmpFile.Name(), dest)
+		mvSudo.Stdout = os.Stdout
+		mvSudo.Stderr = os.Stderr
+		if err := mvSudo.Run(); err != nil {
+			return fmt.Errorf("could not move binary even with sudo: %w", err)
 		}
 	}
-
-	fmt.Printf("Updated to %s successfully.\n", latest.TagName)
+	fmt.Println("Updated to", latest.TagName)
 
 	if restartSvc {
-		// #nosec G204
 		svc := exec.Command("sudo", "systemctl", "restart", binaryBase)
 		svc.Stdout = os.Stdout
 		svc.Stderr = os.Stderr
