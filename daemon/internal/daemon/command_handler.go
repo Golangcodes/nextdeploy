@@ -331,7 +331,7 @@ func extractTarGz(src, dest string) error {
 
 	log.Printf("[extract] Using system tar for faster extraction: %s -> %s", src, dest)
 	// #nosec G204
-	cmd := exec.Command("tar", "-xzf", src, "-C", dest)
+	cmd := exec.Command("tar", "--no-same-owner", "--no-same-permissions", "-xzf", src, "-C", dest)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tar extraction failed: %v - %s", err, string(out))
 	}
