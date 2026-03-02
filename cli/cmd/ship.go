@@ -39,19 +39,17 @@ var shipCmd = &cobra.Command{
 			if err := json.Unmarshal(metadataBytes, &meta); err == nil {
 				caddyPlan := caddy.GenerateCaddyfile(meta.AppName, meta.Domain, string(meta.OutputMode), meta.Config.Port, "/opt/nextdeploy/apps/"+meta.AppName+"/current")
 				log.Info("  Caddy Configuration Plan:")
-				log.Info("  ──────────────────────────────────────────────────")
 				lines := strings.Split(caddyPlan, "\n")
 				for _, line := range lines {
 					if strings.TrimSpace(line) != "" {
 						log.Info("  %s", line)
 					}
 				}
-				log.Info("  ──────────────────────────────────────────────────\n")
 			}
 		}
 
 		if cfg.TargetType == "serverless" {
-			log.Info("Deployment Target: SERVERLESS (No VPS or Daemon required)")
+			log.Info("Deployment Target: SERVERLESS (No VPS or Daemon required): coming soon")
 			if cfg.Serverless == nil {
 				log.Error("TargetType is 'serverless' but 'serverless' config block is missing.")
 				os.Exit(1)

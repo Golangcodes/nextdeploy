@@ -32,19 +32,16 @@ type ServerStruct struct {
 	mu         sync.RWMutex
 }
 
-// SSHClient wraps SSH client and related configurations
 type SSHClient struct {
 	Client     *ssh.Client
 	Config     *ssh.ClientConfig
 	SFTPClient *sftp.Client
 	LastUsed   time.Time
-	mu         sync.Mutex // protects individual client operations
+	mu         sync.Mutex
 }
 
-// ServerOption defines the functional option type
 type ServerOption func(*ServerStruct) error
 
-// New creates a new ServerStruct with provided options
 func New(opts ...ServerOption) (*ServerStruct, error) {
 	s := &ServerStruct{
 		sshClients: make(map[string]*SSHClient),
@@ -59,7 +56,6 @@ func New(opts ...ServerOption) (*ServerStruct, error) {
 	return s, nil
 }
 
-// WithConfig loads and applies the configuration
 func WithConfig() ServerOption {
 	return func(s *ServerStruct) error {
 		cfg, err := config.Load()
@@ -78,7 +74,6 @@ func WithDaemon() ServerOption {
 	}
 }
 
-// WithSSH initializes SSH connections for all configured servers
 func WithSSH() ServerOption {
 	return func(s *ServerStruct) error {
 		if s.config == nil || len(s.config.Servers) == 0 {
@@ -127,7 +122,6 @@ func (s *ServerStruct) GetDeploymentServer() (string, error) {
 		return "", fmt.Errorf("no servers configured")
 	}
 
-	// Always use the first server for now
 	first := s.config.Servers[0]
 	_, err := connectSSH(first)
 	if err != nil {
@@ -137,12 +131,10 @@ func (s *ServerStruct) GetDeploymentServer() (string, error) {
 	return first.Name, nil
 }
 func AddHostToKnownHosts(ip string, knownHostsPath string) error {
-	// Validate IP/hostname
 	if net.ParseIP(ip) == nil && !isValidHostname(ip) {
 		return fmt.Errorf("invalid IP address or hostname: %s", ip)
 	}
 
-	// Set default known_hosts path if not provided
 	if knownHostsPath == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -151,7 +143,6 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 		knownHostsPath = filepath.Join(home, ".ssh", "known_hosts")
 	}
 
-	// Create .ssh directory if it doesn't exist
 	sshDir := filepath.Dir(knownHostsPath)
 	if _, err := os.Stat(sshDir); os.IsNotExist(err) {
 		if err := os.Mkdir(sshDir, 0700); err != nil {
@@ -159,8 +150,6 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 		}
 	}
 
-	// #nosec G204
-	// Get the host key using ssh-keyscan
 	cmd := exec.Command("ssh-keyscan", ip)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -174,8 +163,6 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 		return fmt.Errorf("no host key returned for %s", ip)
 	}
 
-	// #nosec G304
-	// Append to known_hosts file
 	f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to open known_hosts file: %v", err)
@@ -189,7 +176,6 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 	return nil
 }
 
-// Helper function to validate hostnames
 func isValidHostname(hostname string) bool {
 	if len(hostname) > 253 {
 		return false
@@ -202,7 +188,6 @@ func isValidHostname(hostname string) bool {
 	return true
 }
 
-// connectSSH establishes an SSH connection and initializes SFTP client
 func connectSSH(cfg config.ServerConfig) (*SSHClient, error) {
 	if cfg.Port == 0 {
 		cfg.Port = 22
@@ -259,7 +244,6 @@ func getAuthMethods(cfg config.ServerConfig) ([]ssh.AuthMethod, error) {
 		return nil, fmt.Errorf("no SSH key path provided for server %s", cfg.Name)
 	}
 
-	// Handle path expansion
 	expandedPath := cfg.KeyPath
 	if strings.HasPrefix(expandedPath, "~") {
 		home, err := os.UserHomeDir()
@@ -272,7 +256,6 @@ func getAuthMethods(cfg config.ServerConfig) ([]ssh.AuthMethod, error) {
 
 	serverlogger.Debug("Key path resolution: %s -> %s", cfg.KeyPath, expandedPath)
 
-	// #nosec G304
 	key, err := os.ReadFile(expandedPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read SSH key file %s (resolved to %s): %w",
@@ -310,11 +293,9 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 
 	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
 
-	// Create file if it doesn't exist
 	if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0700); err != nil {
 		return nil, err
 	}
-	// #nosec G304
 	f, err := os.OpenFile(knownHostsPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, err
@@ -381,7 +362,7 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 	output := &bytes.Buffer{}
 
 	var stdoutWriters []io.Writer
-	stdoutWriters = append(stdoutWriters, output) // always capture stdout
+	stdoutWriters = append(stdoutWriters, output)
 	if stream != nil {
 		stdoutWriters = append(stdoutWriters, stream)
 	}
