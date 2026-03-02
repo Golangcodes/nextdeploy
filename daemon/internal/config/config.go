@@ -15,7 +15,7 @@ func LoadConfig(filePath string) (*types.DaemonConfig, error) {
 	// Default socket lives inside the RuntimeDirectory that systemd creates
 	// (/run/nextdeployd/) so ProtectSystem=strict doesn't block writes.
 	socketPath := "/run/nextdeployd/nextdeployd.sock"
-	logDir := "/var/log/nextdeploy"
+	logDir := "/var/log/nextdeployd"
 
 	if os.Geteuid() != 0 {
 		home, err := os.UserHomeDir()

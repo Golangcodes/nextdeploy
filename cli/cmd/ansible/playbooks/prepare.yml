@@ -707,11 +707,11 @@
           StandardError=journal
           SyslogIdentifier=nextdeployd
 
-          # systemd creates /run/nextdeployd/ (socket) and /var/log/nextdeploy/
+          # systemd creates /run/nextdeployd/ (socket) and /var/log/nextdeployd/
           # (logs) before the service starts and removes them on stop.
-          RuntimeDirectory=nextdeploy
+          RuntimeDirectory=nextdeployd
           RuntimeDirectoryMode=0750
-          LogsDirectory=nextdeploy
+          LogsDirectory=nextdeployd
           LogsDirectoryMode=0750
 
           # Minimal sandboxing: the daemon writes to /etc/caddy, /opt/nextdeploy,

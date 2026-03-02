@@ -252,7 +252,7 @@ func daemonize() {
 }
 
 func acquireLock() error {
-	lockPath := "/var/run/nextdeployd.lock"
+	lockPath := "/run/nextdeployd/nextdeployd.lock"
 	if os.Geteuid() != 0 {
 		home, err := os.UserHomeDir()
 		if err == nil {
