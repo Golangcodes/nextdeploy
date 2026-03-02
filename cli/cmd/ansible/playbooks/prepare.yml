@@ -373,7 +373,7 @@
     - name: "Phase 2 | Doppler | Assert installed"
       ansible.builtin.shell: >
         env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        command -v doppler
+        sh -c 'command -v doppler'
       register: doppler_which
       changed_when: false
       failed_when: doppler_which.rc != 0
@@ -385,7 +385,7 @@
     - name: "Phase 2 | Caddy | Check if already installed"
       ansible.builtin.shell: >
         env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        command -v caddy 2>/dev/null || echo missing
+        sh -c 'command -v caddy 2>/dev/null || echo missing'
       register: caddy_which
       changed_when: false
 
@@ -573,7 +573,7 @@
     - name: "Phase 2 | Caddy | Final presence check"
       ansible.builtin.shell: >
         env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        command -v caddy
+        sh -c 'command -v caddy'
       register: caddy_final
       changed_when: false
       failed_when: caddy_final.rc != 0
