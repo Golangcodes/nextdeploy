@@ -86,7 +86,7 @@ EnvironmentFile=-%s/.env.nextdeploy
 
 # Security Sandboxing
 ProtectSystem=full
-ProtectHome=yes
+ProtectHome=read-only
 PrivateTmp=yes
 NoNewPrivileges=yes
 ReadOnlyPaths=/
