@@ -1,3 +1,7 @@
+# NextDeploy
+
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Golangcodes_nextdeploy&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Golangcodes_nextdeploy)
+
 ## 📚 Documentation
 
 For a deep dive into the architecture, commands, and security of NextDeploy, visit our **[Documentation Site](docs/README.md)**.
