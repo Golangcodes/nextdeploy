@@ -48,6 +48,12 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	sDomain = strings.TrimPrefix(sDomain, "http://")
 	sDomain = strings.TrimSuffix(sDomain, "/")
 
+	// Guard: if domain is empty after stripping, fall back to a placeholder
+	// so we don't generate a broken ', www.' Caddy site address.
+	if sDomain == "" {
+		sDomain = "localhost"
+	}
+
 	domainList := sDomain
 	if strings.HasPrefix(sDomain, "www.") {
 		root := strings.TrimPrefix(sDomain, "www.")

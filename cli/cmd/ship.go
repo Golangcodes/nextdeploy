@@ -37,12 +37,20 @@ var shipCmd = &cobra.Command{
 		metadataBytes, err := os.ReadFile(".nextdeploy/metadata.json")
 		if err == nil {
 			if err := json.Unmarshal(metadataBytes, &meta); err == nil {
-				caddyPlan := caddy.GenerateCaddyfile(meta.AppName, meta.Domain, string(meta.OutputMode), meta.Config.Port, "/opt/nextdeploy/apps/"+meta.AppName+"/current")
-				log.Info("  Caddy Configuration Plan:")
-				lines := strings.Split(caddyPlan, "\n")
-				for _, line := range lines {
-					if strings.TrimSpace(line) != "" {
-						log.Info("  %s", line)
+				domain := meta.Domain
+				if domain == "" {
+					domain = cfg.App.Domain
+				}
+				if domain == "" {
+					log.Warn("  Caddy Configuration Plan: no domain configured in nextdeploy.yml — plan preview skipped")
+				} else {
+					caddyPlan := caddy.GenerateCaddyfile(meta.AppName, domain, string(meta.OutputMode), meta.Config.Port, "/opt/nextdeploy/apps/"+meta.AppName+"/current")
+					log.Info("  Caddy Configuration Plan:")
+					lines := strings.Split(caddyPlan, "\n")
+					for _, line := range lines {
+						if strings.TrimSpace(line) != "" {
+							log.Info("  %s", line)
+						}
 					}
 				}
 			}

@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/config"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/logging"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/Golangcodes/nextdeploy/daemon/internal/config"
+	"github.com/Golangcodes/nextdeploy/daemon/internal/logging"
+	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 )
 
 type NextDeployDaemon struct {
@@ -22,11 +23,17 @@ type NextDeployDaemon struct {
 	logger         *log.Logger
 }
 
-func NewNextDeployDaemon(socketPath string) (*NextDeployDaemon, error) {
-	cfg, err := config.LoadConfig(socketPath)
+func NewNextDeployDaemon(configPath string, socketPathOverride string) (*NextDeployDaemon, error) {
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
+
+	// --socket-path flag from systemd ExecStart takes precedence over config.
+	if socketPathOverride != "" {
+		cfg.SocketPath = socketPathOverride
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	logConfig := types.LoggerConfig{
@@ -43,7 +50,7 @@ func NewNextDeployDaemon(socketPath string) (*NextDeployDaemon, error) {
 	return &NextDeployDaemon{
 		ctx:            ctx,
 		cancel:         cancel,
-		socketPath:     socketPath,
+		socketPath:     configPath,
 		config:         cfg,
 		socketServer:   socketServer,
 		commandHandler: commandHandler,

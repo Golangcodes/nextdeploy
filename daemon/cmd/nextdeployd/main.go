@@ -20,6 +20,10 @@ import (
 	"github.com/gofrs/flock"
 )
 
+// socketPathOverride is set by --socket-path flag at startup and used by
+// subcommands (ship, status, etc.) that need to contact the running daemon.
+var socketPathOverride string
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -60,7 +64,12 @@ func main() {
 
 	configPath := flag.String("config", defaultConfig, "Path to config file")
 	foreground := flag.Bool("foreground", false, "Run in foreground")
+	socketPath := flag.String("socket-path", "", "Override Unix socket path (default: /run/nextdeployd/nextdeployd.sock for root, ~/.nextdeploy/daemon.sock for others)")
 	flag.Parse()
+
+	// Store override for subcommand resolution (not used in daemon-start path,
+	// but available to getSocketPath if ever called after flag.Parse).
+	socketPathOverride = *socketPath
 
 	go updater.CheckAndPrint(shared.Version)
 
@@ -69,18 +78,26 @@ func main() {
 		return
 	}
 
-	runDaemon(*configPath)
+	runDaemon(*configPath, *socketPath)
 }
 
+// getSocketPath returns the Unix socket path the *running* daemon is listening
+// on. This is called by CLI subcommands (ship, status, rollback, …) that send
+// commands to the already-running daemon process.
 func getSocketPath() string {
-	socketPath := "/var/run/nextdeployd.sock"
-	if _, err := os.Stat(socketPath); os.IsNotExist(err) && os.Geteuid() != 0 {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			socketPath = filepath.Join(home, ".nextdeploy", "daemon.sock")
-		}
+	// CLI subcommands may themselves receive --socket-path; honour it.
+	if socketPathOverride != "" {
+		return socketPathOverride
 	}
-	return socketPath
+	if os.Geteuid() == 0 {
+		// Primary path: inside the RuntimeDirectory that systemd creates.
+		return "/run/nextdeployd/nextdeployd.sock"
+	}
+	home, err := os.UserHomeDir()
+	if err == nil {
+		return filepath.Join(home, ".nextdeploy", "daemon.sock")
+	}
+	return "/run/nextdeployd/nextdeployd.sock"
 }
 
 func sendDaemonCommand(cmd daemontypes.Command) {
@@ -111,6 +128,8 @@ func handleShipSubcommand() {
 			tarball = strings.Trim(tarball, "\"'")
 		} else if strings.HasPrefix(arg, "--dopplerToken=") {
 			dopplerToken = strings.TrimPrefix(arg, "--dopplerToken=")
+		} else if strings.HasPrefix(arg, "--socket-path=") {
+			socketPathOverride = strings.TrimPrefix(arg, "--socket-path=")
 		}
 	}
 	if tarball == "" {
@@ -265,12 +284,12 @@ func acquireLock() error {
 	return nil
 }
 
-func runDaemon(configPath string) {
+func runDaemon(configPath string, socketPathFlag string) {
 	if err := acquireLock(); err != nil {
 		log.Fatalf("Lock error: %v", err)
 	}
 	daemon.StartMetricsServer("127.0.0.1:6060")
-	d, err := daemon.NewNextDeployDaemon(configPath)
+	d, err := daemon.NewNextDeployDaemon(configPath, socketPathFlag)
 	if err != nil {
 		log.Fatalf("Error initializing daemon: %v", err)
 	}
