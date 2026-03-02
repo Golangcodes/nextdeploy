@@ -252,13 +252,19 @@ func daemonize() {
 }
 
 func acquireLock() error {
-	lockPath := "/run/nextdeployd/nextdeployd.lock"
-	if os.Geteuid() != 0 {
-		home, err := os.UserHomeDir()
-		if err == nil {
+	var lockPath string
+	if os.Geteuid() == 0 {
+		lockPath = "/run/nextdeployd/nextdeployd.lock"
+	} else {
+		// 1. Try XDG per-user runtime dir
+		if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
+			lockPath = filepath.Join(xdg, "nextdeployd.lock")
+		} else if home, err := os.UserHomeDir(); err == nil {
+			// 2. Try home dir
 			lockPath = filepath.Join(home, ".nextdeploy", "nextdeployd.lock")
 		} else {
-			lockPath = filepath.Join(os.TempDir(), "nextdeployd.lock")
+			// 3. Fallback to a UID-protected subdirectory in /tmp
+			lockPath = filepath.Join(os.TempDir(), fmt.Sprintf("nextdeployd-%d", os.Getuid()), "nextdeployd.lock")
 		}
 	}
 
