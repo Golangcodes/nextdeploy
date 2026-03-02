@@ -190,7 +190,7 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	_ = tmpFile.Close()
 
 	// #nosec G302 G703
-	if err := os.Chmod(tmpFile.Name(), 0o755); err != nil {
+	if err := os.Chmod(tmpFile.Name(), 0o755); err != nil { // NOSONAR: Public CLI binary needs to be executable by all users
 		return fmt.Errorf("chmod failed: %w", err)
 	}
 
