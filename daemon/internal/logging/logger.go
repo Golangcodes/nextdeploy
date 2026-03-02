@@ -10,19 +10,21 @@ import (
 )
 
 func SetupLogger(config types.LoggerConfig) *log.Logger {
+	var writer io.Writer = os.Stdout // default: stdout only
+
 	if err := os.MkdirAll(config.LogDir, 0750); err != nil {
-		log.Printf("Failed to create log directory: %v\n", err)
-		os.Exit(1)
+		log.Printf("Warning: failed to create log directory %q: %v — logging to stdout only\n", config.LogDir, err)
+	} else {
+		logFilePath := filepath.Join(config.LogDir, config.LogFileName)
+		logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+		if err != nil {
+			log.Printf("Warning: failed to open log file %q: %v — logging to stdout only\n", logFilePath, err)
+		} else {
+			writer = io.MultiWriter(os.Stdout, logFile)
+		}
 	}
-	logFilePath := filepath.Join(config.LogDir, config.LogFileName)
-	logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	if err != nil {
-		log.Printf("Failed to open log file: %v\n", err)
-		os.Exit(1)
-	}
-	multiWriter := io.MultiWriter(os.Stdout, logFile)
-	logger := log.New(multiWriter, "NEXTDEPLOY: ", log.LstdFlags|log.Lshortfile)
-	return logger
+
+	return log.New(writer, "NEXTDEPLOY: ", log.LstdFlags|log.Lshortfile)
 }
 
 func LogInfo(logger *log.Logger, config types.LoggerConfig, message string) {
