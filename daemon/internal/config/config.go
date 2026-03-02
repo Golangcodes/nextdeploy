@@ -3,9 +3,10 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+
 	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 	"github.com/Golangcodes/nextdeploy/shared/config"
-	"os"
 
 	"gopkg.in/yaml.v3"
 )
@@ -34,7 +35,6 @@ func LoadConfig(filePath string) (*types.DaemonConfig, error) {
 	}
 
 	if filePath != "" {
-		// #nosec G304
 		file, err := os.Open(filePath)
 		if err == nil {
 			defer file.Close()
@@ -50,7 +50,6 @@ func LoadConfig(filePath string) (*types.DaemonConfig, error) {
 }
 
 func ReadConfigInServer(path string) (*config.NextDeployConfig, error) {
-	// #nosec G304
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("Config file not found: %w", err)

@@ -60,7 +60,6 @@ func (ch *CommandHandler) setSecret(appName string, args map[string]interface{})
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to save secrets: %v", err)}
 	}
 
-	// Hot-reload application environment
 	if err := ch.syncAppSecrets(appName, secrets); err != nil {
 		return types.Response{Success: true, Message: fmt.Sprintf("secret set but sync failed: %v", err)}
 	}

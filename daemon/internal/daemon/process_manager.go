@@ -38,7 +38,6 @@ func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode st
 		cmd := fmt.Sprintf("%s server.js", bin)
 
 		if dopplerToken != "" {
-			// Doppler respects DOPPLER_TOKEN env var
 			execStart = fmt.Sprintf("%s run -- %s", resolveBinary("doppler"), cmd)
 		} else {
 			execStart = cmd
@@ -59,13 +58,11 @@ func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode st
 		cmd := fmt.Sprintf("%s %s", bin, args)
 
 		if dopplerToken != "" {
-			// Doppler respects DOPPLER_TOKEN env var
 			execStart = fmt.Sprintf("%s run -- %s", resolveBinary("doppler"), cmd)
 		} else {
 			execStart = cmd
 		}
 	} else if outputMode == "export" {
-		// export mode doesn't need a process
 		log.Printf("[process] Export mode detected for %s; no systemd service needed.", appName)
 		return "", false, nil
 	} else {
@@ -105,11 +102,7 @@ WantedBy=multi-user.target
 		if err := os.WriteFile(envFilePath, []byte(envContent), 0600); err != nil {
 			log.Printf("[process] Warning: failed to write environment file: %v", err)
 		}
-		// Ensure the file is owned by nextdeploy
 		_ = os.Chmod(envFilePath, 0600)
-		// We can't easily chown to 'nextdeploy' without GID here unless we look it up,
-		// but the daemon runs as root and the dir is 0770 owned by nextdeploy:nextdeploy,
-		// so it should be fine.
 	}
 
 	log.Printf("[process] Writing service file to %s", servicePath)
@@ -122,19 +115,16 @@ WantedBy=multi-user.target
 		return "", false, fmt.Errorf("failed to write systemd service file %s: %w", servicePath, err)
 	}
 
-	// Verify the file was actually written
 	if _, statErr := os.Stat(servicePath); statErr != nil {
 		return "", false, fmt.Errorf("service file written but not found on disk: %w", statErr)
 	}
 
 	log.Printf("[process] Created systemd service file %s for %s", serviceName, appName)
 
-	// Reload systemd to recognize new service
 	if err := pm.reloadDaemon(); err != nil {
 		return "", false, fmt.Errorf("daemon-reload after writing %s: %w", serviceName, err)
 	}
 
-	// Give systemd a moment to fully index the new unit
 	time.Sleep(500 * time.Millisecond)
 
 	return serviceName, true, nil
@@ -150,20 +140,17 @@ func resolveBinary(name string) string {
 		"doppler": "/usr/local/bin/doppler",
 	}
 
-	// Try the preferred path first
 	if path, ok := candidates[name]; ok {
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
 	}
 
-	// Fall back to PATH lookup
 	if path, err := exec.LookPath(name); err == nil {
 		log.Printf("[process] Resolved %s via PATH: %s", name, path)
 		return path
 	}
 
-	// Last resort: return the name and let systemd try
 	log.Printf("[process] Warning: could not resolve binary %q, using name directly", name)
 	return name
 }
@@ -178,21 +165,14 @@ func (pm *ProcessManager) reloadDaemon() error {
 	return nil
 }
 
-// StartService enables and starts the systemd service
 func (pm *ProcessManager) StartService(serviceName string) error {
-
 	log.Printf("[process] Enabling service %s", serviceName)
-
-	// #nosec G204
-	// Enable the service to start on boot
 	cmd := exec.Command("systemctl", "enable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("[process] Warning: failed to enable service %s: %v - %s", serviceName, err, string(out))
 	}
 
 	log.Printf("[process] Starting service %s", serviceName)
-
-	// #nosec G204
 	cmd = exec.Command("systemctl", "start", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to start service %s: %v - %s", serviceName, err, string(out))
@@ -202,16 +182,11 @@ func (pm *ProcessManager) StartService(serviceName string) error {
 	return nil
 }
 
-// StopService stops and disables the systemd service
 func (pm *ProcessManager) StopService(serviceName string) error {
-
-	// #nosec G204
 	cmd := exec.Command("systemctl", "stop", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
 		log.Printf("Warning: failed to stop service %s: %s", serviceName, out)
 	}
-
-	// #nosec G204
 	cmd = exec.Command("systemctl", "disable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
 		log.Printf("Warning: failed to disable service %s: %s", serviceName, out)
@@ -224,9 +199,7 @@ func (pm *ProcessManager) CurrentServiceName() string {
 	return pm.serviceName
 }
 
-// RestartService restarts the systemd service
 func (pm *ProcessManager) RestartService(serviceName string) error {
-	// #nosec G204
 	cmd := exec.Command("systemctl", "restart", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to restart service %s: %v - %s", serviceName, err, out)
@@ -235,10 +208,8 @@ func (pm *ProcessManager) RestartService(serviceName string) error {
 	return nil
 }
 
-// RemoveService stops, disables, and deletes the systemd service
 func (pm *ProcessManager) RemoveService(serviceName string) error {
 	_ = pm.StopService(serviceName)
-
 	servicePath := filepath.Join(pm.systemdDir, serviceName)
 	if err := os.Remove(servicePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove service file %s: %w", servicePath, err)
@@ -247,7 +218,6 @@ func (pm *ProcessManager) RemoveService(serviceName string) error {
 	return pm.reloadDaemon()
 }
 
-// FindAppServices returns a list of all service names for a given app
 func (pm *ProcessManager) FindAppServices(appName string) ([]string, error) {
 	files, err := os.ReadDir(pm.systemdDir)
 	if err != nil {
@@ -256,7 +226,6 @@ func (pm *ProcessManager) FindAppServices(appName string) ([]string, error) {
 
 	var services []string
 	prefix := fmt.Sprintf("nextdeploy-%s-", appName)
-	// Also check for legacy service name without timestamp
 	legacyName := fmt.Sprintf("nextdeploy-%s.service", appName)
 
 	for _, f := range files {

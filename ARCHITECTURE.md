@@ -1,114 +1,70 @@
-# NextDeploy Architecture Overview
+# NextDeploy Technical Architecture
 
-## 🧩 Purpose
-
-NextDeploy is a deployment engine that allows developers to deploy and manage full-stack Next.js applications to their own virtual servers (VPS), bypassing services like Vercel. It is built in Go, with a CLI and daemon-driven backend, and uses Caddy for automatic HTTPS and flexible reverse proxying.
+This document provides a deep dive into how NextDeploy manages the lifecycle of a Next.js application, from local build to production serving.
 
 ---
 
-## 🧱 Current Architecture
+##The Lifecycle of a Deployment
 
-### 🧠 Core Components
+When you run `nextdeploy ship`, the following sequence occurs:
 
-1. **CLI (Go-based)**  
-   - Initializes projects (`init`)
-   - Builds and deploys Docker containers to target VPS
-   - Handles SSH authentication and file transfer
-
-2. **Daemon (Go-based)**  
-   - Runs on the VPS
-   - Responsible for:
-     - Parsing `nextdeploy.yml`
-     - Building/running Docker containers
-     - Health checks, system monitoring, and logging
-     - Future: GitHub webhook listener for CI/CD
-
-3. **Caddy Server**  
-   - Handles HTTPS with automatic TLS via Let's Encrypt
-   - Acts as a reverse proxy for the deployed Next.js app and internal services
-   - Provides per-project routing and static file hosting
-
-4. **nextdeploy.yml**
-   - Unified configuration file defining:
-     - Build strategy
-     - Environment variables
-     - Ports, domains, and routing
-     - Database configuration
-     - Services required (e.g., Redis, Postgres)
+1. **Local Build**: The CLI runs `next build` (or your custom build command) and collects the output.
+2. **Artifact Packaging**: The CLI creates a compressed tarball containing:
+    - The compiled server code (e.g., `.next/standalone`)
+    - Static assets
+    - A `metadata.json` describing the run parameters.
+3. **Transport**: The tarball is uploaded to the VPS over an encrypted SSH connection (SFTP).
+4. **Daemon Trigger**: The CLI communicates with the NextDeploy Daemon via a root-protected Unix socket.
+5. **Release Atomic Swap**: 
+    - The Daemon unpacks the new version into a unique timestamped directory.
+    - It allocates a fresh internal port.
+    - It generates/updates a `.env.nextdeploy` file with your secrets.
+6. **Health Check**: The Daemon starts the processes and waits for the app to respond on the new port.
+7. **Proxy Reload**: If healthy, the Daemon updates the Caddy configuration and reloads the proxy server.
+8. **Cleanup**: Old releases are pruned, keeping only the last N versions for rollback capability.
 
 ---
 
-## 📦 Data & Observability
+## Component Responsibility
 
-- Server metrics: CPU, RAM, disk usage
-- Docker container status and logs
-- HTTP traffic (inbound/outbound)
-- Build status and error traces
-- Git revision deployed, per app
-- SSL and DNS status checks
-- Active daemon health status
+### 1. The CLI (Go)
+- **State Management**: Uses a local `.nextdeploy/` folder to store session data and server keys.
+- **Project Discovery**: Detects package managers (Bun, NPM, Yarn, PNPM) and Next.js configuration.
+- **Authentication**: Leverages standard SSH keys (`~/.ssh/`).
 
----
+### 2. The Daemon (Go)
+- **Isolation**: Runs as `root` to manage systemd and sockets, but executes applications as a restricted `nextdeploy` user.
+- **Process Management**: Uses `systemd` for reliable process supervision, auto-restarts, and log management via `journalctl`.
+- **Socket Server**: Listens on `/run/nextdeployd.sock` for local commands.
 
-## 🛣️ Roadmap / What’s Next
-
-### 🔁 1. GitHub Webhook Integration (CI/CD)
-- Automatically rebuild and redeploy app when new commits are pushed
-- Authenticated via GitHub App or personal token
-
-### 🔒 2. Hardened Security
-- Encrypted config + secrets store
-- Zero-trust SSH access
-- Resource limits per container
-- Audit logs
-
-### 🧠 3. Smart Daemons
-- Add capability for daemons to self-repair
-- Failover support: container dies? Auto-restart
-- Mirror environments for testing vs. production
-
-### 🌐 4. Multi-tenant Dashboard (Optional SaaS Layer)
-- Web UI for managing:
-  - Apps
-  - Servers
-  - Logs
-  - Deploy history
-- Stripe integration (after US company setup)
-
-### ☁️ 5. Optional Infra Provisioner (AWS Free Tier Tool)
-- Spins up EC2, RDS, DNS records, and VPS instances for users
-- Plug-and-play for those who don’t bring their own infrastructure
+### 3. Caddy (Web Server)
+- **Automatic HTTPS**: Provisions SSL certificates via Let's Encrypt or ZeroSSL automatically.
+- **Performance**: Natively supports HTTP/3, Zstd, and Gzip.
+- **Dynamic Routing**: Uses the `nextdeploy.d/` inclusion pattern allowing the Daemon to update individual app configs without touching the main `Caddyfile`.
 
 ---
 
-## ⚙️ Guiding Principles
+##File System Layout
 
-- **Stack Agnostic**: As long as a Dockerfile + `nextdeploy.yml` exists, we can deploy it.
-- **Self-hosted First**: You bring the server. We bring the orchestration.
-- **CLI-First**: Developer-native experience — command line and config-driven
-- **Extendable by Design**: Each component should be replaceable with custom implementations (e.g., use Nginx instead of Caddy)
-
----
-
-## 📊 System Diagram (Text-based)
+NextDeploy follows a structured layout on the VPS:
 
 ```text
-+------------------+
-| Developer Laptop |
-+--------+---------+
-         |
-         | nextdeploy CLI
-         v
-+------------------------+
-| Target VPS (Daemon)   |
-| --------------------- |
-| - Go Daemons          |
-| - Node/Bun Runtime      |
-| - Caddy Reverse Proxy |
-+------------------------+
-         |
-         | serves via HTTPS
-         v
-+--------------------+
-| Next.js Web App(s) |
-+--------------------+
+/opt/nextdeploy/
+├── bin/            # Binaries (nextdeployd)
+├── secrets/        # Root-restricted secret store (JSON)
+└── apps/
+    └── <app-name>/
+        ├── current # Symlink to the active release
+        └── releases/
+            ├── 1772322955/
+            └── 1772321401/
+```
+
+---
+
+## ⚡ Native vs. Docker
+
+Unlike many "modern" deployment tools, NextDeploy chooses native execution over Docker by default. 
+- **Performance**: Zero virtualization overhead.
+- **Resource Usage**: Lower RAM/CPU footprint.
+- **Transparency**: Devs can use standard Linux tools (`top`, `ps`, `cd`) to see their app exactly as it is.

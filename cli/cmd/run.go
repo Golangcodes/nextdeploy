@@ -22,7 +22,7 @@ var (
 )
 
 var runimageCmd = &cobra.Command{
-	Use:   "runimage",
+	Use:   "run",
 	Short: "Run the built application locally mimicking the production environment",
 	Long: `Loads the build metadata from .nextdeploy/metadata.json and runs the application
 natively (no Docker) using the same entrypoint and environment injection as the production daemon.`,
@@ -101,12 +101,10 @@ func runLocal() {
 		os.Exit(1)
 	}
 
-	// 5. Run it
 	runCmd.Env = env
 	runCmd.Stdout = os.Stdout
 	runCmd.Stderr = os.Stderr
 	runCmd.Dir = cwd
-
 	runLogger.Info("Application starting on http://localhost:%s", port)
 	if err := runCmd.Run(); err != nil {
 		runLogger.Error("Application exited with error: %v", err)
@@ -114,7 +112,6 @@ func runLocal() {
 	}
 }
 
-// Simple env file loader (KEY=VALUE)
 func loadEnvFile(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

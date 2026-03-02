@@ -10,7 +10,7 @@ NextDeploy is an open-source CLI and daemon for deploying and managing Next.js a
 No lock-in. No magic. Just Native Execution, SSH, and full control.
 
 > [!WARNING]
-> **Experimental / Hobby Project**: NextDeploy is currently a hobby project and is **not intended for production use** as of now. Use it at your own risk for testing and personal projects.
+> **Hobby Project**: NextDeploy is currently a hobby project and is **not intended for production use** as of now. Use it at your own risk for testing and personal projects.
 
 ---
 
@@ -47,7 +47,9 @@ go install github.com/Golangcodes/nextdeploy/cli@latest
 ```bash
 go install github.com/Golangcodes/nextdeploy/daemon/cmd/nextdeployd@latest
 ```
-
+```
+curl -fsSL https://nextdeploy.one/daemon.sh | bash
+```
 ### 3. Bash Install Script (Linux Servers)
 
 For a quick setup on a Linux server, you can use our installation script to fetch the latest daemon and CLI securely:
@@ -94,14 +96,12 @@ Other platforms abstract until you lose control. NextDeploy flips that. You own 
 ## Roadmap
 
 * [x] Native VPS Deployment (systemd)
-* [x] AWS Serverless support (Lambda + CloudFront)
+* [ ] AWS Serverless support (Lambda + CloudFront)
 * [x] Integrated Secret Management
 * [x] Live Logs and Status metrics
 * [ ] CI/CD via GitHub Actions / Webhooks
-* [ ] Rollbacks and release tracking
+* [x] Rollbacks and release tracking
 * [ ] Multi-tenant server support
-* [ ] Plugin system (Go, Bun, Astro...)
-* Dashboard and multitenant support
 
 ---
 

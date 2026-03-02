@@ -49,7 +49,6 @@ func (ch *CommandHandler) ValidateCommand(cmd types.Command) error {
 	return nil
 }
 
-// HandleCommand routes a validated command to the correct handler.
 func (ch *CommandHandler) HandleCommand(cmd types.Command) types.Response {
 	switch cmd.Type {
 	case "setupCaddy":
@@ -124,7 +123,6 @@ func (ch *CommandHandler) Shutdown() {
 	}
 }
 
-// =============================================================================
 func (ch *CommandHandler) setUpCaddy(args map[string]interface{}) types.Response {
 	setup, ok := args["setup"].(bool)
 	if !ok || !setup {
@@ -271,7 +269,6 @@ func (ch *CommandHandler) activateRelease(appName, domain, releaseDir, releaseID
 		return types.Response{Success: false, Message: fmt.Sprintf("health check failed: %v", err)}
 	}
 
-	// Switch traffic
 	_ = os.Remove(currentSymlink)
 	if err := os.Symlink(releaseDir, currentSymlink); err != nil {
 		log.Printf("[activate] Warning: failed to update current symlink: %v", err)
@@ -286,7 +283,6 @@ func (ch *CommandHandler) activateRelease(appName, domain, releaseDir, releaseID
 	}
 	_ = ch.caddyManager.Reload()
 
-	// Cleanup old services for this app
 	if services, err := ch.processManager.FindAppServices(appName); err == nil {
 		for _, s := range services {
 			if s != serviceName {
@@ -333,7 +329,6 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 		return types.Response{Success: false, Message: "not enough releases to rollback"}
 	}
 
-	// Sort releases (they are timestamps)
 	sort.Strings(releases)
 	previousReleaseID := releases[len(releases)-2]
 	previousReleaseDir := filepath.Join(releasesDir, previousReleaseID)
@@ -357,7 +352,6 @@ func extractTarGz(src, dest string) error {
 	}
 
 	log.Printf("[extract] Using system tar for faster extraction: %s -> %s", src, dest)
-	// #nosec G204
 	cmd := exec.Command("tar", "--no-same-owner", "--no-same-permissions", "-xzf", src, "-C", dest)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tar extraction failed: %v - %s", err, string(out))
@@ -371,7 +365,6 @@ func readMetadata(unpackDir string) (*nextcore.NextCorePayload, error) {
 		filepath.Join(unpackDir, "metadata.json"),
 	}
 	for _, path := range candidates {
-		// #nosec G304
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -448,9 +441,6 @@ func copyDir(src, dst string) error {
 		if d.IsDir() {
 			return os.MkdirAll(target, 0755)
 		}
-		// Preserve symlinks rather than trying to copy them as regular files.
-		// Without this, symlinked directories (common in node_modules/.pnpm)
-		// cause "copy_file_range: is a directory" errors.
 		if d.Type()&os.ModeSymlink != 0 {
 			linkTarget, err := os.Readlink(path)
 			if err != nil {
@@ -466,7 +456,6 @@ func copyDir(src, dst string) error {
 }
 
 func copyFile(src, dst string) error {
-	// #nosec G304
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -476,7 +465,6 @@ func copyFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
-	// #nosec G304
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
@@ -498,19 +486,16 @@ func (ch *CommandHandler) ensureAppDirOwnership(appName string) {
 
 func (ch *CommandHandler) ensureDirPermissions(root string) {
 	log.Printf("[ship] Fixing permissions recursively for %s", root)
-	// #nosec G204
 	chownCmd := exec.Command("chown", "-R", "nextdeploy:nextdeploy", root)
 	if out, err := chownCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chown %s: %v - %s", root, err, string(out))
 	}
 
-	// #nosec G204
 	chmodDirCmd := exec.Command("find", root, "-type", "d", "-exec", "chmod", "0755", "{}", "+")
 	if out, err := chmodDirCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod dirs in %s: %v - %s", root, err, string(out))
 	}
 
-	// #nosec G204
 	chmodFileCmd := exec.Command("find", root, "-type", "f", "-exec", "chmod", "0644", "{}", "+")
 	if out, err := chmodFileCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod files in %s: %v - %s", root, err, string(out))

@@ -5,7 +5,6 @@ go 1.26.0
 require (
 	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/fatih/color v1.18.0
-	github.com/golang-jwt/jwt/v5 v5.2.3
 	github.com/gorilla/websocket v1.5.3
 	github.com/magefile/mage v1.15.0
 	github.com/pkg/sftp v1.13.9
