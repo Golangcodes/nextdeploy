@@ -710,9 +710,11 @@
           # systemd creates /run/nextdeployd/ (socket) and /var/log/nextdeployd/
           # (logs) before the service starts and removes them on stop.
           RuntimeDirectory=nextdeployd
-          RuntimeDirectoryMode=0750
+          RuntimeDirectoryMode=0755
+          RuntimeDirectoryGroup=nextdeploy
           LogsDirectory=nextdeployd
-          LogsDirectoryMode=0750
+          LogsDirectoryMode=0755
+          LogsDirectoryGroup=nextdeploy
 
           # Minimal sandboxing: the daemon writes to /etc/caddy, /opt/nextdeploy,
           # /run/nextdeployd, and /var/log/nextdeploy — broad access is needed.
@@ -824,6 +826,7 @@
         exit ${FAILED}
       args:
         executable: /bin/bash
+      become: true
       register: verify_all
       changed_when: false
 

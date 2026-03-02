@@ -107,7 +107,7 @@ var shipCmd = &cobra.Command{
 
 		log.Info("Upload complete. Triggering daemon to process deployment...")
 
-		daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd ship --tarball=\"%s\"", remotePath)
+		daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd ship --tarball=\"%s\" --socket-path=/run/nextdeployd/nextdeployd.sock", remotePath)
 		output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, os.Stdout)
 		if err != nil {
 			log.Error("Failed to trigger daemon (ensure nextdeployd is in PATH): %v\nOutput: %s", err, output)
