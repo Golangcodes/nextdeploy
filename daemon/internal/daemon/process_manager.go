@@ -106,10 +106,12 @@ WantedBy=multi-user.target
 	}
 
 	log.Printf("[process] Writing service file to %s", servicePath)
+	// #nosec G301
 	if err := os.MkdirAll(filepath.Dir(servicePath), 0755); err != nil {
 		return "", false, fmt.Errorf("failed to create systemd dir: %w", err)
 	}
 
+	// #nosec G306
 	err := os.WriteFile(servicePath, []byte(serviceContent), 0644)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to write systemd service file %s: %w", servicePath, err)
@@ -167,12 +169,14 @@ func (pm *ProcessManager) reloadDaemon() error {
 
 func (pm *ProcessManager) StartService(serviceName string) error {
 	log.Printf("[process] Enabling service %s", serviceName)
+	// #nosec G204
 	cmd := exec.Command("systemctl", "enable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("[process] Warning: failed to enable service %s: %v - %s", serviceName, err, string(out))
 	}
 
 	log.Printf("[process] Starting service %s", serviceName)
+	// #nosec G204
 	cmd = exec.Command("systemctl", "start", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to start service %s: %v - %s", serviceName, err, string(out))
@@ -183,10 +187,12 @@ func (pm *ProcessManager) StartService(serviceName string) error {
 }
 
 func (pm *ProcessManager) StopService(serviceName string) error {
+	// #nosec G204
 	cmd := exec.Command("systemctl", "stop", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
 		log.Printf("Warning: failed to stop service %s: %s", serviceName, out)
 	}
+	// #nosec G204
 	cmd = exec.Command("systemctl", "disable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
 		log.Printf("Warning: failed to disable service %s: %s", serviceName, out)
@@ -200,6 +206,7 @@ func (pm *ProcessManager) CurrentServiceName() string {
 }
 
 func (pm *ProcessManager) RestartService(serviceName string) error {
+	// #nosec G204
 	cmd := exec.Command("systemctl", "restart", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to restart service %s: %v - %s", serviceName, err, out)

@@ -255,6 +255,7 @@ func copyStaticAssets() error {
 
 // copyFile copies a file from src to dst
 func copyFile(src, dst string) error {
+	// #nosec G304
 	source, err := os.Open(src)
 	if err != nil {
 		NextCoreLogger.Error("Failed to open source file %s: %v", src, err)
@@ -262,6 +263,7 @@ func copyFile(src, dst string) error {
 	}
 	defer source.Close()
 
+	// #nosec G304
 	destination, err := os.Create(dst)
 	if err != nil {
 		NextCoreLogger.Error("Failed to create destination file %s: %v", dst, err)

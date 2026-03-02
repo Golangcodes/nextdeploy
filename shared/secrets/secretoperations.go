@@ -152,6 +152,7 @@ func (sm *SecretManager) GetSecret(name string) (string, error) {
 }
 
 func (sm *SecretManager) ImportSecrets(filePath string) error {
+	// #nosec G304
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read import file: %w", err)

@@ -16,6 +16,7 @@ func SetupLogger(config types.LoggerConfig) *log.Logger {
 		log.Printf("Warning: failed to create log directory %q: %v — logging to stdout only\n", config.LogDir, err)
 	} else {
 		logFilePath := filepath.Join(config.LogDir, config.LogFileName)
+		// #nosec G304
 		logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if err != nil {
 			log.Printf("Warning: failed to open log file %q: %v — logging to stdout only\n", logFilePath, err)

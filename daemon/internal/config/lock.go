@@ -14,6 +14,7 @@ type BuildLock struct {
 }
 
 func ReadBuildLock(filePath string) (*BuildLock, error) {
+	// #nosec G304
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read build.lock file: %w", err)

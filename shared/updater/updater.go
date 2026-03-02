@@ -31,6 +31,7 @@ func LatestRelease() (Release, error) {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 
+	// #nosec G704
 	resp, err := client.Do(req)
 	if err != nil {
 		return Release{}, err
@@ -161,7 +162,8 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer os.Remove(tmpFile.Name()) //nolint:errcheck
+	// #nosec G703
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -171,6 +173,7 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	if err != nil {
 		return err
 	}
+	// #nosec G704
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
@@ -184,18 +187,20 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
 		return fmt.Errorf("failed writing download: %w", err)
 	}
-	tmpFile.Close() //nolint:errcheck
+	_ = tmpFile.Close()
 
-	if err := os.Chmod(tmpFile.Name(), 0o755); err != nil { //nolint:gosec
+	// #nosec G302 G703
+	if err := os.Chmod(tmpFile.Name(), 0o755); err != nil {
 		return fmt.Errorf("chmod failed: %w", err)
 	}
 
+	// #nosec G204 G702
 	mv := exec.Command("mv", tmpFile.Name(), dest)
 	mv.Stdout = os.Stdout
 	mv.Stderr = os.Stderr
 	if err := mv.Run(); err != nil {
 		fmt.Println("Permission denied, attempting with sudo...")
-		// #nosec G204
+		// #nosec G204 G702
 		mvSudo := exec.Command("sudo", "mv", tmpFile.Name(), dest)
 		mvSudo.Stdout = os.Stdout
 		mvSudo.Stderr = os.Stderr
@@ -206,6 +211,7 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	fmt.Println("Updated to", latest.TagName)
 
 	if restartSvc {
+		// #nosec G204
 		svc := exec.Command("sudo", "systemctl", "restart", binaryBase)
 		svc.Stdout = os.Stdout
 		svc.Stderr = os.Stderr

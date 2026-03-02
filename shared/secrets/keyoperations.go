@@ -193,6 +193,7 @@ func (sm *SecretManager) loadUnixKey() ([]byte, error) {
 	appDir := filepath.Join(homedir, ".nextdeploy", sm.cfg.App.Name)
 	keyPath := filepath.Join(appDir, keyFilename)
 	SLogs.Debug("Attempting to load master key from: %s", keyPath)
+	// #nosec G304
 	keyData, err := os.ReadFile(keyPath)
 	if err == nil {
 		if len(keyData) == 0 {

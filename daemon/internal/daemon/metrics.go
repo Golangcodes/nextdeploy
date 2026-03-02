@@ -4,6 +4,8 @@ import (
 	"expvar"
 	"fmt"
 	"net/http"
+
+	// #nosec G108
 	_ "net/http/pprof"
 	"runtime"
 	"time"

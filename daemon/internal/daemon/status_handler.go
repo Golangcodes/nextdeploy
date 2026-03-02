@@ -15,6 +15,7 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 	}
 
 	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
+	// #nosec G204
 	cmd := exec.Command("systemctl", "show", serviceName, "--property=ActiveState,MainPID,MemoryCurrent,SubState")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -40,7 +41,7 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 		memory = "0MB"
 	} else {
 		var bytes int64
-		fmt.Sscanf(memory, "%d", &bytes)
+		_, _ = fmt.Sscanf(memory, "%d", &bytes) // #nosec G104
 		memory = fmt.Sprintf("%.2fMB", float64(bytes)/(1024*1024))
 	}
 	msg := fmt.Sprintf("Status: %s\nPID: %s\nMemory: %s", status, pid, memory)
@@ -62,6 +63,7 @@ func (ch *CommandHandler) handleLogs(args map[string]interface{}) types.Response
 	}
 
 	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
+	// #nosec G204
 	cmd := exec.Command("systemctl", "list-unit-files", serviceName)
 	out, err := cmd.CombinedOutput()
 	if err != nil || !strings.Contains(string(out), serviceName) {

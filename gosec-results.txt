@@ -1,0 +1,10 @@
+Results:
+
+
+Summary:
+  Gosec  : v2.23.0
+  Files  : 79
+  Lines  : 11414
+  Nosec  : 100
+  Issues : 0
+

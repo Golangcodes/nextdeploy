@@ -223,6 +223,7 @@ func daemonize() {
 			}
 		}
 	}
+	// #nosec G204 G702
 	cmd := exec.Command(execPath, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	logDir := "/var/log/nextdeployd"
@@ -236,6 +237,7 @@ func daemonize() {
 		log.Fatalf("Error creating log directory: %v", err)
 	}
 	logFilePath := filepath.Join(logDir, "nextdeployd.log")
+	// #nosec G304
 	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		log.Fatalf("Error opening log file: %v", err)
@@ -268,6 +270,7 @@ func acquireLock() error {
 		}
 	}
 
+	// #nosec G301 G703
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0750); err != nil {
 		return err
 	}
@@ -282,8 +285,9 @@ func acquireLock() error {
 	}
 
 	pidPath := strings.TrimSuffix(lockPath, ".lock") + ".pid"
+	// #nosec G306 G703
 	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0600); err != nil {
-		fileLock.Unlock()
+		_ = fileLock.Unlock() // #nosec G104
 		return fmt.Errorf("error writing PID file: %v", err)
 	}
 

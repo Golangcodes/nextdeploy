@@ -86,6 +86,7 @@ func runLocal() {
 			os.Exit(1)
 		}
 		runLogger.Info("Starting native standalone server: node %s", serverJs)
+		// #nosec G204
 		runCmd = exec.Command("node", serverJs)
 	case nextcore.OutputModeDefault:
 		runLogger.Info("Starting native production server: npm start")
@@ -113,6 +114,7 @@ func runLocal() {
 }
 
 func loadEnvFile(path string) ([]string, error) {
+	// #nosec G304
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

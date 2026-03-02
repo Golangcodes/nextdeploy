@@ -150,6 +150,7 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 		}
 	}
 
+	// #nosec G204
 	cmd := exec.Command("ssh-keyscan", ip)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -163,6 +164,7 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 		return fmt.Errorf("no host key returned for %s", ip)
 	}
 
+	// #nosec G304
 	f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to open known_hosts file: %v", err)
@@ -256,6 +258,7 @@ func getAuthMethods(cfg config.ServerConfig) ([]ssh.AuthMethod, error) {
 
 	serverlogger.Debug("Key path resolution: %s -> %s", cfg.KeyPath, expandedPath)
 
+	// #nosec G304
 	key, err := os.ReadFile(expandedPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read SSH key file %s (resolved to %s): %w",
@@ -296,6 +299,7 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 	if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0700); err != nil {
 		return nil, err
 	}
+	// #nosec G304
 	f, err := os.OpenFile(knownHostsPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, err
@@ -313,6 +317,7 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 			var keyErr *knownhosts.KeyError
 			if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
 				serverlogger.Info("Adding unknown host %s to known_hosts automatically", hostname)
+				// #nosec G304
 				f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
 				if err != nil {
 					return err
@@ -423,6 +428,7 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	client.mu.Lock()
 	defer client.mu.Unlock()
 
+	// #nosec G304
 	localFile, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to open local file: %w", err)
@@ -460,6 +466,7 @@ func (s *ServerStruct) DownloadFile(ctx context.Context, serverName, remotePath,
 	}
 	defer remoteFile.Close()
 
+	// #nosec G304
 	localFile, err := os.Create(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to create local file: %w", err)

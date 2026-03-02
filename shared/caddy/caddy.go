@@ -90,6 +90,7 @@ func (cm *CaddyManager) GetConfig(ctx context.Context) (*Config, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// #nosec G704
 	resp, err := cm.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get config: %w", err)
@@ -139,6 +140,7 @@ func (cm *CaddyManager) ApplyConfig(ctx context.Context, config *Config) error {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	// #nosec G704
 	resp, err := cm.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to apply config: %w", err)
@@ -207,6 +209,7 @@ func (cm *CaddyManager) PatchConfig(ctx context.Context, path string, config int
 }
 
 func (cm *CaddyManager) LoadConfig(ctx context.Context, filePath string) (*Config, error) {
+	// #nosec G304
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)

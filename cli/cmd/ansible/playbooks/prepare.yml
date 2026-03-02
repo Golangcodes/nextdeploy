@@ -257,8 +257,8 @@
             "${HOME}/.local/bin/bun" \
             "${HOME}/.local/opt/bun/bin/bun"; do
           if [ -x "${BUN_BIN}" ]; then
-            sudo ln -sf "${BUN_BIN}" /usr/local/bin/bun
-            echo "Linked bun from ${BUN_BIN}"
+            sudo install -m 0755 "${BUN_BIN}" /usr/local/bin/bun
+            echo "Installed bun globally from ${BUN_BIN}"
             LINKED=true
             break
           fi

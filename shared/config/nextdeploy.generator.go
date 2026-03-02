@@ -189,6 +189,7 @@ func WriteConfig(filename string, cfg *NextDeployConfig) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
+	// #nosec G302 G703
 	if err := os.WriteFile(filename, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}

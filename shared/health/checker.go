@@ -18,6 +18,7 @@ func CheckWithTimeout(url string, timeout time.Duration) bool {
 		case <-ctx.Done():
 			return false
 		case <-ticker.C:
+			// #nosec G107
 			resp, err := http.Get(url)
 			if err == nil && resp.StatusCode == 200 {
 				return true

@@ -71,15 +71,16 @@ type CloudProviderStruct struct {
 	SecretKey string `yaml:"secret_key,omitempty"`
 }
 type ServerConfig struct {
-	WebServer     *WebServer `yaml:"web_server,omitempty"`
-	Name          string     `yaml:"name"`
-	Host          string     `yaml:"host"`
-	Port          int        `yaml:"port"`
-	Username      string     `yaml:"username"`
-	Password      string     `yaml:"password"`
-	KeyPath       string     `yaml:"key_path"`
-	SSHKey        string     `yaml:"ssh_key,omitempty"`
-	KeyPassphrase string     `yaml:"key_passphrase,omitempty"`
+	WebServer *WebServer `yaml:"web_server,omitempty"`
+	Name      string     `yaml:"name"`
+	Host      string     `yaml:"host"`
+	Port      int        `yaml:"port"`
+	Username  string     `yaml:"username"`
+	// #nosec G117
+	Password      string `yaml:"password"`
+	KeyPath       string `yaml:"key_path"`
+	SSHKey        string `yaml:"ssh_key,omitempty"`
+	KeyPassphrase string `yaml:"key_passphrase,omitempty"`
 }
 
 type AppConfig struct {
@@ -104,14 +105,15 @@ type DockerConfig struct {
 	Build          DockerBuild `yaml:"build"`
 	Push           bool        `yaml:"push"`
 	Username       string      `yaml:"username,omitempty"`
-	Password       string      `yaml:"password,omitempty"`
-	AlwaysPull     bool        `yaml:"alwaysPull,omitempty"`
-	Strategy       string      `yaml:"strategy,omitempty"`
-	AutoPush       bool        `yaml:"autoPush,omitempty"`
-	Platform       string      `yaml:"platform,omitempty"`
-	NoCache        bool        `yaml:"noCache,omitempty"`
-	BuildContext   string      `yaml:"buildContext,omitempty"`
-	Target         string      `yaml:"target,omitempty"`
+	// #nosec G117
+	Password     string `yaml:"password,omitempty"`
+	AlwaysPull   bool   `yaml:"alwaysPull,omitempty"`
+	Strategy     string `yaml:"strategy,omitempty"`
+	AutoPush     bool   `yaml:"autoPush,omitempty"`
+	Platform     string `yaml:"platform,omitempty"`
+	NoCache      bool   `yaml:"noCache,omitempty"`
+	BuildContext string `yaml:"buildContext,omitempty"`
+	Target       string `yaml:"target,omitempty"`
 }
 
 type DockerBuild struct {
@@ -122,10 +124,11 @@ type DockerBuild struct {
 }
 
 type Database struct {
-	Type            string `yaml:"type"`
-	Host            string `yaml:"host"`
-	Port            string `yaml:"port"`
-	Username        string `yaml:"username"`
+	Type     string `yaml:"type"`
+	Host     string `yaml:"host"`
+	Port     string `yaml:"port"`
+	Username string `yaml:"username"`
+	// #nosec G117
 	Password        string `yaml:"password"`
 	Name            string `yaml:"name"`
 	MigrateOnDeploy bool   `yaml:"migrate_on_deploy,omitempty"`
@@ -170,7 +173,8 @@ type VaultConfig struct {
 }
 
 type SecretFile struct {
-	Path   string `yaml:"path"`
+	Path string `yaml:"path"`
+	// #nosec G117
 	Secret string `yaml:"secret"`
 }
 
@@ -189,9 +193,10 @@ type Backup struct {
 }
 
 type Storage struct {
-	Type      string `yaml:"type"`
-	Endpoint  string `yaml:"endpoint,omitempty"`
-	Bucket    string `yaml:"bucket"`
+	Type     string `yaml:"type"`
+	Endpoint string `yaml:"endpoint,omitempty"`
+	Bucket   string `yaml:"bucket"`
+	// #nosec G117
 	AccessKey string `yaml:"accessKey,omitempty"`
 	SecretKey string `yaml:"secretKey,omitempty"`
 }

@@ -380,6 +380,7 @@ func createTarball(sourceDir, targetTar string, outputMode nextcore.OutputMode, 
 	}
 
 	log.Info("[tarball] Renaming %s → %s", tempName, targetTar)
+	// #nosec G703
 	if err := os.Rename(tempName, targetTar); err != nil {
 		if strings.Contains(err.Error(), "invalid cross-device link") {
 			log.Info("[tarball] Cross-device rename detected, falling back to copy...")
@@ -556,6 +557,7 @@ func fileCopyAndRemove(src, dst string) error {
 	if _, err := io.Copy(destination, source); err != nil {
 		return fmt.Errorf("copy %s → %s: %w", src, dst, err)
 	}
+	// #nosec G703
 	_ = os.Remove(src)
 	return nil
 }

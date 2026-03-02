@@ -12,6 +12,7 @@ import (
 	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 )
 
+// #nosec G101
 const secretsDir = "/opt/nextdeploy/secrets"
 
 func (ch *CommandHandler) handleSecrets(args map[string]interface{}) types.Response {

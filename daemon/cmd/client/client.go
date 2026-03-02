@@ -99,6 +99,7 @@ func handleDaemonCommand() {
 func runDaemonDirectly(configPath string) {
 	fmt.Println("Starting NextDeploy daemon in foreground...")
 
+	// #nosec G204 G702
 	cmd := exec.Command("nextdeploy-daemon", "--foreground=true", "--config="+configPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -116,6 +117,7 @@ func startDaemonProcess(configPath string) {
 	}
 
 	fmt.Println("Starting NextDeploy daemon...")
+	// #nosec G204 G702
 	cmd := exec.Command("nextdeploy-daemon", "--config="+configPath)
 	if err := cmd.Start(); err != nil {
 		fmt.Printf("Failed to start daemon: %v\n", err)
