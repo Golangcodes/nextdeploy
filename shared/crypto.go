@@ -49,13 +49,11 @@ type KeyPair struct {
 	ECDHPublic  *ecdh.PublicKey
 	SignPrivate ed25519.PrivateKey
 	SignPublic  ed25519.PublicKey
-	ECDSAKey    *ecdsa.PrivateKey // Optional ECDSA key for compatibility
+	ECDSAKey    *ecdsa.PrivateKey
 	KeyID       string
 }
 
-// Generate key pair create a new ecdh (x25519) key pair and a new ed25519 signing key pair.
 func SignMessage(msg AgentMessage, privateKey *ecdsa.PrivateKey) (AgentMessage, error) {
-	// Create copy without signature
 	msgToSign := msg
 	msgToSign.Signature = ""
 
@@ -84,13 +82,11 @@ func VerifyMessageSignature(msg AgentMessage) bool {
 		return false
 	}
 
-	// Get public key from agent store (would need implementation)
 	publicKey := getAgentPublicKey(msg.AgentID)
 	if publicKey == nil {
 		return false
 	}
 
-	// Create copy without signature
 	msgToVerify := msg
 	msgToVerify.Signature = ""
 
@@ -110,34 +106,26 @@ func VerifyMessageSignature(msg AgentMessage) bool {
 }
 
 func SecureKeyMemory(key []byte) {
-	// Use platform-specific secure memory functions
 	if len(key) == 0 {
 		return
 	}
 
-	// #nosec G103
-	// For Linux/Unix:
 	if _, _, err := syscall.Syscall(syscall.SYS_MLOCK, uintptr(unsafe.Pointer(&key[0])), uintptr(len(key)), 0); err != 0 {
 		log.Printf("Warning: failed to lock memory: %v", err)
 	}
 }
 
-// ZeroKey securely wipes keys from memory
 func ZeroKey(key []byte) {
 	if len(key) == 0 {
 		return
 	}
 
-	// Use constant-time zeroing
 	for i := range key {
 		key[i] = 0
 	}
 
-	// Ensure compiler doesn't optimize this away
 	runtime.KeepAlive(key)
 
-	// #nosec G103
-	// For Linux/Unix:
 	if _, _, err := syscall.Syscall(syscall.SYS_MUNLOCK, uintptr(unsafe.Pointer(&key[0])), uintptr(len(key)), 0); err != 0 {
 		log.Printf("Warning: failed to unlock memory: %v", err)
 	}
@@ -145,7 +133,6 @@ func ZeroKey(key []byte) {
 
 func GenerateKeyPair() (*KeyPair, error) {
 	curve := ecdh.X25519()
-	// generate ECDH key pair
 	ecdhPrivate, err := curve.GenerateKey(rand.Reader)
 	if err != nil {
 		SharedLogger.Error("Failed to generate ECDH key pair: %v", err)
@@ -156,13 +143,11 @@ func GenerateKeyPair() (*KeyPair, error) {
 		SharedLogger.Error("Failed to get ECDH public key:%v", err)
 		return nil, errors.New("failed to get ECDH public key")
 	}
-	// generate ramdom key ID
 	KeyID := make([]byte, KeyIDLength)
 	if _, err := io.ReadFull(rand.Reader, KeyID); err != nil {
 		SharedLogger.Error("Failed to generate random KeyID: %v", err)
 		return nil, fmt.Errorf("failed to generate random KeyID: %w", err)
 	}
-	// generate Ed25519 key pair
 	signPublic, signPrivate, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		SharedLogger.Error("Failed to generate Ed25519 key pair: %v", err)
@@ -184,14 +169,9 @@ func RunCryptoHealthChecks() error {
 }
 
 func getAgentPublicKey(agentID string) *ecdsa.PublicKey {
-	// Placeholder function to retrieve the public key of an agent by its ID.
-	// In a real implementation, this would query a database or a key store.
-	// For now, we return nil to indicate that the public key is not found.
 	SharedLogger.Warn("getAgentPublicKey is not implemented, returning nil")
 	return nil
 }
-
-// DeriveSharedKey derives a shared key from the ECDH private key and the public key of the peer.
 
 func DeriveSharedKey(privateKey *ecdh.PrivateKey, publicKey *ecdh.PublicKey) ([]byte, error) {
 	if privateKey == nil || publicKey == nil {
@@ -203,13 +183,9 @@ func DeriveSharedKey(privateKey *ecdh.PrivateKey, publicKey *ecdh.PublicKey) ([]
 		SharedLogger.Error("Failed to derive shared key: %v", err)
 		return nil, fmt.Errorf("failed to derive shared key: %w", err)
 	}
-	// hash the shared key to ensure it is of fixed size
 	hashedKey := sha256.Sum256(sharedKey)
 	return hashedKey[:SharedKeySize], nil
 }
-
-// EncryptData encrypts data using AES-GCM with the provided key and returns the ciphertext and nonce.
-// TODO: consolidate with existing encryption methods in the project
 
 func Encrypt(data []byte, key []byte) ([]byte, []byte, error) {
 	block, err := aes.NewCipher(key)
@@ -250,7 +226,6 @@ func Decrypt(cipherText []byte, key []byte, nonce []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// SignData signs the data using the Ed25519 private key and returns the signature.
 func Sign(data []byte, privateKey ed25519.PrivateKey) ([]byte, error) {
 	if len(privateKey) != PrivateKeySize {
 		SharedLogger.Error("Invalid private key size: expected %d, got %d", PrivateKeySize, len(privateKey))
@@ -265,7 +240,6 @@ func Sign(data []byte, privateKey ed25519.PrivateKey) ([]byte, error) {
 	return signature, nil
 }
 
-// Verify verifies the signature of the data using the public key.
 func Verify(data []byte, signature []byte, publicKey ed25519.PublicKey) (bool, error) {
 
 	if len(publicKey) != ed25519.PrivateKeySize {
@@ -295,9 +269,7 @@ func GenerateFingerprint(publicKey ed25519.PublicKey) (string, error) {
 	return fingerprint, nil
 }
 
-// Load key from env file
 func LoadKeyFromFile(filename string) ([]byte, error) {
-	// #nosec G304
 	file, err := os.Open(filename)
 	if err != nil {
 		SharedLogger.Error("Failed to open key file: %v", err)

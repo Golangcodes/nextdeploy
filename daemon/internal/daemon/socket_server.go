@@ -43,7 +43,7 @@ func (ss *SocketServer) Start() error {
 
 func (ss *SocketServer) handleConnection(conn net.Conn) {
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(10 * time.Minute))
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
 	if !ss.limiter.Allow() {
@@ -67,7 +67,7 @@ func (ss *SocketServer) handleConnection(conn net.Conn) {
 		return
 	}
 	response := ss.commandHandler.HandleCommand(cmd)
-	CommandsHandled.Add(1)
+	CommandsHandled.Add(2)
 	_ = encoder.Encode(response)
 }
 
@@ -121,7 +121,6 @@ func (ss *SocketServer) Close() error {
 	if ss.listener != nil {
 		return ss.listener.Close()
 	}
-	// clean up socket file
 	_ = os.Remove(ss.socketPath)
 	return nil
 }

@@ -1,9 +1,10 @@
 # ==============================
 # NEXTDEPLOY CONFIGURATION FILE
 # ==============================
-# This YAML defines everything needed to build, deploy, monitor, and scale your app on a VPS using NextDeploy.
+# This YAML defines everything needed to build, deploy, monitor, and scale your app on a VPS/SERVERlESS using NextDeploy.
 # Think of it as your infrastructure-as-code for end-to-end delivery.
 
+# NOTE: DO NOT ADD YOUR SECRETS AS OF NOW WE WORKING ON SECRET MANAGMENT THIS IS HOW WE INTENT TO USE
 version: "1.0" # Config file versioning for forward compatibility with future NextDeploy updates
 
 # -----
@@ -14,38 +15,6 @@ app:
   environment: production # Can be: development | staging | production. Affects env variables & caching.
   domain: app.example.com # Public domain where your app will be accessible
   port: 3000 # Internal app port (e.g., what your Node/Go server listens on)
-
-# -----
-# GIT REPOSITORY SETTINGS
-# -----
-repository:
-  url: git@github.com:username/example-app.git # SSH or HTTPS Git URL; used to clone the app
-  branch: main # Which branch to deploy from (e.g., "main", "develop")
-  auto_deploy: true # Automatically deploy on webhook trigger (e.g., from GitHub Actions)
-  webhook_secret: your_webhook_secret # Used to validate that a deploy webhook came from a trusted source
-
-# -----
-# DOCKER BUILD CONFIGURATION
-# -----
-docker:
-  Username: username # Your Docker Hub or GitHub username (for image tagging)
-  Password: your_docker_password # Docker Hub password (if pushing to Docker Hub)
-  build:
-    context: . # Directory to build the image from (typically root of repo)
-    dockerfile: Dockerfile # Path to Dockerfile relative to context
-    args:
-      NODE_ENV: production # Build-time environment variables (e.g., optimization flags)
-    no_cache: false # Set to true to force a fresh rebuild (useful for clearing old layers)
-  image: username/example-app:latest # Full image tag pushed to registry
-  registry: ghcr.io # Supported: ghcr.io (GitHub), docker.io, ECR (AWS), GCR (Google)
-  username: username # Docker registry username (if using private registry)
-  password: your_registry_password # Docker registry password (if using private registry)
-  localImage: ""
-  push: true # Automatically push image after successful build
-
-# Example:
-#   - Docker builds image with `NODE_ENV=production`
-#   - Pushes to GitHub Container Registry as ghcr.io/username/example-app:latest
 
 # -----
 # DEPLOYMENT TARGET

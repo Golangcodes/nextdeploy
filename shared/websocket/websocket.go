@@ -5,8 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"github.com/Golangcodes/nextdeploy/shared"
 	"time"
+
+	"github.com/Golangcodes/nextdeploy/shared"
 
 	"github.com/gorilla/websocket"
 )
@@ -41,7 +42,6 @@ func (c *WSClient) ReceiveMessage() (shared.AgentMessage, error) {
 		websockerlogger.Error("Failed to read message from WebSocket error:%s", err)
 		return shared.AgentMessage{}, err
 	}
-	// FIX: Deserialize the message into AgentMessage and use returned message from ReadMessage
 	var agentMessage shared.AgentMessage
 	return agentMessage, nil
 }
@@ -55,8 +55,6 @@ func (c *WSClient) Connect(url string, headers http.Header) error {
 
 	c.conn = conn
 	c.connected = true
-
-	// Start reader/writer goroutines
 	go c.readPump()
 	go c.writePump()
 

@@ -15,13 +15,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Windows-specific implementations of SecureKeyMemory and ZeroKey
 func SecureKeyMemory(key []byte) {
 	if len(key) == 0 {
 		return
 	}
 
-	// Use Windows VirtualLock instead of mlock
 	addr := uintptr(unsafe.Pointer(&key[0]))
 	length := uintptr(len(key))
 
@@ -36,15 +34,11 @@ func ZeroKey(key []byte) {
 		return
 	}
 
-	// Use constant-time zeroing
 	for i := range key {
 		key[i] = 0
 	}
 
-	// Ensure compiler doesn't optimize this away
 	runtime.KeepAlive(key)
-
-	// Use Windows VirtualUnlock instead of munlock
 	addr := uintptr(unsafe.Pointer(&key[0]))
 	length := uintptr(len(key))
 
@@ -53,9 +47,6 @@ func ZeroKey(key []byte) {
 		log.Printf("Warning: failed to unlock memory: %v", err)
 	}
 }
-
-// The rest of the functions are the same as in the Unix version
-// but need to be copied here for Windows build
 
 const (
 	KeyIDLength       = 32
@@ -84,7 +75,3 @@ type KeyPair struct {
 	ECDSAKey    *ecdsa.PrivateKey
 	KeyID       string
 }
-
-// All other functions (SignMessage, VerifyMessageSignature, GenerateKeyPair, etc.)
-// need to be copied here exactly as they appear in the Unix version
-// [Copy all the remaining functions from the Unix version here]

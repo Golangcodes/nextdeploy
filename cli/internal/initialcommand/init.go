@@ -1,7 +1,9 @@
 package initialcommand
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/Golangcodes/nextdeploy/shared"
@@ -19,33 +21,26 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	log.Info("----------------------------------------")
 	log.Info("Analysing your Next.js project...")
 
-	payload, err := nextcore.GenerateMetadata()
-	if err != nil {
-		log.Error("Failed to analyze Next.js project: %v", err)
-		return err
+	// Basic analysis without requiring nextdeploy.yml
+	appName := "example-app"
+	if data, err := os.ReadFile("package.json"); err == nil {
+		var pkg struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(data, &pkg); err == nil && pkg.Name != "" {
+			appName = pkg.Name
+		}
 	}
 
-	log.Info("\n  ✓ Next.js %s detected", payload.NextVersion)
-	hasAppRouter := payload.NextBuildMetadata.HasAppRouter
-	if hasAppRouter {
-		log.Info("  ✓ App Router detected")
-	} else {
-		log.Info("  ✓ Pages Router detected")
+	nextVersion, _ := nextcore.GetNextJsVersion("package.json")
+	if nextVersion != "" {
+		log.Info("  ✓ Next.js %s detected", nextVersion)
 	}
-	log.Info("  ✓ Output mode: %s", payload.OutputMode)
-	log.Info("  ✓ Package manager: %s\n", payload.PackageManager)
 
-	log.Info("Scanning your routes...")
-
-	log.Info("  ✓ %d static routes", len(payload.StaticRoutes))
-	if len(payload.DynamicRoutes) > 0 {
-		log.Info("  ✓ %d dynamic routes", len(payload.DynamicRoutes))
-	}
-	if payload.Middleware != nil {
-		log.Info("  ✓ Middleware route detected")
-	}
-	if payload.HasImageAssets {
-		log.Info("  ✓ Image optimization enabled")
+	cwd, _ := os.Getwd()
+	pkgManager, _ := nextcore.DetectPackageManager(cwd)
+	if pkgManager != nextcore.Unknown {
+		log.Info("  ✓ Package manager: %s\n", pkgManager.String())
 	}
 
 	log.Info("\nNextDeploy understands your application.\n")
@@ -58,34 +53,17 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("prompt failed: %w", err)
 	}
 
-	cfg := &config.NextDeployConfig{
-		Version: "1.0",
-		App: config.AppConfig{
-			Name:        payload.AppName,
-			Port:        3000,
-			Environment: "production",
-		},
-	}
-
+	targetType := "vps"
 	if strings.Contains(targetChoice, "Serverless") {
-		cfg.TargetType = "serverless"
-		cfg.Serverless = &config.ServerlessConfig{
-			Provider: "aws",
-			Region:   "us-east-1",
-			S3Bucket: "my-nextjs-assets-bucket",
-		}
-	} else {
-		cfg.TargetType = "vps"
-		cfg.Servers = []config.ServerConfig{
-			{
-				Host:     "your-vps-ip",
-				Username: "root",
-				KeyPath:  "~/.ssh/id_rsa",
-			},
-		}
+		targetType = "serverless"
 	}
 
-	if err := config.SaveConfig("nextdeploy.yml", cfg); err != nil {
+	// Use the raw template to preserve comments
+	configContent := config.GetSampleConfigTemplate()
+	configContent = strings.ReplaceAll(configContent, "name: example-app", "name: "+appName)
+	configContent = strings.ReplaceAll(configContent, "target_type: vps", "target_type: "+targetType)
+
+	if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0600); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 

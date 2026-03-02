@@ -3,9 +3,10 @@ package websocket
 import (
 	"crypto/ecdh"
 	"crypto/ecdsa"
-	"github.com/gorilla/websocket"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type WSClient struct {
@@ -18,13 +19,13 @@ type WSClient struct {
 	writeWait   time.Duration
 	pongWait    time.Duration
 	authKey     *ecdsa.PrivateKey
-	sessionKeys map[string]*ecdh.PrivateKey // Session-specific keys
+	sessionKeys map[string]*ecdh.PrivateKey
 	upgrader    websocket.Upgrader
 }
 
 type SecureMessage struct {
-	IV         []byte `json:"iv"`         // Initialization vector for AES-GCM
-	Ciphertext []byte `json:"ciphertext"` // Encrypted payload
-	Tag        []byte `json:"tag"`        // Authentication tag
-	Sequence   uint64 `json:"sequence"`   // Prevent replay attacks
+	IV         []byte `json:"iv"`
+	Ciphertext []byte `json:"ciphertext"`
+	Tag        []byte `json:"tag"`
+	Sequence   uint64 `json:"sequence"`
 }

@@ -6,176 +6,124 @@ import (
 )
 
 const sampleConfig = `
-version: "1.0" # ⚠️ Do NOT change unless you change field meanings, format, or logic.
+# ==============================
+# NEXTDEPLOY CONFIGURATION FILE
+# ==============================
+# This YAML defines everything needed to build, deploy, monitor, and scale your app on a VPS/SERVERlESS using NextDeploy.
+# Think of it as your infrastructure-as-code for end-to-end delivery.
 
-# ==================================================
+# NOTE: DO NOT ADD YOUR SECRETS AS OF NOW WE WORKING ON SECRET MANAGMENT THIS IS HOW WE INTENT TO USE
+version: "1.0" # Config file versioning for forward compatibility with future NextDeploy updates
+
+# -----
 # APP METADATA
-# ==================================================
+# -----
 app:
-  name: nextdeploy # Used for naming containers, logs, dashboards, etc.
-  environment: production # One of: development | staging | production
-  domain: https://www.nextdeploy.one # Public URL your app is accessible on
-  port: 3000 # Internal port the app server listens on (not exposed directly)
+  name: example-app # [REQUIRED] Unique app name used for identification
+  environment: production # [REQUIRED] production | staging | development
+  domain: app.example.com # Public domain for your app
+  port: 3000 # [REQUIRED] Internal port your app listens on
 
-# ==================================================
-# GIT SOURCE CONFIGURATION
-# ==================================================
-repository:
-  url: git@github.com:username/example-app.git # Must be accessible from deployer
-  branch: main
-  auto_deploy: true # Enable webhook-triggered CI/CD
-  webhook_secret: your_webhook_secret # Used to verify webhook origin
-
-# ==================================================
-# CONTAINER BUILD & REGISTRY CONFIG
-# ==================================================
-docker:
-  build:
-    context: . # Usually root of repo
-    dockerfile: Dockerfile
-    args:
-      NODE_ENV: production
-    no_cache: false # Force rebuilds (good for CI, bad for caching)
-  image: hersiyussuf/nextdeploy
-  registry: docker.io
-  push: true
-  username: hersiyussuf
-  password: dckr_pat_H8xP4EPpj4_zKE91zKnInqXh010
-
-# ==================================================
-# INFRASTRUCTURE / SERVER TARGETS
-# ==================================================
+# -----
+# DEPLOYMENT SERVERS
+# -----
 servers:
-  - name: production # Unique ID (used for logs, filtering, routing)
-    host: 51.20.134.163
-    username: ubuntu
-    ssh_key: ~/.ssh/nextdeploy-key.pem
-    key_path: "/home/elitebook/.ssh/nextdeploy-key.pem"
-    use_sudo: false
+  - name: "production-01" # [REQUIRED] Friendly name for the server
+    host: 192.0.2.123 # [REQUIRED] IP or hostname of the server
+    username: ubuntu # [REQUIRED] SSH user (e.g., ubuntu, debian, root)
+    key_path: ~/.ssh/id_rsa # [REQUIRED] Path to your private SSH key
+    # password: "" # Optional: SSH password (key_path takes precedence)
 
-    container:
-      name: nextdeploy
-      restart: always
-      env_file: .env
-      volumes:
-        - ./data:/app/data
-      ports:
-        - "80:3000"
-      healthcheck:
-        path: /api/health
-        interval: 30s
-        timeout: 5s
-        retries: 3
-
-# ✅ Teaching:
-# Move this out of docker because:
-# 1. Docker is the build + push concern.
-# 2. Servers are runtime infra concerns.
-# 3. Daemons like ship, failover, and monitor depend on accurate server declarations.
-
-# ==================================================
-# DATABASE CONFIGURATION
-# ==================================================
+# -----
+# DATABASE CONFIG
+# -----
 database:
-  type: postgres
-  host: 192.0.2.124
+  type: postgres # Supported: postgres | mysql
+  host: 192.0.2.124 # IP of your database server (managed or self-hosted)
   port: 5432
   username: dbuser
   password: secret
   name: exampledb
-  migrate_on_deploy: true
+  migrate_on_deploy: true # Run database migrations automatically after deployment
 
-# Teaching:
-# Database should be fully managed externally. Don’t run DB in the same container — you want container failure to be isolated from data integrity.
+# Example:
+#   - Use Amazon RDS or DigitalOcean Managed PostgreSQL as the database host.
+#   - Schema is updated with migration tools like Goose, Flyway, or Prisma.
 
-# ==================================================
+# -----
 # LOGGING CONFIGURATION
-# ==================================================
+# -----
 logging:
-  enabled: true
-  provider: nextdeploy # Could later support: syslog, logtail, datadog, etc.
-  stream_logs: true
-  log_path: /var/log/containers/nextdeploy.log
+  enabled: true # Enable logging system
+  provider: nextdeploy # Use NextDeploy's internal logging daemon (alternatively: syslog, logtail, etc.)
+  stream_logs: true # Send live container logs to dashboard (tail -f equivalent)
+  log_path: /var/log/containers/example-app.log # Path on server where logs are persisted
 
-# ==================================================
-# MONITORING & ALERTING CONFIG
-# ==================================================
+# -----
+# MONITORING & ALERTING
+# -----
 monitoring:
-  enabled: true
-  cpu_threshold: 80
-  memory_threshold: 75
-  disk_threshold: 90
+  enabled: true # Enables resource monitoring for CPU, memory, disk
+  cpu_threshold: 80 # Alert if CPU usage goes over 80%
+  memory_threshold: 75 # Alert if memory usage exceeds 75%
+  disk_threshold: 90 # Alert if disk usage crosses 90%
   alert:
-    email: ops@example.com
-    slack_webhook: https://hooks.slack.com/services/...
+    email: ops@example.com # Email to send alerts to
+    slack_webhook: https://hooks.slack.com/services/... # Slack channel webhook for real-time alerting
     notify_on:
-      - crash
-      - healthcheck_failed
+      - crash # App/container crash
+      - healthcheck_failed # Failed /api/health checks
       - high_cpu
       - high_memory
 
-# Teaching:
-# This will integrate with the monitor daemon. Future version: consider window_duration, cooldown_period, alert_frequency.
+# Example:
+#   - If your Go server crashes due to panic, or memory spikes over 75%, you get a Slack alert.
+#   - Alerts also help you pre-emptively scale or investigate.
 
-# ==================================================
-# BACKUP CONFIGURATION
-# ==================================================
+# -----
+# BACKUP STRATEGY
+# -----
 backup:
-  enabled: true
-  frequency: daily
-  retention_days: 7
+  enabled: true # Enable automatic backups
+  frequency: daily # Options: hourly | daily | weekly
+  retention_days: 7 # Keep backups for 7 days
   storage:
-    provider: s3
-    bucket: nextdeploy-backups
-    region: us-east-1
+    provider: s3 # Use S3-compatible storage (AWS S3, MinIO, Wasabi, etc.)
+    bucket: nextdeploy-backups # S3 bucket name
+    region: us-east-1 # AWS region
     access_key: YOUR_ACCESS_KEY
     secret_key: YOUR_SECRET_KEY
 
-# Teaching:g
-# You're backing up volume and DB snapshots. Make sure you version them and don’t overwrite blindly.
+# Example:
+#   - Database and volume data backed up to S3 every day.
+#   - Automatically deleted after 7 days unless extended.
 
-# ==================================================
-# SSL / HTTPS CONFIG
-# ==================================================
-domain: nextdeploy.one
-email: yussufhersi219@gmail.com
-staging: false
-wildcard: true
-dns_provider: namecheap
-force: false
-ssl:
-  domain: nextdeploy.one
-  email: yussufhersi219@gmail.com
-  staging: false
-  wildcard: true
-  dns_provider: namecheap
-  force: false
-  enabled: true
-  provider: letsencrypt
-  auto_renew: true
-# Teaching:
-# When SSL is enabled, certbot or equivalent should be run on the server. Ideally daemonized + log-monitored.
 
-# ==================================================
-# POST-DEPLOY WEBHOOKS
-# ==================================================
+# -----
+# WEBHOOKS AFTER DEPLOYMENT
+# -----
 webhook:
   on_success:
-    - curl -X POST https://your-api.com/deploy/success
+    - curl -X POST https://your-api.com/deploy/success # Notify external system (e.g., Slack, Discord, CI dashboard)
   on_failure:
-    - curl -X POST https://your-api.com/deploy/failure
+    - curl -X POST https://your-api.com/deploy/failure # Used for alerting, logging, or rollback triggers
 
-# Teaching:
-# Great for chaining environments. Success webhook → notify QA or trigger end-to-end test suite.
-deployment:
-  server:
-    host: 51.20.134.163 # Must match one of your servers' host
-  container:
-    name: nextdeploy
-    restart: always
-    ports:
-      - "80:3000"
+# Example:
+#   - You can hook this into Notion, Linear, Jira, Slack, or even a custom dashboard.
+#   - Also useful for CI/CD chaining (e.g., notify QA team that staging is ready).
+
+## CLOUD PROVIDER instructions
+
+CloudProvider:
+  name: aws # Supported: aws | gcp | azure | digitalocean
+  region: us-north-1 # AWS region (e.g., us-east-1, eu-west-1)
+  access_key: YOUR_AWS_ACCESS_KEY # IAM user access key
+  secret_key: YOUR_AWS_SECRET_KEY # IAM user secret key
 `
+
+func GetSampleConfigTemplate() string {
+	return sampleConfig
+}
 
 func GenerateSampleConfig() error {
 	// Write the sample config to sample.nextdeploy.yml in the current directory

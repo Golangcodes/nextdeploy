@@ -15,11 +15,9 @@ func (sm *SecretManager) ValidateSecret(name, value string) error {
 		return errors.New("secret must be at least 12 characters long")
 	}
 
-	// Add more validation rules as needed
 	return nil
 }
 
-// SecureCompare performs constant-time comparison of secrets
 func (sm *SecretManager) SecureCompare(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
@@ -37,7 +35,6 @@ func (sm *SecretManager) RotateSecrets() error {
 			continue
 		}
 
-		// Decrypt with old key
 		oldKey, err := sm.getCachedKey(name)
 		if err != nil {
 			SLogs.Warn("Failed to get cached key for %s: %v", name, err)
@@ -50,7 +47,6 @@ func (sm *SecretManager) RotateSecrets() error {
 			continue
 		}
 
-		// Encrypt with new key
 		encrypted, err := Encrypt(decrypted, []byte(newKey))
 		if err != nil {
 			SLogs.Warn("Failed to re-encrypt secret %s: %v", name, err)
@@ -67,12 +63,10 @@ func (sm *SecretManager) RotateSecrets() error {
 }
 func (sm *SecretManager) PrepareSecretsContext() error {
 	sm.mu.Lock()
-	//ensure config is load properly on sm
 	defer sm.mu.Unlock()
 	if sm.cfg == nil {
 		return fmt.Errorf("configuration is not set")
 	}
-	// ensure manager is initialized
 	if sm.manager == nil {
 		sm.manager = &providerManager{
 			providers: make(map[string]SecretProvider),
@@ -123,14 +117,12 @@ func (sm *SecretManager) SetSecret(name, value string, encrypt bool) error {
 	return nil
 }
 
-// GetSecret retrieves a secret, decrypting if necessary
 func (sm *SecretManager) GetSecret(name string) (string, error) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
 	secret, exists := sm.secrets[name]
 	if !exists {
-		// Try external providers
 		if sm.manager != nil {
 			for _, provider := range sm.manager.providers {
 				if value, err := provider.GetSecret(name); err == nil {
@@ -159,9 +151,7 @@ func (sm *SecretManager) GetSecret(name string) (string, error) {
 	return string(decrypted), nil
 }
 
-// ImportSecrets imports secrets from a JSON file
 func (sm *SecretManager) ImportSecrets(filePath string) error {
-	// #nosec G304
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read import file: %w", err)
@@ -182,7 +172,6 @@ func (sm *SecretManager) ImportSecrets(filePath string) error {
 	return nil
 }
 
-// ExportSecrets exports secrets to a JSON file
 func (sm *SecretManager) ExportSecrets(filePath string) error {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()

@@ -15,21 +15,6 @@ func PromptForConfig(reader *bufio.Reader) (*NextDeployConfig, error) {
 		App: AppConfig{
 			Port: 3000,
 		},
-		Docker: DockerConfig{
-			Build: DockerBuild{
-				Context:    ".",
-				Dockerfile: "Dockerfile",
-				NoCache:    false,
-				Args:       map[string]string{"NODE_ENV": "production"},
-			},
-			Push: true,
-		},
-		Deployment: Deployment{
-			Container: Container{
-				Restart: "always",
-				Ports:   []string{"80:3000"},
-			},
-		},
 	}
 
 	if err := PromptAppConfig(reader, cfg); err != nil {
@@ -38,14 +23,6 @@ func PromptForConfig(reader *bufio.Reader) (*NextDeployConfig, error) {
 
 	if err := PromptRepositoryConfig(reader, cfg); err != nil {
 		return nil, fmt.Errorf("repository configuration error: %w", err)
-	}
-
-	if err := PromptDockerConfig(reader, cfg); err != nil {
-		return nil, fmt.Errorf("docker configuration error: %w", err)
-	}
-
-	if err := PromptDeploymentConfig(reader, cfg); err != nil {
-		return nil, fmt.Errorf("deployment configuration error: %w", err)
 	}
 
 	if PromptYesNo(reader, "Configure database?") {
@@ -112,57 +89,6 @@ func PromptRepositoryConfig(reader *bufio.Reader, cfg *NextDeployConfig) error {
 		secret, _ := reader.ReadString('\n')
 		cfg.Repository.WebhookSecret = strings.TrimSpace(secret)
 	}
-
-	return nil
-}
-
-func PromptDockerConfig(reader *bufio.Reader, cfg *NextDeployConfig) error {
-	fmt.Print("Docker image name (e.g., username/app): ")
-	image, err := ReadRequiredInput(reader)
-	if err != nil {
-		return err
-	}
-	cfg.Docker.Image = image
-
-	fmt.Print("Docker registry (leave empty for default): ")
-	registry, _ := reader.ReadString('\n')
-	cfg.Docker.Registry = strings.TrimSpace(registry)
-
-	cfg.Docker.Build.NoCache = PromptYesNo(reader, "Build without cache?")
-
-	return nil
-}
-
-func PromptDeploymentConfig(reader *bufio.Reader, cfg *NextDeployConfig) error {
-	fmt.Print("Deployment server host (IP or domain): ")
-	host, err := ReadRequiredInput(reader)
-	if err != nil {
-		return err
-	}
-	cfg.Deployment.Server.Host = host
-
-	fmt.Print("Server SSH user: ")
-	user, err := ReadRequiredInput(reader)
-	if err != nil {
-		return err
-	}
-	cfg.Deployment.Server.User = user
-
-	fmt.Print("SSH key path (~/.ssh/key): ")
-	keyPath, err := ReadRequiredInput(reader)
-	if err != nil {
-		return err
-	}
-	cfg.Deployment.Server.SSHKey = keyPath
-
-	cfg.Deployment.Server.UseSudo = PromptYesNo(reader, "Require sudo for deployment?")
-
-	fmt.Print("Container name: ")
-	name, err := ReadRequiredInput(reader)
-	if err != nil {
-		return err
-	}
-	cfg.Deployment.Container.Name = name
 
 	return nil
 }
@@ -276,21 +202,6 @@ func PromptForConfigs(reader *bufio.Reader) (*NextDeployConfig, error) {
 		App: AppConfig{
 			Port: 3000,
 		},
-		Docker: DockerConfig{
-			Build: DockerBuild{
-				Context:    ".",
-				Dockerfile: "Dockerfile",
-				NoCache:    false,
-				Args:       map[string]string{"NODE_ENV": "production"},
-			},
-			Push: true,
-		},
-		Deployment: Deployment{
-			Container: Container{
-				Restart: "always",
-				Ports:   []string{"80:3000"},
-			},
-		},
 	}
 
 	if err := PromptAppConfig(reader, cfg); err != nil {
@@ -299,14 +210,6 @@ func PromptForConfigs(reader *bufio.Reader) (*NextDeployConfig, error) {
 
 	if err := PromptRepositoryConfig(reader, cfg); err != nil {
 		return nil, fmt.Errorf("repository configuration error: %w", err)
-	}
-
-	if err := PromptDockerConfig(reader, cfg); err != nil {
-		return nil, fmt.Errorf("docker configuration error: %w", err)
-	}
-
-	if err := PromptDeploymentConfig(reader, cfg); err != nil {
-		return nil, fmt.Errorf("deployment configuration error: %w", err)
 	}
 
 	if PromptYesNo(reader, "Configure database?") {

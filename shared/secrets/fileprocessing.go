@@ -42,15 +42,12 @@ func (sm *SecretManager) EncryptEnvFile(masterKey string) (map[string]string, er
 	return results, nil
 }
 
-// EncryptFile encrypts a file using OpenSSL AES-256-CBC
 func (sm *SecretManager) EncryptFile(filename string, key []byte) error {
 	encryptedFilename := filename + ".enc"
 	return sm.encryptWithOpenSSL(filename, encryptedFilename, string(key))
 }
 
-// encryptWithOpenSSL is the core OpenSSL encryption function
 func (sm *SecretManager) encryptWithOpenSSL(inputPath, outputPath, password string) error {
-	// #nosec G204
 	cmd := exec.Command("openssl", "enc", "-aes-256-cbc", "-salt",
 		"-in", inputPath, "-out", outputPath, "-pass", "pass:"+password, "-pbkdf2")
 
@@ -61,7 +58,6 @@ func (sm *SecretManager) encryptWithOpenSSL(inputPath, outputPath, password stri
 		return fmt.Errorf("openssl encryption failed: %v, stderr: %s", err, stderr.String())
 	}
 
-	// Set secure permissions
 	if err := os.Chmod(outputPath, 0600); err != nil {
 		return fmt.Errorf("failed to set permissions on encrypted file: %w", err)
 	}
@@ -70,7 +66,6 @@ func (sm *SecretManager) encryptWithOpenSSL(inputPath, outputPath, password stri
 	return nil
 }
 
-// DecryptFile decrypts a file using OpenSSL AES-256-CBC
 func (sm *SecretManager) DecryptFile(filename string, key []byte) (string, error) {
 	if !strings.HasSuffix(filename, ".enc") {
 		return "", fmt.Errorf("file %s is not an encrypted file", filename)
@@ -87,58 +82,8 @@ func (sm *SecretManager) DecryptFile(filename string, key []byte) (string, error
 	return command, nil
 }
 
-// decryptWithOpenSSL is the core OpenSSL decryption function
 func (sm *SecretManager) decryptWithOpenSSL(inputPath, outputPath, password string) (string, error) {
 	// decrypt command is
 	command := "openssl enc -d -aes-256-cbc -in .env.enc -out .env -pass pass:%password"
 	return command, nil
-}
-
-// processSingleEnvFile handles decryption of a single environment file using OpenSSL
-func (sm *SecretManager) ProcessSingleEnvFile(path, key string) (*EnvFile, error) {
-	// SLogs.Debug("Processing env file: %s", path)
-	//
-	// decryptedPath := strings.TrimSuffix(path, ".enc")
-	// if err := sm.decryptWithOpenSSL(path, decryptedPath, key); err != nil {
-	// 	return nil, fmt.Errorf("decryption failed: %w", err)
-	// }
-	//
-	// content, err := os.ReadFile(decryptedPath)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("read failed: %w", err)
-	// }
-	//
-	// SLogs.Info("Decrypted env file written to %s", decryptedPath)
-	// return &EnvFile{
-	// 	EncryptedPath: path,
-	// 	DecryptedPath: decryptedPath,
-	// 	Content:       content,
-	// }, nil
-	return nil, fmt.Errorf("processSingleEnvFile is not implemented yet")
-}
-
-// ProcessConfigFile processes the config file using OpenSSL
-func (sm *SecretManager) ProcessConfigFile(cwd, key string) (*ConfigFile, error) {
-	// const configFileName = "nextdeploy.yml"
-	// encryptedPath := filepath.Join(cwd, configFileName+".enc")
-	//
-	// // Verify config file exists
-	// if _, err := os.Stat(encryptedPath); os.IsNotExist(err) {
-	// 	// We can encrypt the file here
-	// 	_, err := os.ReadFile(filepath.Join(cwd, configFileName))
-	// 	if err != nil {
-	// 		return nil, fmt.Errorf("failed to read config file: %w", err)
-	// 	}
-	// }
-	//
-	// // Decrypt config using OpenSSL
-	// decryptedPath := filepath.Join(cwd, configFileName)
-	// if err := sm.decryptWithOpenSSL(encryptedPath, decryptedPath, key); err != nil {
-	// 	return nil, fmt.Errorf("config decryption failed: %w", err)
-	// }
-	//
-	// return &ConfigFile{
-	// 	EncryptedPath: encryptedPath,
-	// }, nil
-	return nil, fmt.Errorf("ProcessConfigFile is not implemented yet")
 }

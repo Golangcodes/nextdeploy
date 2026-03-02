@@ -1,5 +1,3 @@
-// Package updater provides GitHub release-based update checking and self-update
-// functionality for the NextDeploy CLI and Daemon.
 package updater
 
 import (
@@ -20,14 +18,11 @@ const (
 	apiURL      = "https://api.github.com/repos/" + githubOwner + "/" + githubRepo + "/releases/latest"
 )
 
-// Release represents the subset of GitHub release API fields we care about.
 type Release struct {
 	TagName string `json:"tag_name"`
 	HTMLURL string `json:"html_url"`
 }
 
-// LatestRelease fetches the latest release tag from GitHub.
-// Returns an empty Release and an error on failure.
 func LatestRelease() (Release, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
@@ -40,7 +35,7 @@ func LatestRelease() (Release, error) {
 	if err != nil {
 		return Release{}, err
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return Release{}, fmt.Errorf("github API returned %d", resp.StatusCode)
@@ -53,8 +48,6 @@ func LatestRelease() (Release, error) {
 	return release, nil
 }
 
-// CheckAndPrint silently checks GitHub for a newer release and prints a one-line
-// hint to stderr. Designed to be called as a goroutine so it never blocks.
 func CheckAndPrint(current string) {
 	if current == "dev" {
 		return
@@ -69,8 +62,6 @@ func CheckAndPrint(current string) {
 	}
 }
 
-// isNewer returns true if candidate is strictly newer than current using
-// basic semver comparison (strips leading 'v' before comparing).
 func isNewer(candidate, current string) bool {
 	return semverGT(stripV(candidate), stripV(current))
 }
@@ -82,7 +73,6 @@ func stripV(v string) string {
 	return v
 }
 
-// semverGT returns true if a > b using dot-separated integer comparison.
 func semverGT(a, b string) bool {
 	aParts := splitVer(a)
 	bParts := splitVer(b)
@@ -129,7 +119,6 @@ func splitVer(v string) []int {
 	return parts
 }
 
-// currently running binary.
 func SelfUpdate(current string) error {
 	dest, err := os.Executable()
 	if err != nil {
@@ -142,7 +131,6 @@ func SelfUpdateDaemon(current string) error {
 	return selfUpdateBinary(current, "nextdeployd", "/usr/local/bin/nextdeployd", true)
 }
 
-// selfUpdateBinary is the shared implementation for CLI and daemon self-update.
 func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	fmt.Printf("Current version: %s\n", current)
 	fmt.Println("Fetching latest release info...")

@@ -123,26 +123,18 @@ func WithSSH() ServerOption {
 }
 
 func (s *ServerStruct) GetDeploymentServer() (string, error) {
-	if s.config == nil || s.config.Deployment.Server.Host == "" {
-		return "", fmt.Errorf("deployment server configuration is not set")
+	if s.config == nil || len(s.config.Servers) == 0 {
+		return "", fmt.Errorf("no servers configured")
 	}
 
-	deploymentTarget := s.config.Deployment.Server.Host
-
-	// find the matching server in servers list
-	for _, server := range s.config.Servers {
-		// Check if deployment target matches either server name OR host IP
-		if server.Name == deploymentTarget || server.Host == deploymentTarget {
-			_, err := connectSSH(server)
-			if err != nil {
-				return "", fmt.Errorf("failed to connect to deployment server %s (%s): %w",
-					server.Name, server.Host, err)
-			}
-			return server.Name, nil
-		}
+	// Always use the first server for now
+	first := s.config.Servers[0]
+	_, err := connectSSH(first)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to deployment server %s (%s): %w",
+			first.Name, first.Host, err)
 	}
-	return "", fmt.Errorf("deployment server %s not found in configuration (searched by name and host)",
-		deploymentTarget)
+	return first.Name, nil
 }
 func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 	// Validate IP/hostname

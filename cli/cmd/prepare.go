@@ -224,20 +224,10 @@ func resolveTargetServer() (string, config.ServerConfig, error) {
 	if len(cfg.Servers) == 0 {
 		return "", config.ServerConfig{}, fmt.Errorf("no servers configured in nextdeploy.yml")
 	}
-	if cfg.Deployment.Server.Host != "" {
-		needle := cfg.Deployment.Server.Host
-		for _, s := range cfg.Servers {
-			if s.Name == needle || s.Host == needle {
-				PrepLogs.Debug("Using configured deployment server: %s (%s)", s.Name, s.Host)
-				return s.Name, s, nil
-			}
-		}
-		PrepLogs.Warn("Deployment server %q not found in servers list (checked name and host), falling back to first server",
-			needle)
-	}
 
+	// Always use the first server for now as the primary target
 	first := cfg.Servers[0]
-	PrepLogs.Warn("No deployment server configured, using first server: %s", first.Name)
+	PrepLogs.Debug("Using primary server: %s (%s)", first.Name, first.Host)
 	return first.Name, first, nil
 }
 

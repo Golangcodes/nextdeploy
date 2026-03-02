@@ -12,8 +12,7 @@ type NextDeployConfig struct {
 	TargetType    string               `yaml:"target_type"` // e.g., "vps", "serverless"
 	App           AppConfig            `yaml:"app"`
 	Repository    Repository           `yaml:"repository"`
-	Docker        DockerConfig         `yaml:"docker"`
-	Deployment    Deployment           `yaml:"deployment"`
+	Docker        *DockerConfig        `yaml:"docker,omitempty"`
 	Serverless    *ServerlessConfig    `yaml:"serverless,omitempty"`
 	Database      *Database            `yaml:"database,omitempty"`
 	Monitoring    *Monitoring          `yaml:"monitoring,omitempty"`
@@ -21,11 +20,11 @@ type NextDeployConfig struct {
 	Logging       Logging              `yaml:"logging,omitempty"`
 	Backup        *Backup              `yaml:"backup,omitempty"`
 	SSL           *SSL                 `yaml:"ssl,omitempty"`
-	Webhooks      []Webhook            `yaml:"webhooks,omitempty"`
+	Webhook       *WebhookConfig       `yaml:"webhook,omitempty"`
 	Environment   []EnvVariable        `yaml:"environment,omitempty"`
-	Servers       []ServerConfig       `yaml:"servers"`
+	Servers       []ServerConfig       `yaml:"servers,omitempty"`
 	SSLConfig     *SSLConfig           `yaml:"ssl_config,omitempty"`
-	CloudProvider *CloudProviderStruct `yaml:"cloud_provider,omitempty"`
+	CloudProvider *CloudProviderStruct `yaml:"CloudProvider,omitempty"`
 }
 
 type SafeConfig struct {
@@ -122,51 +121,30 @@ type DockerBuild struct {
 	Args       map[string]string `yaml:"args,omitempty"`
 }
 
-type Deployment struct {
-	Server    Server    `yaml:"server"`
-	Container Container `yaml:"container"`
-}
-type Server struct {
-	Host    string `yaml:"host"`
-	User    string `yaml:"user"`
-	SSHKey  string `yaml:"sshKey,omitempty"`
-	UseSudo bool   `yaml:"useSudo"`
-}
-
-type Container struct {
-	Name        string       `yaml:"name"`
-	Restart     string       `yaml:"restart"`
-	Ports       []string     `yaml:"ports"`
-	HealthCheck *HealthCheck `yaml:"healthCheck,omitempty"`
-}
-type HealthCheck struct {
-	Test     []string `yaml:"test,omitempty"`
-	Interval string   `yaml:"interval,omitempty"`
-	Timeout  string   `yaml:"timeout,omitempty"`
-	Retries  int      `yaml:"retries,omitempty"`
-}
-
 type Database struct {
-	Type     string `yaml:"type"`
-	Host     string `yaml:"host"`
-	Port     string `yaml:"port"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	Name     string `yaml:"name"`
+	Type            string `yaml:"type"`
+	Host            string `yaml:"host"`
+	Port            string `yaml:"port"`
+	Username        string `yaml:"username"`
+	Password        string `yaml:"password"`
+	Name            string `yaml:"name"`
+	MigrateOnDeploy bool   `yaml:"migrate_on_deploy,omitempty"`
 }
 
 type Monitoring struct {
-	Enabled  bool   `yaml:"enabled"`
-	Type     string `yaml:"type"`
-	Endpoint string `yaml:"endpoint"`
-	Alerts   Alerts `yaml:"alerts,omitempty"`
+	Enabled         bool   `yaml:"enabled"`
+	Type            string `yaml:"type"`
+	Endpoint        string `yaml:"endpoint"`
+	CPUThreshold    int    `yaml:"cpu_threshold,omitempty"`
+	MemoryThreshold int    `yaml:"memory_threshold,omitempty"`
+	DiskThreshold   int    `yaml:"disk_threshold,omitempty"`
+	Alert           *Alert `yaml:"alert,omitempty"`
 }
 
-type Alerts struct {
-	CPUThreshold    int    `yaml:"cpuThreshold"`
-	MemoryThreshold int    `yaml:"memoryThreshold"`
-	Email           string `yaml:"email,omitempty"`
-	SlackWebhook    string `yaml:"slackWebhook,omitempty"`
+type Alert struct {
+	Email        string   `yaml:"email,omitempty"`
+	SlackWebhook string   `yaml:"slack_webhook,omitempty"`
+	NotifyOn     []string `yaml:"notify_on,omitempty"`
 }
 
 type SecretsConfig struct {
@@ -197,15 +175,17 @@ type SecretFile struct {
 }
 
 type Logging struct {
-	Driver  string            `yaml:"driver"`
-	Options map[string]string `yaml:"options,omitempty"`
+	Enabled    bool   `yaml:"enabled"`
+	Provider   string `yaml:"provider"`
+	StreamLogs bool   `yaml:"stream_logs"`
+	LogPath    string `yaml:"log_path"`
 }
 
 type Backup struct {
-	Enabled   bool    `yaml:"enabled"`
-	Schedule  string  `yaml:"schedule"`
-	Retention int     `yaml:"retentionDays"`
-	Storage   Storage `yaml:"storage"`
+	Enabled       bool    `yaml:"enabled"`
+	Frequency     string  `yaml:"frequency,omitempty"`
+	RetentionDays int     `yaml:"retention_days,omitempty"`
+	Storage       Storage `yaml:"storage"`
 }
 
 type Storage struct {
@@ -229,11 +209,9 @@ type SSL struct {
 	Domain      string   `yaml:"domain,omitempty"`
 }
 
-type Webhook struct {
-	Name   string   `yaml:"name"`
-	URL    string   `yaml:"url"`
-	Events []string `yaml:"events"`
-	Secret string   `yaml:"secret,omitempty"`
+type WebhookConfig struct {
+	OnSuccess []string `yaml:"on_success,omitempty"`
+	OnFailure []string `yaml:"on_failure,omitempty"`
 }
 
 type EnvVariable struct {

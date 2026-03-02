@@ -19,14 +19,14 @@ const (
 type MessageType string
 
 const (
-	TypeCommand         MessageType = "command" // Command to execute
+	TypeCommand         MessageType = "command"
 	TypeCommandResponse MessageType = "command_response"
-	TypeStatus          MessageType = "status"   // Status update
-	TypeResponse        MessageType = "response" // Response to a command
-	TypeEvent           MessageType = "event"    // Event notification
-	TypeLog             MessageType = "log"      // Log message
-	TypeError           MessageType = "error"    // Error message
-	TypeAuth            MessageType = "auth"     // Authentication message
+	TypeStatus          MessageType = "status"
+	TypeResponse        MessageType = "response"
+	TypeEvent           MessageType = "event"
+	TypeLog             MessageType = "log"
+	TypeError           MessageType = "error"
+	TypeAuth            MessageType = "auth"
 	TypeStatusAck       MessageType = "status_ack"
 	TypeAuthResponse    MessageType = "auth_response"
 )
@@ -38,60 +38,50 @@ type AgentMessage struct {
 	Payload   json.RawMessage   `json:"payload"`
 	Timestamp int64             `json:"timestamp"`
 	AgentID   string            `json:"agent_id"`
-	Signature string            `json:"signature,omitempty"` // ECC signature of the message
-	Context   map[string]string `json:"context,omitempty"`   // Additional context for the message
+	Signature string            `json:"signature,omitempty"`
+	Context   map[string]string `json:"context,omitempty"`
 }
 
-// CommandPayload represents a command sent to an agent
 type CommandPayload struct {
-	Name string      `json:"name"`           // Command name (e.g., "restart", "deploy")
-	Args []string    `json:"args,omitempty"` // Command arguments
-	ID   string      `json:"id"`             // Unique command ID for tracking
-	Meta interface{} `json:"meta,omitempty"` // Additional metadata
+	Name string      `json:"name"`
+	Args []string    `json:"args,omitempty"`
+	ID   string      `json:"id"`
+	Meta interface{} `json:"meta,omitempty"`
 }
 
-// StatusPayload represents an agent status update
 type StatusPayload struct {
-	Status  string                 `json:"status"`            // Current status (e.g., "healthy", "degraded")
-	Metrics map[string]interface{} `json:"metrics,omitempty"` // System metrics
-	Load    SystemLoad             `json:"load,omitempty"`    // System load information
+	Status  string                 `json:"status"`
+	Metrics map[string]interface{} `json:"metrics,omitempty"`
+	Load    SystemLoad             `json:"load,omitempty"`
 }
 
-// SystemLoad contains system load information
 type SystemLoad struct {
-	CPU    float64 `json:"cpu"`    // CPU usage percentage
-	Memory float64 `json:"memory"` // Memory usage percentage
-	Disk   float64 `json:"disk"`   // Disk usage percentage
+	CPU    float64 `json:"cpu"`
+	Memory float64 `json:"memory"`
+	Disk   float64 `json:"disk"`
 }
 
-// AuthPayload represents an authentication request
 type AuthPayload struct {
-	Token    string `json:"token"`              // Authentication token
-	Version  string `json:"version"`            // Agent version
-	Hostname string `json:"hostname,omitempty"` // Agent hostname
+	Token    string `json:"token"`
+	Version  string `json:"version"`
+	Hostname string `json:"hostname,omitempty"`
 }
 
-// EventPayload represents an event notification
 type EventPayload struct {
-	Type string      `json:"type"` // Event type (e.g., "deployment_started")
-	Data interface{} `json:"data"` // Event-specific data
+	Type string      `json:"type"`
+	Data interface{} `json:"data"`
 }
 
-// ErrorPayload represents an error response
 type ErrorPayload struct {
-	Message string `json:"message"`           // Error message
-	Code    int    `json:"code,omitempty"`    // Optional error code
-	Details string `json:"details,omitempty"` // Additional error details
+	Message string `json:"message"`
+	Code    int    `json:"code,omitempty"`
+	Details string `json:"details,omitempty"`
 }
 
-// Helper functions
-
-// GetCurrentTimestamp returns the current Unix timestamp
 func GetCurrentTimestamp() int64 {
 	return time.Now().Unix()
 }
 
-// NewCommandMessage creates a new command message
 func NewCommandMessage(agentID string, command CommandPayload) (AgentMessage, error) {
 	payload, err := json.Marshal(command)
 	if err != nil {
@@ -106,7 +96,6 @@ func NewCommandMessage(agentID string, command CommandPayload) (AgentMessage, er
 	}, nil
 }
 
-// NewStatusMessage creates a new status message
 func NewStatusMessage(agentID string, status StatusPayload) (AgentMessage, error) {
 	payload, err := json.Marshal(status)
 	if err != nil {
@@ -121,17 +110,15 @@ func NewStatusMessage(agentID string, status StatusPayload) (AgentMessage, error
 	}, nil
 }
 
-// EncryptedEnv represents the encrypted environment variables
 type EncryptedEnv struct {
-	KeyID        string            `json:"key_id"`         // Daemon's key ID used for encryption
-	EnvBlob      string            `json:"env_blob"`       // Base64 encoded encrypted full .env content
-	Variables    map[string]string `json:"variables"`      // Map of encrypted individual variables
-	Nonce        string            `json:"nonce"`          // Base64 encoded nonce used for encryption
-	Timestamp    time.Time         `json:"timestamp"`      // When the payload was created
-	CLIPublicKey string            `json:"cli_public_key"` // Base64 encoded CLI's ECDH public key
+	KeyID        string            `json:"key_id"`
+	EnvBlob      string            `json:"env_blob"`
+	Variables    map[string]string `json:"variables"`
+	Nonce        string            `json:"nonce"`
+	Timestamp    time.Time         `json:"timestamp"`
+	CLIPublicKey string            `json:"cli_public_key"`
 }
 
-// RBAC Roles
 const (
 	RoleOwner    = "owner"
 	RoleAdmin    = "admin"
@@ -140,28 +127,26 @@ const (
 )
 
 type Identity struct {
-	Fingerprint string    `json:"fingerprint"` // SHA-256 of public key
-	PublicKey   string    `json:"public_key"`  // Base64 encoded public key
-	SignPublic  string    `json:"sign_public"` // Base64 encoded Ed25519 public key
-	Role        string    `json:"role"`        // RBAC role (owner, admin, deployer, etc.)
-	Email       string    `json:"email"`       // User email/identifier
-	AddedBy     string    `json:"added_by"`    // Who added this identity
-	CreatedAt   time.Time `json:"created_at"`  // When this identity was added
+	Fingerprint string    `json:"fingerprint"`
+	PublicKey   string    `json:"public_key"`
+	SignPublic  string    `json:"sign_public"`
+	Role        string    `json:"role"`
+	Email       string    `json:"email"`
+	AddedBy     string    `json:"added_by"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type Envelope struct {
-	Payload   []byte `json:"payload"`   // JSON string of EncryptedEnv
-	Signature string `json:"signature"` // Base64 encoded signature of the payload
+	Payload   []byte `json:"payload"`
+	Signature string `json:"signature"`
 }
 
-// PublicKeyResponse is the response from the daemon's /public-key endpoint
 type PublicKeyResponse struct {
-	KeyID      string `json:"key_id"`      // Identifier for the key
-	PublicKey  string `json:"public_key"`  // Base64 encoded ECDH public key
-	SignPublic string `json:"sign_public"` // Base64 encoded Ed25519 public key
+	KeyID      string `json:"key_id"`
+	PublicKey  string `json:"public_key"`
+	SignPublic string `json:"sign_public"`
 }
 
-// TrustedKey represents a trusted daemon public key stored by the CLI
 type TrustedKey struct {
 	KeyID       string          `json:"key_id"`
 	PublicKey   *ecdh.PublicKey `json:"public_key"`
@@ -169,42 +154,38 @@ type TrustedKey struct {
 	Fingerprint string          `json:"fingerprint"`
 }
 
-// TrustStore is a collection of trusted keys
 type TrustStore struct {
 	Keys       []TrustedKey `json:"keys"`
-	Identities []Identity
+	Identities []Identity   `json:"identities"`
 }
 
 type AuditLogEntry struct {
-	Action    string    `json:"action"`       // What happened
-	Actor     string    `json:"actor"`        // Who did it (fingerprint)
-	Target    string    `json:"target"`       // What was affected
-	Timestamp time.Time `json:"timestamp"`    // When it happened
-	Signature string    `json:"signature"`    // Signature of the action
-	IP        string    `json:"ip,omitempty"` // Optional IP address
-	Message   string    `json:"message"`      // Optional message or details:
-	Client    string    `json:"client_id"`    // Client identifier (if applicable)
+	Action    string    `json:"action"`
+	Actor     string    `json:"actor"`
+	Target    string    `json:"target"`
+	Timestamp time.Time `json:"timestamp"`
+	Signature string    `json:"signature"`
+	IP        string    `json:"ip,omitempty"`
+	Message   string    `json:"message"`
+	Client    string    `json:"client_id"`
 }
 
-// EnvFile represents a parsed .env file
 type EnvFile struct {
 	Variables map[string]string
 	Raw       []byte
 }
 
 func ParseEnvFile(content []byte) (*EnvFile, error) {
-	// Simplified parser
 	variables := make(map[string]string)
 	lines := strings.Split(string(content), "\n")
 	for _, line := range lines {
 		if line == "" || strings.HasPrefix(line, "#") {
-			continue // Skip empty lines and components
+			continue
 		}
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
 			SharedLogger.Error("Invalid line in .env file: %s", line)
 			return nil, fmt.Errorf("invalid line in .env file: %s", line)
-
 		}
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])

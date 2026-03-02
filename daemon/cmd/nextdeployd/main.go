@@ -15,6 +15,7 @@ import (
 	daemontypes "github.com/Golangcodes/nextdeploy/daemon/internal/types"
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/updater"
+	"github.com/gofrs/flock"
 )
 
 func main() {
@@ -230,28 +231,35 @@ func daemonize() {
 }
 
 func acquireLock() error {
-	lockPath := "/var/run/nextdeployd.pid"
+	lockPath := "/var/run/nextdeployd.lock"
 	if os.Geteuid() != 0 {
 		home, err := os.UserHomeDir()
 		if err == nil {
-			lockPath = filepath.Join(home, ".nextdeploy", "nextdeployd.pid")
+			lockPath = filepath.Join(home, ".nextdeploy", "nextdeployd.lock")
 		} else {
-			lockPath = "/tmp/nextdeployd.pid"
+			lockPath = filepath.Join(os.TempDir(), "nextdeployd.lock")
 		}
 	}
+
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0750); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+
+	fileLock := flock.New(lockPath)
+	locked, err := fileLock.TryLock()
 	if err != nil {
-		return err
+		return fmt.Errorf("error acquiring lock: %v", err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = f.Close()
+	if !locked {
 		return fmt.Errorf("another instance of nextdeployd is already running")
 	}
-	_ = f.Truncate(0)
-	_, _ = f.WriteString(fmt.Sprintf("%d\n", os.Getpid()))
+
+	pidPath := strings.TrimSuffix(lockPath, ".lock") + ".pid"
+	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0600); err != nil {
+		fileLock.Unlock()
+		return fmt.Errorf("error writing PID file: %v", err)
+	}
+
 	return nil
 }
 
@@ -266,5 +274,15 @@ func runDaemon(configPath string) {
 	}
 	if err := d.Start(); err != nil {
 		log.Fatalf("Error starting daemon: %v", err)
+	}
+}
+
+func isRoot() bool {
+	return os.Geteuid() == 0
+}
+
+func getSysProcAttr() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{
+		Setsid: true,
 	}
 }

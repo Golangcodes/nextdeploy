@@ -1,12 +1,13 @@
 ---
 # nextdeploy prepare playbook
 # Provisions a fresh Linux server with everything NextDeploy needs:
-#   Node.js (webi, 3-tier glibc fallback)
-#   Bun     (webi)
-#   Caddy   (apt repo OR yum COPR + static binary fallback)
+#   Node.js      (webi latest → webi@18 → unofficial glibc-217 build)
+#   Bun          (official installer, symlinked to /usr/local/bin)
+#   Go           (auto-fetches latest stable from go.dev, falls back to go_version_fallback)
+#   Caddy        (apt repo OR yum COPR → static binary fallback)
 #   Doppler CLI
-#   nextdeployd daemon
-#   /opt/nextjs-app directory
+#   nextdeployd  (GitHub release binary → go install fallback)
+#   /opt/nextdeploy directory tree
 
 - name: NextDeploy – Prepare server
   hosts: target
@@ -14,13 +15,15 @@
   become: false
 
   vars:
-    node22_version: "22.22.0"
-    go_version: "1.26.0"
+    node22_version: "22.22.0" # used only for the glibc-217 tier-3 Node fallback
+    go_version_fallback: "1.25.7" # used only if go.dev/VERSION cannot be fetched
     app_root: /opt/nextdeploy
     app_dir: /opt/nextdeploy/apps
-    caddy_fallback_version: "2.8.4"
+    caddy_fallback_version: "2.8.4" # used only if GitHub API is unreachable
 
-  # ── Phase 1: prerequisites ──────────────────────────────────────────────────
+  # ────────────────────────────────────────────────────────────────────────────
+  # PHASE 1 – System bootstrap & info
+  # ────────────────────────────────────────────────────────────────────────────
   tasks:
     - name: "Phase 1 | Security | Create nextdeploy group"
       ansible.builtin.group:
@@ -46,45 +49,33 @@
         append: true
       become: true
 
-    - name: "Phase 1 | System information"
-      ansible.builtin.command: uname -a
-      register: uname_out
-      changed_when: false
-
-    - name: "Phase 1 | Disk space"
-      ansible.builtin.command: df -h /
-      register: df_out
-      changed_when: false
-
-    - name: "Phase 1 | Memory"
-      ansible.builtin.command: free -m
-      register: mem_out
-      changed_when: false
-
-    - name: "Phase 1 | Uptime"
-      ansible.builtin.command: uptime
-      register: uptime_out
+    - name: "Phase 1 | Gather system info"
+      ansible.builtin.shell: |
+        echo "uname  : $(uname -a)"
+        echo "disk   : $(df -h / | awk 'NR==2')"
+        echo "memory : $(free -m | awk 'NR==2')"
+        echo "uptime : $(uptime)"
+      register: sysinfo
       changed_when: false
 
     - name: "Phase 1 | Print system summary"
       ansible.builtin.debug:
-        msg:
-          - "uname  : {{ uname_out.stdout }}"
-          - "disk   : {{ df_out.stdout_lines[1] | default('n/a') }}"
-          - "memory : {{ mem_out.stdout_lines[1] | default('n/a') }}"
-          - "uptime : {{ uptime_out.stdout }}"
+        msg: "{{ sysinfo.stdout_lines }}"
 
-    # ── Phase 2: base packages ──────────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────────
+    # PHASE 2 – Base packages
+    # ────────────────────────────────────────────────────────────────────────────
 
-    # ---------- apt ------------------------------------------------------------
-    - name: "Phase 2 | apt – update cache"
+    # ── apt ──────────────────────────────────────────────────────────────────
+
+    - name: "Phase 2 | apt | Update cache"
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
       become: true
       when: ansible_pkg_mgr == "apt"
 
-    - name: "Phase 2 | apt – install base packages"
+    - name: "Phase 2 | apt | Install base packages"
       ansible.builtin.apt:
         name:
           - curl
@@ -93,18 +84,21 @@
           - gcc
           - build-essential
           - ca-certificates
+          - unzip
+          - file
         state: present
       become: true
       when: ansible_pkg_mgr == "apt"
 
-    # ---------- yum ------------------------------------------------------------
-    - name: "Phase 2 | yum – clean cache"
+    # ── yum ──────────────────────────────────────────────────────────────────
+
+    - name: "Phase 2 | yum | Clean cache"
       ansible.builtin.command: yum clean all -q
       become: true
       changed_when: false
       when: ansible_pkg_mgr == "yum"
 
-    - name: "Phase 2 | yum – install base packages"
+    - name: "Phase 2 | yum | Install base packages"
       ansible.builtin.yum:
         name:
           - curl
@@ -114,61 +108,68 @@
           - glibc-static
           - ca-certificates
           - yum-utils
+          - unzip
+          - file
         state: present
       become: true
       when: ansible_pkg_mgr == "yum"
 
-    # ── Phase 2: Node.js (webi, 3-tier glibc fallback) ─────────────────────────
+    # ────────────────────────────────────────────────────────────────────────────
+    # PHASE 2 – Node.js  (3-tier glibc fallback)
+    # ────────────────────────────────────────────────────────────────────────────
 
-    - name: "Phase 2 | Node.js – check if functional"
+    - name: "Phase 2 | Node.js | Check if already functional"
       ansible.builtin.shell: |
         set +e
         OUT=$(node --version 2>&1)
         RC=$?
-        # Treat glibc errors as broken even if exit code is 0
         echo "$OUT" | grep -qi 'glibc' && exit 1
         exit $RC
       register: node_pre
       failed_when: false
       changed_when: false
 
-    # Attempt 1 – latest stable (glibc 2.28+)
-    - name: "Phase 2 | Node.js – install via webi (latest)"
+    # Tier 1 – webi latest (glibc 2.28+)
+    - name: "Phase 2 | Node.js | Tier-1: install via webi latest"
       ansible.builtin.shell: |
-        curl -sS https://webi.sh/node | sh
+        set -euo pipefail
+        curl -fsSL https://webi.sh/node | sh
         NODE_DIR="${HOME}/.local/opt/node/bin"
-        [ -f "${NODE_DIR}/node" ] && sudo ln -sf "${NODE_DIR}/node" /usr/local/bin/node || true
-        [ -f "${NODE_DIR}/npm"  ] && sudo ln -sf "${NODE_DIR}/npm"  /usr/local/bin/npm  || true
-        [ -f "${NODE_DIR}/npx"  ] && sudo ln -sf "${NODE_DIR}/npx"  /usr/local/bin/npx  || true
+        for BIN in node npm npx; do
+          [ -f "${NODE_DIR}/${BIN}" ] && sudo ln -sf "${NODE_DIR}/${BIN}" "/usr/local/bin/${BIN}" || true
+        done
+      args:
+        executable: /bin/bash
       when: node_pre.rc != 0
 
-    - name: "Phase 2 | Node.js – re-check after webi latest"
+    - name: "Phase 2 | Node.js | Re-check after webi latest"
       ansible.builtin.shell: >
-        env -i HOME="$HOME"
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         node --version
       register: node_after_latest
       failed_when: false
       changed_when: false
       when: node_pre.rc != 0
 
-    # Attempt 2 – Node 18 (glibc 2.27+, Ubuntu 18.04 / Debian Buster)
-    - name: "Phase 2 | Node.js – install via webi@18 (glibc 2.27 fallback)"
+    # Tier 2 – webi@18 (glibc 2.27+, Ubuntu 18.04 / Debian Buster)
+    - name: "Phase 2 | Node.js | Tier-2: install via webi@18"
       ansible.builtin.shell: |
-        curl -sS https://webi.sh/node@18 | sh
+        set -euo pipefail
+        curl -fsSL https://webi.sh/node@18 | sh
         NODE_DIR="${HOME}/.local/opt/node/bin"
-        [ -f "${NODE_DIR}/node" ] && sudo ln -sf "${NODE_DIR}/node" /usr/local/bin/node || true
-        [ -f "${NODE_DIR}/npm"  ] && sudo ln -sf "${NODE_DIR}/npm"  /usr/local/bin/npm  || true
-        [ -f "${NODE_DIR}/npx"  ] && sudo ln -sf "${NODE_DIR}/npx"  /usr/local/bin/npx  || true
+        for BIN in node npm npx; do
+          [ -f "${NODE_DIR}/${BIN}" ] && sudo ln -sf "${NODE_DIR}/${BIN}" "/usr/local/bin/${BIN}" || true
+        done
+      args:
+        executable: /bin/bash
       when:
         - node_pre.rc != 0
         - node_after_latest is defined
         - node_after_latest.rc != 0
 
-    - name: "Phase 2 | Node.js – re-check after webi@18"
+    - name: "Phase 2 | Node.js | Re-check after webi@18"
       ansible.builtin.shell: >
-        env -i HOME="$HOME"
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         node --version
       register: node_after_18
       failed_when: false
@@ -178,16 +179,19 @@
         - node_after_latest is defined
         - node_after_latest.rc != 0
 
-    # Attempt 3 – Node 22 unofficial glibc-217 build (glibc 2.17+, covers AL2)
-    - name: "Phase 2 | Node.js – install Node 22 glibc-217 build (ultimate fallback)"
+    # Tier 3 – unofficial glibc-217 build (glibc 2.17+, covers Amazon Linux 2)
+    - name: "Phase 2 | Node.js | Tier-3: install glibc-217 build (ultimate fallback)"
       ansible.builtin.shell: |
+        set -euo pipefail
         sudo mkdir -p /opt/node22
-        curl -fsSL \
+        curl -fsSL --retry 3 --retry-delay 2 \
           "https://unofficial-builds.nodejs.org/download/release/v{{ node22_version }}/node-v{{ node22_version }}-linux-x64-glibc-217.tar.gz" \
           | sudo tar -xzf - -C /opt/node22 --strip-components=1
-        sudo ln -sf /opt/node22/bin/node /usr/local/bin/node
-        sudo ln -sf /opt/node22/bin/npm  /usr/local/bin/npm
-        sudo ln -sf /opt/node22/bin/npx  /usr/local/bin/npx
+        for BIN in node npm npx; do
+          sudo ln -sf "/opt/node22/bin/${BIN}" "/usr/local/bin/${BIN}"
+        done
+      args:
+        executable: /bin/bash
       when:
         - node_pre.rc != 0
         - node_after_latest is defined
@@ -195,111 +199,199 @@
         - node_after_18 is defined
         - node_after_18.rc != 0
 
-    - name: "Phase 2 | Node.js – final functional check"
+    - name: "Phase 2 | Node.js | Final functional check"
       ansible.builtin.shell: >
-        env -i HOME="$HOME"
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         node --version
       register: node_final
       changed_when: false
 
-    - name: "Phase 2 | Node.js – assert runnable"
+    - name: "Phase 2 | Node.js | Assert runnable"
       ansible.builtin.assert:
         that: node_final.rc == 0
         fail_msg: >-
-          node is not runnable after all install attempts —
-          glibc on this system may be too old even for the glibc-217 build.
+          node is not runnable after all three install tiers.
+          glibc on this host may be older than 2.17 — manual intervention required.
 
-    # ── Phase 2: Bun (webi) ────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────────
+    # PHASE 2 – Bun
+    # ────────────────────────────────────────────────────────────────────────────
 
-    - name: "Phase 2 | Bun – check if installed"
-      ansible.builtin.shell: >
-        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        sh -c 'command -v bun >/dev/null 2>&1 && echo installed || echo missing'
-      register: bun_check
-      changed_when: false
+    - name: "Phase 2 | Bun | Check if already installed"
+      ansible.builtin.stat:
+        path: /usr/local/bin/bun
+      register: bun_stat_pre
 
-    - name: "Phase 2 | Bun – install via webi"
+    - name: "Phase 2 | Bun | Install via official installer"
       ansible.builtin.shell: |
-        curl -sS https://webi.sh/bun | sh
-        BUN_BIN="${HOME}/.local/opt/bun/bin/bun"
-        [ -f "${BUN_BIN}" ] && sudo ln -sf "${BUN_BIN}" /usr/local/bin/bun || true
-      when: "'installed' not in bun_check.stdout"
+        set -euo pipefail
 
-    - name: "Phase 2 | Bun – verify"
-      ansible.builtin.shell: >
-        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        sh -c 'command -v bun >/dev/null 2>&1 && echo installed || echo missing'
-      register: bun_verify
-      changed_when: false
-      when: "'installed' not in bun_check.stdout"
+        # bun installer requires unzip — installed in base packages but double-check
+        if command -v apt-get >/dev/null 2>&1; then
+          sudo apt-get install -y unzip >/dev/null 2>&1 || true
+        elif command -v yum >/dev/null 2>&1; then
+          sudo yum install -y unzip >/dev/null 2>&1 || true
+        fi
 
-    - name: "Phase 2 | Bun – assert installed"
+        curl -fsSL https://bun.sh/install | bash
+
+        # Symlink into /usr/local/bin from all known landing spots
+        LINKED=false
+        for BUN_BIN in \
+            "${HOME}/.bun/bin/bun" \
+            "${HOME}/.local/bin/bun" \
+            "${HOME}/.local/opt/bun/bin/bun"; do
+          if [ -x "${BUN_BIN}" ]; then
+            sudo ln -sf "${BUN_BIN}" /usr/local/bin/bun
+            echo "Linked bun from ${BUN_BIN}"
+            LINKED=true
+            break
+          fi
+        done
+
+        if [ "${LINKED}" = "false" ]; then
+          echo "ERROR: bun binary not found in any expected location after install" >&2
+          echo "Searched: ~/.bun/bin/bun  ~/.local/bin/bun  ~/.local/opt/bun/bin/bun" >&2
+          exit 1
+        fi
+      args:
+        executable: /bin/bash
+      when: not bun_stat_pre.stat.exists
+
+    - name: "Phase 2 | Bun | Verify symlink is executable"
+      ansible.builtin.stat:
+        path: /usr/local/bin/bun
+      register: bun_stat_post
+
+    - name: "Phase 2 | Bun | Assert installed and executable"
       ansible.builtin.assert:
-        that: >-
-          'installed' in bun_check.stdout or
-          (bun_verify is defined and 'installed' in bun_verify.stdout)
-        fail_msg: "bun webi install appeared to succeed but bun is not in PATH"
+        that:
+          - bun_stat_post.stat.exists
+          - bun_stat_post.stat.executable
+        fail_msg: >-
+          /usr/local/bin/bun does not exist or is not executable after install.
+          Check that bun.sh installer succeeded and that one of
+          ~/.bun/bin/bun | ~/.local/bin/bun | ~/.local/opt/bun/bin/bun was created.
 
-    # ── Phase 2: Go ────────────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────────
+    # PHASE 2 – Go  (auto-resolves latest stable; falls back to go_version_fallback)
+    # ────────────────────────────────────────────────────────────────────────────
 
-    - name: "Phase 2 | Go – check if installed"
+    - name: "Phase 2 | Go | Check if already installed"
       ansible.builtin.shell: >
         env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        sh -c 'command -v go >/dev/null 2>&1 && go version || echo missing'
+        go version 2>/dev/null || echo missing
       register: go_check
       changed_when: false
 
-    - name: "Phase 2 | Go – download and install go{{ go_version }}"
+    - name: "Phase 2 | Go | Resolve latest stable version from go.dev"
       ansible.builtin.shell: |
+        set -euo pipefail
+        # go.dev/VERSION returns the canonical latest stable string e.g. "go1.25.7"
+        VER=$(curl -fsSL --retry 3 --retry-delay 2 https://go.dev/VERSION?m=text 2>/dev/null \
+              | head -1 \
+              | sed 's/^go//')
+        if echo "${VER}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "${VER}"
+        else
+          echo "{{ go_version_fallback }}"
+        fi
+      args:
+        executable: /bin/bash
+      register: go_resolved_version
+      changed_when: false
+      when: "'go version' not in go_check.stdout"
+
+    - name: "Phase 2 | Go | Install go{{ go_resolved_version.stdout | default(go_version_fallback) | trim }}"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        GO_VERSION="{{ go_resolved_version.stdout | default(go_version_fallback) | trim }}"
+        ARCH="{{ ansible_architecture | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
+        TARBALL="/tmp/go.tar.gz"
+
+        echo "Installing Go ${GO_VERSION} (${ARCH})..."
         curl -fsSL --retry 3 --retry-delay 2 \
-          https://go.dev/dl/go{{ go_version }}.linux-{{ ansible_architecture | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}.tar.gz \
-          -o /tmp/go.tar.gz
+          "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" \
+          -o "${TARBALL}"
+
+        if ! tar -tzf "${TARBALL}" >/dev/null 2>&1; then
+          echo "ERROR: Go tarball is corrupt or invalid (version=${GO_VERSION}, arch=${ARCH})" >&2
+          rm -f "${TARBALL}"
+          exit 1
+        fi
+
         sudo rm -rf /usr/local/go
-        sudo tar -C /usr/local -xzf /tmp/go.tar.gz
-        rm -f /tmp/go.tar.gz
+        sudo tar -C /usr/local -xzf "${TARBALL}"
+        rm -f "${TARBALL}"
+
         sudo ln -sf /usr/local/go/bin/go    /usr/local/bin/go
         sudo ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+      args:
+        executable: /bin/bash
       become: true
-      when: "'missing' in go_check.stdout or 'go version' not in go_check.stdout"
+      when: "'go version' not in go_check.stdout"
 
-    - name: "Phase 2 | Go – verify"
+    - name: "Phase 2 | Go | Final check"
       ansible.builtin.shell: >
         env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         go version
       register: go_final
       changed_when: false
 
-    - name: "Phase 2 | Go – assert installed"
+    - name: "Phase 2 | Go | Assert installed"
       ansible.builtin.assert:
         that: "'go version' in go_final.stdout"
-        fail_msg: "go installation failed — 'go version' not in PATH"
+        fail_msg: >-
+          go installation failed — 'go version' not found in PATH.
+          Attempted version: {{ go_resolved_version.stdout | default(go_version_fallback) | trim }}
 
-    # ── Phase 2: Doppler CLI ───────────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────────
+    # PHASE 2 – Doppler CLI
+    # ────────────────────────────────────────────────────────────────────────────
 
-    - name: "Phase 2 | Doppler – check if installed"
+    - name: "Phase 2 | Doppler | Check if already installed"
+      ansible.builtin.stat:
+        path: /usr/local/bin/doppler
+      register: doppler_stat
+
+    - name: "Phase 2 | Doppler | Install CLI"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if command -v curl >/dev/null 2>&1; then
+          curl -fsSL --tlsv1.2 --proto "=https" --retry 3 \
+            https://cli.doppler.com/install.sh | sudo sh
+        elif command -v wget >/dev/null 2>&1; then
+          wget -t 3 -qO- https://cli.doppler.com/install.sh | sudo sh
+        else
+          echo "ERROR: neither curl nor wget available — cannot install Doppler" >&2
+          exit 1
+        fi
+      args:
+        executable: /bin/bash
+      when: not doppler_stat.stat.exists
+
+    - name: "Phase 2 | Doppler | Assert installed"
       ansible.builtin.shell: >
         env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        sh -c 'command -v doppler >/dev/null 2>&1 && echo installed || echo missing'
-      register: doppler_check
+        command -v doppler
+      register: doppler_which
       changed_when: false
+      failed_when: doppler_which.rc != 0
 
-    - name: "Phase 2 | Doppler – install CLI"
-      ansible.builtin.shell: >
-        (curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh
-        || wget -t 3 -qO- https://cli.doppler.com/install.sh) | sudo sh
-      when: "'installed' not in doppler_check.stdout"
+    # ────────────────────────────────────────────────────────────────────────────
+    # PHASE 2 – Caddy
+    # ────────────────────────────────────────────────────────────────────────────
 
-    # ── Phase 2: Caddy (apt) ───────────────────────────────────────────────────
-
-    - name: "Phase 2 | Caddy – check if installed"
+    - name: "Phase 2 | Caddy | Check if already installed"
       ansible.builtin.shell: >
         env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        sh -c 'command -v caddy >/dev/null 2>&1 && echo installed || echo missing'
-      register: caddy_check
+        command -v caddy 2>/dev/null || echo missing
+      register: caddy_which
       changed_when: false
 
-    - name: "Phase 2 | Caddy (apt) – install apt transport prerequisites"
+    # ── apt path ─────────────────────────────────────────────────────────────
+
+    - name: "Phase 2 | Caddy (apt) | Install transport prerequisites"
       ansible.builtin.apt:
         name:
           - debian-keyring
@@ -309,28 +401,34 @@
       become: true
       when:
         - ansible_pkg_mgr == "apt"
-        - "'installed' not in caddy_check.stdout"
+        - "'missing' in caddy_which.stdout"
 
-    - name: "Phase 2 | Caddy (apt) – add GPG key"
-      ansible.builtin.shell: >
-        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key'
-        | sudo gpg --batch --yes --dearmor
-        -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    - name: "Phase 2 | Caddy (apt) | Add GPG key"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+          | sudo gpg --batch --yes --dearmor \
+              -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+      args:
+        executable: /bin/bash
       become: true
       when:
         - ansible_pkg_mgr == "apt"
-        - "'installed' not in caddy_check.stdout"
+        - "'missing' in caddy_which.stdout"
 
-    - name: "Phase 2 | Caddy (apt) – add repository"
-      ansible.builtin.shell: >
-        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt'
-        | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+    - name: "Phase 2 | Caddy (apt) | Add repository"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+          | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+      args:
+        executable: /bin/bash
       become: true
       when:
         - ansible_pkg_mgr == "apt"
-        - "'installed' not in caddy_check.stdout"
+        - "'missing' in caddy_which.stdout"
 
-    - name: "Phase 2 | Caddy (apt) – install"
+    - name: "Phase 2 | Caddy (apt) | Install package"
       ansible.builtin.apt:
         name: caddy
         update_cache: true
@@ -338,19 +436,20 @@
       become: true
       when:
         - ansible_pkg_mgr == "apt"
-        - "'installed' not in caddy_check.stdout"
+        - "'missing' in caddy_which.stdout"
 
-    - name: "Phase 2 | Caddy (apt) – enable and start service"
+    - name: "Phase 2 | Caddy (apt) | Enable and start service"
       ansible.builtin.systemd:
         name: caddy
         enabled: true
         state: started
+        daemon_reload: true
       become: true
       when: ansible_pkg_mgr == "apt"
 
-    # ── Phase 2: Caddy (yum – COPR then static binary fallback) ───────────────
+    # ── yum path ─────────────────────────────────────────────────────────────
 
-    - name: "Phase 2 | Caddy (yum) – install yum-plugin-copr"
+    - name: "Phase 2 | Caddy (yum) | Install yum-plugin-copr"
       ansible.builtin.yum:
         name: yum-plugin-copr
         state: present
@@ -359,19 +458,20 @@
       register: copr_plugin
       when:
         - ansible_pkg_mgr == "yum"
-        - "'installed' not in caddy_check.stdout"
+        - "'missing' in caddy_which.stdout"
 
-    - name: "Phase 2 | Caddy (yum) – enable COPR repo"
+    - name: "Phase 2 | Caddy (yum) | Enable COPR repo"
       ansible.builtin.command: yum copr enable -y @caddy/caddy
       become: true
       ignore_errors: true
       register: copr_enable
+      changed_when: "'enabled' in (copr_enable.stdout | default(''))"
       when:
         - ansible_pkg_mgr == "yum"
-        - "'installed' not in caddy_check.stdout"
+        - "'missing' in caddy_which.stdout"
         - copr_plugin is not failed
 
-    - name: "Phase 2 | Caddy (yum) – install via COPR"
+    - name: "Phase 2 | Caddy (yum) | Install via COPR"
       ansible.builtin.yum:
         name: caddy
         state: present
@@ -380,43 +480,57 @@
       register: caddy_copr
       when:
         - ansible_pkg_mgr == "yum"
-        - "'installed' not in caddy_check.stdout"
+        - "'missing' in caddy_which.stdout"
         - copr_enable is not failed
 
-    # Binary fallback for systems where COPR is unavailable (e.g. old glibc AL2)
-    - name: "Phase 2 | Caddy (yum) – static binary fallback"
+    - name: "Phase 2 | Caddy (yum) | Static binary fallback"
       ansible.builtin.shell: |
+        set -euo pipefail
         CADDY_VERSION=$(curl -fsSL --retry 3 --retry-delay 2 \
           https://api.github.com/repos/caddyserver/caddy/releases/latest 2>/dev/null \
           | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/')
-        [ -z "$CADDY_VERSION" ] && CADDY_VERSION="{{ caddy_fallback_version }}"
+        [ -z "${CADDY_VERSION}" ] && CADDY_VERSION="{{ caddy_fallback_version }}"
+        echo "Installing Caddy ${CADDY_VERSION} (static binary)"
+
         curl -fsSL --retry 3 --retry-delay 2 \
           "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz" \
           -o /tmp/caddy.tar.gz
+
+        if ! tar -tzf /tmp/caddy.tar.gz >/dev/null 2>&1; then
+          echo "ERROR: Caddy tarball is corrupt or invalid" >&2
+          rm -f /tmp/caddy.tar.gz
+          exit 1
+        fi
+
         tar -xzf /tmp/caddy.tar.gz --no-same-owner -C /tmp caddy
-        mv /tmp/caddy /usr/local/bin/caddy
-        chmod +x /usr/local/bin/caddy
-        rm -f /tmp/caddy.tar.gz
+        install -m 0755 /tmp/caddy /usr/local/bin/caddy
+        rm -f /tmp/caddy.tar.gz /tmp/caddy
+      args:
+        executable: /bin/bash
       become: true
       when:
         - ansible_pkg_mgr == "yum"
-        - "'installed' not in caddy_check.stdout"
+        - "'missing' in caddy_which.stdout"
         - caddy_copr is failed or caddy_copr is skipped
 
-    - name: "Phase 2 | Caddy (yum) – write systemd unit"
+    - name: "Phase 2 | Caddy (yum) | Write systemd unit"
       ansible.builtin.copy:
         dest: /etc/systemd/system/caddy.service
         mode: "0644"
         content: |
           [Unit]
           Description=Caddy web server
-          After=network.target
+          Documentation=https://caddyserver.com/docs/
+          After=network.target network-online.target
+          Requires=network-online.target
 
           [Service]
           User=root
           ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
           ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+          TimeoutStopSec=5s
           Restart=on-failure
+          RestartSec=5s
           LimitNOFILE=1048576
 
           [Install]
@@ -424,100 +538,127 @@
       become: true
       when:
         - ansible_pkg_mgr == "yum"
-        - "'installed' not in caddy_check.stdout"
+        - "'missing' in caddy_which.stdout"
 
-    - name: "Phase 2 | Caddy (yum) – create config directory"
+    - name: "Phase 2 | Caddy (yum) | Create config directory"
       ansible.builtin.file:
         path: /etc/caddy
         state: directory
+        owner: root
+        group: root
         mode: "0755"
       become: true
-      when:
-        - ansible_pkg_mgr == "yum"
-        - "'installed' not in caddy_check.stdout"
+      when: ansible_pkg_mgr == "yum"
 
-    - name: "Phase 2 | Caddy (yum) – default Caddyfile"
+    - name: "Phase 2 | Caddy (yum) | Write default Caddyfile"
       ansible.builtin.copy:
         dest: /etc/caddy/Caddyfile
         content: ':80 { respond "OK" }'
         force: false
         mode: "0644"
       become: true
-      when:
-        - ansible_pkg_mgr == "yum"
-        - "'installed' not in caddy_check.stdout"
+      when: ansible_pkg_mgr == "yum"
 
-    - name: "Phase 2 | Caddy (yum) – reload daemon, enable and start"
+    - name: "Phase 2 | Caddy (yum) | Reload daemon, enable and start"
       ansible.builtin.systemd:
         name: caddy
         daemon_reload: true
         enabled: true
         state: started
       become: true
-      when:
-        - ansible_pkg_mgr == "yum"
-        - "'installed' not in caddy_check.stdout"
+      when: ansible_pkg_mgr == "yum"
 
-    - name: "Phase 2 | Caddy – assert installed"
+    # ── final check ───────────────────────────────────────────────────────────
+
+    - name: "Phase 2 | Caddy | Final presence check"
       ansible.builtin.shell: >
         env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        sh -c 'command -v caddy >/dev/null 2>&1 && echo installed || echo missing'
+        command -v caddy
       register: caddy_final
       changed_when: false
+      failed_when: caddy_final.rc != 0
 
-    - name: "Phase 2 | Caddy – verify presence"
-      ansible.builtin.assert:
-        that: "'installed' in caddy_final.stdout"
-        fail_msg: "caddy installation appeared to succeed but binary is not in PATH"
+    - name: "Phase 2 | Caddy | Assert service active"
+      ansible.builtin.systemd:
+        name: caddy
+      register: caddy_service
+      become: true
+      failed_when: caddy_service.status.ActiveState not in ['active', 'activating']
 
-    # ── Phase 3: nextdeployd daemon ────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────────
+    # PHASE 3 – nextdeployd daemon
+    # ────────────────────────────────────────────────────────────────────────────
 
-    - name: "Phase 3 | Daemon – check if nextdeployd is already installed"
+    - name: "Phase 3 | Daemon | Record pre-install version"
       ansible.builtin.shell: >
         env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        sh -c 'command -v nextdeployd >/dev/null 2>&1 && echo installed || echo missing'
-      register: daemon_check
-      changed_when: false
-
-    - name: "Phase 3 | Daemon – record current version (if any)"
-      ansible.builtin.shell: >
-        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        sh -c 'nextdeployd --version 2>/dev/null || echo "not installed"'
+        nextdeployd --version 2>/dev/null || echo "not installed"
       register: daemon_version_before
       changed_when: false
       failed_when: false
 
-    - name: "Phase 3 | Daemon – fetch latest release tag from GitHub"
+    - name: "Phase 3 | Daemon | Fetch latest GitHub release tag"
       ansible.builtin.shell: |
+        set -euo pipefail
         curl -fsSL --retry 3 --retry-delay 2 \
           https://api.github.com/repos/Golangcodes/nextdeploy/releases/latest \
-          | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/'
+          | grep '"tag_name"' | head -1 \
+          | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/'
+      args:
+        executable: /bin/bash
       register: latest_tag
       changed_when: false
+      failed_when: false
 
-    - name: "Phase 3 | Daemon – download pre-built binary from release"
+    - name: "Phase 3 | Daemon | Download pre-built binary"
       ansible.builtin.shell: |
+        set -euo pipefail
         TAG="{{ latest_tag.stdout | trim }}"
         ARCH="{{ ansible_architecture | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
         URL="https://github.com/Golangcodes/nextdeploy/releases/download/${TAG}/nextdeployd-linux-${ARCH}"
-        echo "Downloading nextdeployd ${TAG} (linux/${ARCH})..."
+
+        echo "Downloading nextdeployd ${TAG} for linux/${ARCH}..."
         curl -fsSL --retry 3 --retry-delay 2 "${URL}" -o /tmp/nextdeployd
+
+        # Confirm ELF binary — not an HTML 404 page
+        if ! file /tmp/nextdeployd 2>/dev/null | grep -qi 'ELF'; then
+          echo "ERROR: downloaded file is not an ELF binary" >&2
+          echo "       URL: ${URL}" >&2
+          echo "       file output: $(file /tmp/nextdeployd 2>&1)" >&2
+          rm -f /tmp/nextdeployd
+          exit 1
+        fi
+
         sudo install -m 0755 /tmp/nextdeployd /usr/local/bin/nextdeployd
         rm -f /tmp/nextdeployd
-      register: daemon_install
-      when: "latest_tag.stdout | trim != ''"
+        echo "Installed nextdeployd ${TAG}"
+      args:
+        executable: /bin/bash
+      register: daemon_binary_install
+      when: "(latest_tag.stdout | trim) != ''"
+      failed_when: false # non-zero falls through to go install
 
-    - name: "Phase 3 | Daemon – fallback: go install (if no release binary available)"
+    - name: "Phase 3 | Daemon | Fallback: build from source via go install"
       ansible.builtin.shell: |
+        set -euo pipefail
         export GOPATH="${HOME}/go"
         export PATH="${GOPATH}/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-        echo "No release binary found — building from source via go install..."
+        echo "Building nextdeployd from source (go install)..."
         go install github.com/Golangcodes/nextdeploy/daemon/cmd/nextdeployd@latest
-        sudo cp "${GOPATH}/bin/nextdeployd" /usr/local/bin/nextdeployd
-        sudo chmod +x /usr/local/bin/nextdeployd
-      when: "latest_tag.stdout | trim == ''"
+        sudo install -m 0755 "${GOPATH}/bin/nextdeployd" /usr/local/bin/nextdeployd
+      args:
+        executable: /bin/bash
+      when: >-
+        (latest_tag.stdout | trim) == '' or
+        (daemon_binary_install is defined and daemon_binary_install.rc is defined and daemon_binary_install.rc != 0)
 
-    - name: "Phase 3 | Daemon – record new version after install"
+    - name: "Phase 3 | Daemon | Assert binary present and executable"
+      ansible.builtin.stat:
+        path: /usr/local/bin/nextdeployd
+      register: daemon_stat
+      failed_when: not daemon_stat.stat.exists or not daemon_stat.stat.executable
+
+    - name: "Phase 3 | Daemon | Record post-install version"
       ansible.builtin.shell: >
         env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         nextdeployd --version 2>/dev/null || echo "unknown"
@@ -525,11 +666,11 @@
       changed_when: false
       failed_when: false
 
-    - name: "Phase 3 | Daemon – show version delta"
+    - name: "Phase 3 | Daemon | Show version delta"
       ansible.builtin.debug:
         msg: "nextdeployd: {{ daemon_version_before.stdout | trim }} → {{ daemon_version_after.stdout | trim }}"
 
-    - name: "Phase 3 | Daemon – write systemd service unit"
+    - name: "Phase 3 | Daemon | Write systemd service unit"
       ansible.builtin.copy:
         dest: /etc/systemd/system/nextdeployd.service
         mode: "0644"
@@ -538,7 +679,8 @@
           [Unit]
           Description=NextDeploy Daemon
           Documentation=https://nextdeploy.one/docs
-          After=network.target
+          After=network.target caddy.service
+          Wants=caddy.service
 
           [Service]
           Type=simple
@@ -550,7 +692,7 @@
           StandardError=journal
           SyslogIdentifier=nextdeployd
 
-          # Security Sandboxing
+          # Security hardening
           ProtectSystem=strict
           ProtectHome=yes
           PrivateTmp=yes
@@ -562,7 +704,7 @@
           WantedBy=multi-user.target
       become: true
 
-    - name: "Phase 3 | Daemon – reload systemd, enable and restart service"
+    - name: "Phase 3 | Daemon | Reload systemd, enable and restart"
       ansible.builtin.systemd:
         name: nextdeployd
         daemon_reload: true
@@ -570,82 +712,18 @@
         state: restarted
       become: true
 
-    - name: "Phase 3 | Daemon – assert installed"
-      ansible.builtin.shell: >
-        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        sh -c 'command -v nextdeployd >/dev/null 2>&1 && echo installed || echo missing'
-      register: daemon_final
-      changed_when: false
+    - name: "Phase 3 | Daemon | Confirm service is active"
+      ansible.builtin.systemd:
+        name: nextdeployd
+      register: daemon_service
+      become: true
+      failed_when: daemon_service.status.ActiveState not in ['active', 'activating']
 
-    - name: "Phase 3 | Daemon – verify presence"
-      ansible.builtin.assert:
-        that: "'installed' in daemon_final.stdout"
-        fail_msg: "nextdeployd installation failed — binary not found in PATH"
+    # ────────────────────────────────────────────────────────────────────────────
+    # PHASE 4 – App directories
+    # ────────────────────────────────────────────────────────────────────────────
 
-
-
-
-    # ── Phase 4: verify ────────────────────────────────────────────────────────
-
-    - name: "Phase 4 | Verify Node.js"
-      ansible.builtin.shell: >
-        env -i HOME="$HOME"
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        node --version
-      register: v_node
-      changed_when: false
-
-    - name: "Phase 4 | Verify npm"
-      ansible.builtin.shell: >
-        env -i HOME="$HOME"
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        npm --version
-      register: v_npm
-      changed_when: false
-
-    - name: "Phase 4 | Verify Bun"
-      ansible.builtin.shell: >
-        env -i HOME="$HOME"
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        bun --version
-      register: v_bun
-      changed_when: false
-
-    - name: "Phase 4 | Verify Caddy"
-      ansible.builtin.shell: >
-        env -i HOME="$HOME"
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        caddy version
-      register: v_caddy
-      changed_when: false
-
-    - name: "Phase 4 | Verify Doppler"
-      ansible.builtin.shell: >
-        env -i HOME="$HOME"
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        doppler --version
-      register: v_doppler
-      changed_when: false
-
-    - name: "Phase 4 | Verify Go"
-      ansible.builtin.shell: >
-        env -i HOME="$HOME"
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        go version
-      register: v_go
-      changed_when: false
-
-    - name: "Phase 4 | Verify nextdeployd"
-      ansible.builtin.shell: >
-        env -i HOME="$HOME"
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        nextdeployd --version
-      register: v_daemon
-      changed_when: false
-
-    # ── Phase 4: app directory ─────────────────────────────────────────────────
-
-    - name: "Phase 4 | Create application root directory {{ app_root }}"
+    - name: "Phase 4 | Create app directory tree"
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
@@ -658,16 +736,41 @@
         - "{{ app_dir }}"
         - "{{ app_root }}/uploads"
 
-    # ── Phase 4: summary ───────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────────
+    # PHASE 4 – Final verification
+    # ────────────────────────────────────────────────────────────────────────────
+
+    - name: "Phase 4 | Verify all tools"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        FAILED=0
+
+        check() {
+          local label="$1"; shift
+          local out
+          if out=$("$@" 2>&1); then
+            echo "✓ ${label}: ${out}"
+          else
+            echo "✗ ${label}: FAILED (command: $*)" >&2
+            FAILED=1
+          fi
+        }
+
+        check "node"        node --version
+        check "npm"         npm  --version
+        check "bun"         bun  --version
+        check "go"          go   version
+        check "caddy"       caddy version
+        check "doppler"     doppler --version
+        check "nextdeployd" nextdeployd --version
+
+        exit ${FAILED}
+      args:
+        executable: /bin/bash
+      register: verify_all
+      changed_when: false
 
     - name: "Phase 4 | Installation summary"
       ansible.builtin.debug:
-        msg:
-          - "✓ Node.js     : {{ v_node.stdout }}"
-          - "✓ npm         : {{ v_npm.stdout }}"
-          - "✓ Bun         : {{ v_bun.stdout }}"
-          - "✓ Go          : {{ v_go.stdout }}"
-          - "✓ Caddy       : {{ v_caddy.stdout }}"
-          - "✓ Doppler     : {{ v_doppler.stdout }}"
-          - "✓ nextdeployd : {{ v_daemon.stdout }}"
-          - "✓ App dir     : {{ app_dir }}"
+        msg: "{{ verify_all.stdout_lines }}"

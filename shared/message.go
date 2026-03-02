@@ -25,13 +25,11 @@ type MessageHeader struct {
 }
 
 func EncryptMessage(key []byte, sequence uint64, payload interface{}) ([]byte, error) {
-	// Serialize payload
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	// Create AES-GCM cipher
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cipher: %w", err)
@@ -42,16 +40,13 @@ func EncryptMessage(key []byte, sequence uint64, payload interface{}) ([]byte, e
 		return nil, fmt.Errorf("failed to create GCM: %w", err)
 	}
 
-	// Generate nonce
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
-	// Encrypt data
 	ciphertext := gcm.Seal(nil, nonce, payloadBytes, nil)
 
-	// Split ciphertext and tag
 	tagStart := len(ciphertext) - gcm.Overhead()
 	msg := SecureMessage{
 		IV:         nonce,
@@ -70,15 +65,12 @@ func DecryptMessage(key []byte, data []byte) ([]byte, uint64, error) {
 		return nil, 0, fmt.Errorf("failed to unmarshal message: %w", err)
 	}
 
-	// Verify timestamp (prevent replay)
 	if time.Since(time.Unix(msg.Timestamp, 0)) > 30*time.Second {
 		return nil, 0, errors.New("message too old")
 	}
 
-	// Reconstruct ciphertext
 	fullCiphertext := append(msg.Ciphertext, msg.Tag...)
 
-	// Create AES-GCM cipher
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to create cipher: %w", err)
@@ -89,7 +81,6 @@ func DecryptMessage(key []byte, data []byte) ([]byte, uint64, error) {
 		return nil, 0, fmt.Errorf("failed to create GCM: %w", err)
 	}
 
-	// Decrypt data
 	plaintext, err := gcm.Open(nil, msg.IV, fullCiphertext, nil)
 	if err != nil {
 		return nil, 0, fmt.Errorf("decryption failed: %w", err)
