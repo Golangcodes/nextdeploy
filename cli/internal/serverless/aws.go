@@ -256,7 +256,13 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 
 	standaloneDir := filepath.Join(tmpDir, "standalone")
 	if _, err := os.Stat(standaloneDir); os.IsNotExist(err) {
-		return fmt.Errorf("standalone directory not found in tarball. Is OutputModeStandalone enabled?")
+		// Fallback: Check if we have a flat structure (server.js at root)
+		if _, err := os.Stat(filepath.Join(tmpDir, "server.js")); err == nil {
+			p.log.Info("Standalone directory not found, but server.js exists at root. Using flat structure.")
+			standaloneDir = tmpDir
+		} else {
+			return fmt.Errorf("standalone directory not found in tarball, and no server.js found at root. Is OutputModeStandalone enabled?")
+		}
 	}
 
 	// 2. Zip the standalone folder for Lambda
