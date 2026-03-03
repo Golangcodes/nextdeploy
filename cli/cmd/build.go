@@ -111,6 +111,10 @@ func (h *resultHeap) Pop() interface{} {
 	return x
 }
 
+var (
+	forceBuild bool
+)
+
 var buildCmd = &cobra.Command{
 	Use:   "build",
 	Short: "Build the Next.js app and prepare a deployable tarball",
@@ -118,7 +122,9 @@ var buildCmd = &cobra.Command{
 		log := shared.PackageLogger("build", "BUILD")
 		log.Info("Starting NextDeploy build process...")
 
-		if err := nextcore.ValidateBuildState(); err == nil {
+		if forceBuild {
+			log.Info("Force build enabled. Bypassing incremental build check...")
+		} else if err := nextcore.ValidateBuildState(); err == nil {
 			log.Info("Git commit unchanged. Skipping build (Incremental build state matched).")
 			os.Exit(0)
 		} else {
@@ -183,6 +189,7 @@ var buildCmd = &cobra.Command{
 }
 
 func init() {
+	buildCmd.Flags().BoolVarP(&forceBuild, "force", "f", false, "Force a full build even if git commit is unchanged")
 	rootCmd.AddCommand(buildCmd)
 }
 

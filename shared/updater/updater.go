@@ -181,9 +181,12 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download returned HTTP %d - is release %s published?", resp.StatusCode, latest.TagName)
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("download returned HTTP 404 - the release %s exists but the binary %s was not found. This can happen if the build CI is still running. Please try again in 1-2 minutes.", latest.TagName, binaryName)
+		}
+		return fmt.Errorf("download failed with HTTP %d. Please check your internet connection and try again.", resp.StatusCode)
 	}
-	fmt.Printf("Downloading (this may take a minute on slow connections)...\n")
+	fmt.Printf("Downloading %s (this may take a minute)...\n", binaryName)
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
 		return fmt.Errorf("failed writing download: %w", err)
 	}
