@@ -72,7 +72,7 @@ func (cm *CaddyManager) Reload() error {
 	}
 
 	log.Printf("Warning: systemctl reload caddy failed (%v), falling back to direct caddy reload...", err)
-	fallbackCmd := exec.Command("caddy", "reload", "--config", mainCaddyfilePath, "--adapter", "caddyfile")
+	fallbackCmd := exec.Command("/usr/bin/caddy", "reload", "--config", mainCaddyfilePath, "--adapter", "caddyfile")
 	output, err = fallbackCmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("caddy reload failed (systemctl and fallback): %v - %s", err, string(output))
@@ -83,7 +83,7 @@ func (cm *CaddyManager) Reload() error {
 }
 
 func (cm *CaddyManager) Validate() error {
-	cmd := exec.Command("caddy", "validate", "--config", mainCaddyfilePath)
+	cmd := exec.Command("/usr/bin/caddy", "validate", "--config", mainCaddyfilePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("caddy validation failed: %v - %s", err, string(output))
