@@ -14,6 +14,9 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
 	}
+	if err := validateAppName(appName); err != nil {
+		return types.Response{Success: false, Message: err.Error()}
+	}
 
 	serviceName, err := ch.findActiveService(appName)
 	if err != nil {
@@ -21,7 +24,8 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 	}
 
 	// #nosec G204
-	cmd := exec.Command("/usr/bin/systemctl", "show", serviceName, "--property=ActiveState,MainPID,MemoryCurrent,SubState")
+	systemctl := resolveTool("systemctl")
+	cmd := exec.Command(systemctl, "show", serviceName, "--property=ActiveState,MainPID,MemoryCurrent,SubState")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to get service status: %v", err)}
@@ -77,7 +81,8 @@ func (ch *CommandHandler) findActiveService(appName string) (string, error) {
 	for i := len(services) - 1; i >= 0; i-- {
 		s := services[i]
 		// #nosec G204
-		cmd := exec.Command("/usr/bin/systemctl", "is-active", s)
+		systemctl := resolveTool("systemctl")
+		cmd := exec.Command(systemctl, "is-active", s)
 		out, _ := cmd.CombinedOutput()
 		state := strings.TrimSpace(string(out))
 		if state == "active" || state == "activating" {
@@ -93,6 +98,9 @@ func (ch *CommandHandler) handleLogs(args map[string]interface{}) types.Response
 	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
+	}
+	if err := validateAppName(appName); err != nil {
+		return types.Response{Success: false, Message: err.Error()}
 	}
 
 	serviceName, err := ch.findActiveService(appName)

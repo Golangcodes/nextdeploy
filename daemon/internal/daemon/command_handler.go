@@ -112,7 +112,8 @@ func (ch *CommandHandler) restartDaemon(args map[string]interface{}) types.Respo
 
 	log.Printf("New daemon process started (pid %d), shutting down current...", cmd.Process.Pid)
 
-	time.Sleep(500 * time.Millisecond)
+	// Minimal delay to let the new process bind the socket if necessary
+	time.Sleep(100 * time.Millisecond)
 	ch.Shutdown()
 
 	return types.Response{Success: true, Message: "daemon restarted"}
@@ -165,9 +166,10 @@ func (ch *CommandHandler) setUpCaddy(args map[string]interface{}) types.Response
 		}
 	}
 
+	systemctl := resolveTool("systemctl")
 	if out, err := exec.Command("caddy", "reload", "--config", "/etc/caddy/Caddyfile").CombinedOutput(); err != nil {
 		log.Printf("caddy reload failed (%v: %s), attempting systemctl start...", err, string(out))
-		if out2, err2 := exec.Command(systemctlPath, "start", "caddy").CombinedOutput(); err2 != nil {
+		if out2, err2 := exec.Command(systemctl, "start", "caddy").CombinedOutput(); err2 != nil {
 			return types.Response{
 				Success: false,
 				Message: fmt.Sprintf("failed to start Caddy service: %v — %s", err2, string(out2)),
@@ -185,10 +187,18 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 		return types.Response{Success: false, Message: "missing 'tarball' argument"}
 	}
 
+	// Path sanitization
+	tarballPath = filepath.Clean(tarballPath)
+	if !strings.HasPrefix(tarballPath, uploadsDir) {
+		return types.Response{Success: false, Message: "security error: tarball path must be within uploads directory"}
+	}
+
 	log.Printf("[ship] Starting deployment from: %s", tarballPath)
 
 	// Ensure workTmpDir exists
-	_ = os.MkdirAll(workTmpDir, 0755)
+	if err := os.MkdirAll(workTmpDir, 0755); err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to ensure tmp dir: %v", err)}
+	}
 
 	tmpDir, err := os.MkdirTemp(workTmpDir, "unpack-*")
 	if err != nil {
@@ -212,7 +222,15 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	}
 
 	appName := Coalesce(meta.AppName, "default-app")
+	if err := validateAppName(appName); err != nil {
+		return types.Response{Success: false, Message: err.Error()}
+	}
+
 	domain := Coalesce(meta.Domain, "localhost")
+	if err := validateDomain(domain); err != nil {
+		return types.Response{Success: false, Message: err.Error()}
+	}
+
 	outputMode := string(meta.OutputMode)
 
 	log.Printf("[ship] App=%s domain=%s mode=%s pkg=%s", appName, domain, outputMode, meta.PackageManager)
@@ -276,10 +294,14 @@ type ReleaseContext struct {
 func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	currentSymlink := filepath.Join(appsDir, ctx.AppName, "current")
 
-	port, err := findFreePort()
+	port, closePort, err := findFreePort()
 	if err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to allocate port: %v", err)}
 	}
+	// Close immediately but allows for keeping it open if we wanted to
+	// pass it to the child process (not supported by systemd easily)
+	_ = closePort()
+
 	log.Printf("[activate] Allocated port %d for release %s", port, ctx.ReleaseID)
 
 	serviceName, serviceGenerated, err := ch.processManager.GenerateServiceFile(
@@ -300,12 +322,18 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 		if serviceGenerated {
 			_ = ch.processManager.RemoveService(serviceName)
 		}
-		return types.Response{Success: false, Message: fmt.Sprintf("health check failed: %v", err)}
+		return types.Response{Success: false, Message: fmt.Sprintf("health check failed after 5m: %v", err)}
 	}
 
-	_ = os.Remove(currentSymlink)
-	if err := os.Symlink(ctx.ReleaseDir, currentSymlink); err != nil {
-		log.Printf("[activate] Warning: failed to update current symlink: %v", err)
+	// Atomic symlink update
+	tmpSymlink := currentSymlink + ".tmp"
+	_ = os.Remove(tmpSymlink)
+	if err := os.Symlink(ctx.ReleaseDir, tmpSymlink); err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to create atomic symlink: %v", err)}
+	}
+	if err := os.Rename(tmpSymlink, currentSymlink); err != nil {
+		_ = os.Remove(tmpSymlink)
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to rename atomic symlink: %v", err)}
 	}
 
 	if err := ch.caddyManager.GenerateConfig(ctx.AppName, ctx.Domain, ctx.OutputMode, port, currentSymlink); err != nil {
@@ -344,6 +372,9 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
+	}
+	if err := validateAppName(appName); err != nil {
+		return types.Response{Success: false, Message: err.Error()}
 	}
 
 	releasesDir := filepath.Join(appsDir, appName, "releases")
@@ -392,14 +423,14 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 }
 
 func extractTarGz(src, dest string) error {
-	// #nosec G301
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dest, err)
 	}
 
-	log.Printf("[extract] Using system tar for faster extraction: %s -> %s", src, dest)
+	tarPath := resolveTool("tar")
+	log.Printf("[extract] Using %s for faster extraction: %s -> %s", tarPath, src, dest)
 	// #nosec G204
-	cmd := exec.Command("/usr/bin/tar", "--no-same-owner", "--no-same-permissions", "-xzf", src, "-C", dest)
+	cmd := exec.Command(tarPath, "--no-same-owner", "--no-same-permissions", "-xzf", src, "-C", dest)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tar extraction failed: %v - %s", err, string(out))
 	}
@@ -426,27 +457,34 @@ func readMetadata(unpackDir string) (*nextcore.NextCorePayload, error) {
 	return nil, fmt.Errorf("metadata.json not found in tarball (checked %v)", candidates)
 }
 
-func findFreePort() (int, error) {
+func findFreePort() (int, func() error, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return 0, fmt.Errorf("failed to find free port: %w", err)
+		return 0, nil, fmt.Errorf("failed to find free port: %w", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	return port, nil
+	return port, ln.Close, nil
 }
 
 func waitForHealthy(port int, timeout time.Duration) error {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	deadline := time.Now().Add(timeout)
 
+	backoff := 100 * time.Millisecond
+	maxBackoff := 2 * time.Second
+
 	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, time.Second)
+		conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
 		if err == nil {
 			_ = conn.Close()
 			return nil
 		}
-		time.Sleep(500 * time.Millisecond)
+
+		time.Sleep(backoff)
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
 	}
 	return fmt.Errorf("app did not become healthy on %s within %s", addr, timeout)
 }
@@ -538,44 +576,27 @@ func (ch *CommandHandler) ensureAppDirOwnership(appName string) {
 }
 
 func (ch *CommandHandler) ensureDirPermissions(root string) {
-	// Optimization: Skip chown if already correct. This saves thousands of syscalls.
-	// We use 'find' with '-not -user nextdeploy' to only touch what's necessary.
+	findPath := resolveTool("find")
+	chownPath := resolveTool("chown")
+	chmodPath := resolveTool("chmod")
+
+	// Optimization: Skip chown if already correct.
 	// #nosec G204
-	chownCmd := exec.Command("find", root, "(", "!", "-user", "nextdeploy", "-o", "!", "-group", "nextdeploy", ")", "-exec", "chown", "nextdeploy:nextdeploy", "{}", "+")
+	chownCmd := exec.Command(findPath, root, "(", "!", "-user", "nextdeploy", "-o", "!", "-group", "nextdeploy", ")", "-exec", chownPath, "nextdeploy:nextdeploy", "{}", "+")
 	if out, err := chownCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: optimized chown failed: %v - %s", err, string(out))
-		// Fallback to simple chown -R if find fails
-		_ = exec.Command("chown", "-R", "nextdeploy:nextdeploy", root).Run()
+		_ = exec.Command(chownPath, "-R", "nextdeploy:nextdeploy", root).Run()
 	}
 
-	// Optimization: Use '+' instead of ';' for find -exec to batch calls
 	// #nosec G204
-	chmodDirCmd := exec.Command("find", root, "-type", "d", "!", "-perm", "0755", "-exec", "chmod", "0755", "{}", "+")
+	chmodDirCmd := exec.Command(findPath, root, "-type", "d", "!", "-perm", "0755", "-exec", chmodPath, "0755", "{}", "+")
 	if out, err := chmodDirCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod dirs in %s: %v - %s", root, err, string(out))
 	}
 
 	// #nosec G204
-	chmodFileCmd := exec.Command("find", root, "-type", "f", "!", "-perm", "0644", "-exec", "chmod", "0644", "{}", "+")
+	chmodFileCmd := exec.Command(findPath, root, "-type", "f", "!", "-perm", "0644", "-exec", chmodPath, "0644", "{}", "+")
 	if out, err := chmodFileCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod files in %s: %v - %s", root, err, string(out))
 	}
-}
-
-func StringArg(args map[string]interface{}, key string) (string, bool) {
-	v, ok := args[key]
-	if !ok {
-		return "", false
-	}
-	s, ok := v.(string)
-	return s, ok
-}
-
-func Coalesce(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }

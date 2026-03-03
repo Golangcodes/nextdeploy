@@ -29,6 +29,9 @@ func (ch *CommandHandler) handleSecrets(args map[string]interface{}) types.Respo
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
 	}
+	if err := validateAppName(appName); err != nil {
+		return types.Response{Success: false, Message: err.Error()}
+	}
 
 	switch action {
 	case "set":

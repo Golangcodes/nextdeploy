@@ -156,13 +156,14 @@ func resolveBinary(name string) string {
 		return path
 	}
 
-	log.Printf("[process] Warning: could not resolve binary %q, using name directly", name)
-	return name
+	// Fallback to resolveTool if candidates and PATH fail
+	return resolveTool(name)
 }
 
 func (pm *ProcessManager) reloadDaemon() error {
 	log.Printf("[process] Running systemctl daemon-reload")
-	cmd := exec.Command(systemctlPath, "daemon-reload")
+	systemctl := resolveTool("systemctl")
+	cmd := exec.Command(systemctl, "daemon-reload")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to reload systemd daemon: %v - %s", err, out)
 	}
@@ -171,16 +172,17 @@ func (pm *ProcessManager) reloadDaemon() error {
 }
 
 func (pm *ProcessManager) StartService(serviceName string) error {
+	systemctl := resolveTool("systemctl")
 	log.Printf("[process] Enabling service %s", serviceName)
 	// #nosec G204
-	cmd := exec.Command(systemctlPath, "enable", serviceName)
+	cmd := exec.Command(systemctl, "enable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("[process] Warning: failed to enable service %s: %v - %s", serviceName, err, string(out))
 	}
 
 	log.Printf("[process] Starting service %s", serviceName)
 	// #nosec G204
-	cmd = exec.Command(systemctlPath, "start", serviceName)
+	cmd = exec.Command(systemctl, "start", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to start service %s: %v - %s", serviceName, err, string(out))
 	}
@@ -190,13 +192,14 @@ func (pm *ProcessManager) StartService(serviceName string) error {
 }
 
 func (pm *ProcessManager) StopService(serviceName string) error {
+	systemctl := resolveTool("systemctl")
 	// #nosec G204
-	cmd := exec.Command(systemctlPath, "stop", serviceName)
+	cmd := exec.Command(systemctl, "stop", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
 		log.Printf("Warning: failed to stop service %s: %s", serviceName, out)
 	}
 	// #nosec G204
-	cmd = exec.Command(systemctlPath, "disable", serviceName)
+	cmd = exec.Command(systemctl, "disable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
 		log.Printf("Warning: failed to disable service %s: %s", serviceName, out)
 	}
@@ -209,8 +212,9 @@ func (pm *ProcessManager) CurrentServiceName() string {
 }
 
 func (pm *ProcessManager) RestartService(serviceName string) error {
+	systemctl := resolveTool("systemctl")
 	// #nosec G204
-	cmd := exec.Command(systemctlPath, "restart", serviceName)
+	cmd := exec.Command(systemctl, "restart", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to restart service %s: %v - %s", serviceName, err, out)
 	}

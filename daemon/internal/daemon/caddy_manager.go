@@ -64,7 +64,8 @@ func (cm *CaddyManager) EnsureMainCaddyfile() error {
 }
 
 func (cm *CaddyManager) Reload() error {
-	cmd := exec.Command("systemctl", "reload", "caddy")
+	systemctl := resolveTool("systemctl")
+	cmd := exec.Command(systemctl, "reload", "caddy")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
 		log.Println("Caddy reloaded successfully via systemctl.")
@@ -72,7 +73,8 @@ func (cm *CaddyManager) Reload() error {
 	}
 
 	log.Printf("Warning: systemctl reload caddy failed (%v), falling back to direct caddy reload...", err)
-	fallbackCmd := exec.Command("/usr/bin/caddy", "reload", "--config", mainCaddyfilePath, "--adapter", "caddyfile")
+	caddyPath := resolveTool("caddy")
+	fallbackCmd := exec.Command(caddyPath, "reload", "--config", mainCaddyfilePath, "--adapter", "caddyfile")
 	output, err = fallbackCmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("caddy reload failed (systemctl and fallback): %v - %s", err, string(output))
@@ -83,7 +85,8 @@ func (cm *CaddyManager) Reload() error {
 }
 
 func (cm *CaddyManager) Validate() error {
-	cmd := exec.Command("/usr/bin/caddy", "validate", "--config", mainCaddyfilePath)
+	caddyPath := resolveTool("caddy")
+	cmd := exec.Command(caddyPath, "validate", "--config", mainCaddyfilePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("caddy validation failed: %v - %s", err, string(output))
