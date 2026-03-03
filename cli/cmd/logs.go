@@ -46,7 +46,15 @@ var logsCmd = &cobra.Command{
 		daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd logs --appName=%s", appName)
 		serviceName, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
 		if err != nil {
-			log.Error("Failed to resolve service name: %v\nOutput: %s", err, serviceName)
+			// Extract any "Error: ..." from the output if it exists
+			errMsg := "Failed to resolve service name"
+			if strings.Contains(serviceName, "Error:") {
+				parts := strings.Split(serviceName, "Error:")
+				errMsg = strings.TrimSpace(parts[len(parts)-1])
+			} else if serviceName != "" {
+				errMsg = strings.TrimSpace(serviceName)
+			}
+			log.Error("%s", errMsg)
 			os.Exit(1)
 		}
 		serviceName = strings.TrimSpace(serviceName)

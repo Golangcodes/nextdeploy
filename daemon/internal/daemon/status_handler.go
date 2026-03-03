@@ -3,6 +3,7 @@ package daemon
 import (
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
@@ -14,7 +15,11 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
 	}
 
-	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
+	serviceName, err := ch.findActiveService(appName)
+	if err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("Application '%s' has not been deployed yet. Please run 'nextdeploy ship' first.", appName)}
+	}
+
 	// #nosec G204
 	cmd := exec.Command("systemctl", "show", serviceName, "--property=ActiveState,MainPID,MemoryCurrent,SubState")
 	out, err := cmd.CombinedOutput()
@@ -56,18 +61,43 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 	}
 }
 
+func (ch *CommandHandler) findActiveService(appName string) (string, error) {
+	services, err := ch.processManager.FindAppServices(appName)
+	if err != nil {
+		return "", err
+	}
+	if len(services) == 0 {
+		return "", fmt.Errorf("no services found for app %s", appName)
+	}
+
+	// Sort to find the latest timestamped service
+	sort.Strings(services)
+
+	// Search for the first one that is active or activating (checking from latest to oldest)
+	for i := len(services) - 1; i >= 0; i-- {
+		s := services[i]
+		// #nosec G204
+		cmd := exec.Command("systemctl", "is-active", s)
+		out, _ := cmd.CombinedOutput()
+		state := strings.TrimSpace(string(out))
+		if state == "active" || state == "activating" {
+			return s, nil
+		}
+	}
+
+	// If none are active, return the most recent one
+	return services[len(services)-1], nil
+}
+
 func (ch *CommandHandler) handleLogs(args map[string]interface{}) types.Response {
 	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
 	}
 
-	serviceName := fmt.Sprintf("nextdeploy-%s.service", appName)
-	// #nosec G204
-	cmd := exec.Command("systemctl", "list-unit-files", serviceName)
-	out, err := cmd.CombinedOutput()
-	if err != nil || !strings.Contains(string(out), serviceName) {
-		return types.Response{Success: false, Message: fmt.Sprintf("application %s not found (service %s missing)", appName, serviceName)}
+	serviceName, err := ch.findActiveService(appName)
+	if err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("Application '%s' has not been deployed yet. Please run 'nextdeploy ship' first.", appName)}
 	}
 	return types.Response{
 		Success: true,
