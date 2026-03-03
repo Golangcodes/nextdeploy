@@ -809,6 +809,15 @@
         mode: "0755"
       become: true
 
+    - name: "Phase 5 | Caddy | Ensure access.log exists with correct permissions"
+      ansible.builtin.file:
+        path: /var/log/caddy/access.log
+        state: touch
+        owner: caddy
+        group: caddy
+        mode: "0644"
+      become: true
+
     - name: "Phase 5 | Fail2Ban | Create Caddy filter"
       ansible.builtin.copy:
         dest: /etc/fail2ban/filter.d/caddy-auth.conf
