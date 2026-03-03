@@ -169,6 +169,7 @@ func (ch *CommandHandler) setUpCaddy(args map[string]interface{}) types.Response
 	systemctl := resolveTool("systemctl")
 	if out, err := exec.Command("caddy", "reload", "--config", "/etc/caddy/Caddyfile").CombinedOutput(); err != nil {
 		log.Printf("caddy reload failed (%v: %s), attempting systemctl start...", err, string(out))
+		// #nosec G204
 		if out2, err2 := exec.Command(systemctl, "start", "caddy").CombinedOutput(); err2 != nil {
 			return types.Response{
 				Success: false,
@@ -196,7 +197,7 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	log.Printf("[ship] Starting deployment from: %s", tarballPath)
 
 	// Ensure workTmpDir exists
-	if err := os.MkdirAll(workTmpDir, 0755); err != nil {
+	if err := os.MkdirAll(workTmpDir, 0750); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to ensure tmp dir: %v", err)}
 	}
 
@@ -432,7 +433,7 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 }
 
 func extractTarGz(src, dest string) error {
-	if err := os.MkdirAll(dest, 0755); err != nil {
+	if err := os.MkdirAll(dest, 0750); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dest, err)
 	}
 
@@ -594,6 +595,7 @@ func (ch *CommandHandler) ensureDirPermissions(root string) {
 	chownCmd := exec.Command(findPath, root, "(", "!", "-user", "nextdeploy", "-o", "!", "-group", "nextdeploy", ")", "-exec", chownPath, "nextdeploy:nextdeploy", "{}", "+")
 	if out, err := chownCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: optimized chown failed: %v - %s", err, string(out))
+		// #nosec G204
 		_ = exec.Command(chownPath, "-R", "nextdeploy:nextdeploy", root).Run()
 	}
 

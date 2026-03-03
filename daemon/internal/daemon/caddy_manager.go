@@ -66,6 +66,7 @@ func (cm *CaddyManager) EnsureMainCaddyfile() error {
 
 func (cm *CaddyManager) Reload() error {
 	systemctl := resolveTool("systemctl")
+	// #nosec G204
 	cmd := exec.Command(systemctl, "reload", "caddy")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
@@ -75,6 +76,7 @@ func (cm *CaddyManager) Reload() error {
 
 	log.Printf("Warning: systemctl reload caddy failed (%v), falling back to direct caddy reload...", err)
 	caddyPath := resolveTool("caddy")
+	// #nosec G204
 	fallbackCmd := exec.Command(caddyPath, "reload", "--config", mainCaddyfilePath, "--adapter", "caddyfile")
 	output, err = fallbackCmd.CombinedOutput()
 	if err != nil {
@@ -87,6 +89,7 @@ func (cm *CaddyManager) Reload() error {
 
 func (cm *CaddyManager) Validate() error {
 	caddyPath := resolveTool("caddy")
+	// #nosec G204
 	cmd := exec.Command(caddyPath, "validate", "--config", mainCaddyfilePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

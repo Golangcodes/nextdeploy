@@ -163,6 +163,7 @@ func resolveBinary(name string) string {
 func (pm *ProcessManager) reloadDaemon() error {
 	log.Printf("[process] Running systemctl daemon-reload")
 	systemctl := resolveTool("systemctl")
+	// #nosec G204
 	cmd := exec.Command(systemctl, "daemon-reload")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to reload systemd daemon: %v - %s", err, out)

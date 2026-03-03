@@ -25,6 +25,7 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 
 	// #nosec G204
 	systemctl := resolveTool("systemctl")
+	// #nosec G204
 	cmd := exec.Command(systemctl, "show", serviceName, "--property=ActiveState,MainPID,MemoryCurrent,SubState")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -82,6 +83,7 @@ func (ch *CommandHandler) findActiveService(appName string) (string, error) {
 		s := services[i]
 		// #nosec G204
 		systemctl := resolveTool("systemctl")
+		// #nosec G204
 		cmd := exec.Command(systemctl, "is-active", s)
 		out, _ := cmd.CombinedOutput()
 		state := strings.TrimSpace(string(out))
