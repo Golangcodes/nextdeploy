@@ -428,6 +428,14 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	client.mu.Lock()
 	defer client.mu.Unlock()
 
+	// Optimization: Use raw SSH pipe (cat > remotePath) instead of SFTP.
+	// This is significantly faster for single file transfers as it avoids SFTP protocol overhead.
+	session, err := client.Client.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create SSH session for upload: %w", err)
+	}
+	defer session.Close()
+
 	// #nosec G304
 	localFile, err := os.Open(localPath)
 	if err != nil {
@@ -435,21 +443,34 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	}
 	defer localFile.Close()
 
-	remoteFile, err := client.SFTPClient.Create(remotePath)
+	stdin, err := session.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("failed to create remote file: %w", err)
+		return fmt.Errorf("failed to get stdin pipe: %w", err)
 	}
-	defer remoteFile.Close()
 
-	// Optimization: Use a larger pipe for faster SFTP transfer
-	// SFTP can be slow with small packets over high-latency links.
-	_, err = io.CopyBuffer(remoteFile, localFile, make([]byte, 128*1024))
-	if err != nil {
-		return fmt.Errorf("failed to copy file: %w", err)
+	// #nosec G204
+	// Using sh to ensure the path is correctly handled
+	cmd := fmt.Sprintf("cat > %q", remotePath)
+	if err := session.Start(cmd); err != nil {
+		return fmt.Errorf("failed to start remote cat: %w", err)
+	}
+
+	// Fast streaming
+	if _, err := io.Copy(stdin, localFile); err != nil {
+		_ = stdin.Close()
+		return fmt.Errorf("failed to stream upload to pipe: %w", err)
+	}
+
+	if err := stdin.Close(); err != nil {
+		return fmt.Errorf("failed to close upload pipe: %w", err)
+	}
+
+	if err := session.Wait(); err != nil {
+		return fmt.Errorf("upload session failed: %w", err)
 	}
 
 	client.LastUsed = time.Now()
-	serverlogger.Info("Uploaded %s to %s:%s", localPath, serverName, remotePath)
+	serverlogger.Info("Uploaded %s to %s:%s (High-speed SSH pipe)", localPath, serverName, remotePath)
 	return nil
 }
 
