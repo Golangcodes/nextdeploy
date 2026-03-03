@@ -17,6 +17,8 @@ import (
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
+const appsDir = "/opt/nextdeploy/apps"
+
 type CommandHandler struct {
 	config         *types.DaemonConfig
 	caddyManager   *CaddyManager
@@ -209,7 +211,7 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 
 	timestamp := time.Now().Unix()
 	releaseID := fmt.Sprintf("%d", timestamp)
-	releaseDir := filepath.Join("/opt/nextdeploy/apps", appName, "releases", releaseID)
+	releaseDir := filepath.Join(appsDir, appName, "releases", releaseID)
 
 	// #nosec G301 G703
 	if err := os.MkdirAll(filepath.Dir(releaseDir), 0755); err != nil {
@@ -237,20 +239,42 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 
 	dopplerToken, _ := StringArg(args, "dopplerToken")
 	log.Printf("[ship] %s extracted to %s, activating...", appName, releaseDir)
-	return ch.activateRelease(appName, domain, releaseDir, releaseID, outputMode, dopplerToken, meta.PackageManager, tarballPath)
+
+	ctx := ReleaseContext{
+		AppName:        appName,
+		Domain:         domain,
+		ReleaseDir:     releaseDir,
+		ReleaseID:      releaseID,
+		OutputMode:     outputMode,
+		DopplerToken:   dopplerToken,
+		PackageManager: meta.PackageManager,
+		TarballPath:    tarballPath,
+	}
+	return ch.activateRelease(ctx)
 }
 
-func (ch *CommandHandler) activateRelease(appName, domain, releaseDir, releaseID, outputMode, dopplerToken, packageManager, tarballPath string) types.Response {
-	currentSymlink := filepath.Join("/opt/nextdeploy/apps", appName, "current")
+type ReleaseContext struct {
+	AppName        string
+	Domain         string
+	ReleaseDir     string
+	ReleaseID      string
+	OutputMode     string
+	DopplerToken   string
+	PackageManager string
+	TarballPath    string
+}
+
+func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
+	currentSymlink := filepath.Join(appsDir, ctx.AppName, "current")
 
 	port, err := findFreePort()
 	if err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to allocate port: %v", err)}
 	}
-	log.Printf("[activate] Allocated port %d for release %s", port, releaseID)
+	log.Printf("[activate] Allocated port %d for release %s", port, ctx.ReleaseID)
 
 	serviceName, serviceGenerated, err := ch.processManager.GenerateServiceFile(
-		appName, releaseDir, outputMode, dopplerToken, port, packageManager, releaseID,
+		ctx.AppName, ctx.ReleaseDir, ctx.OutputMode, ctx.DopplerToken, port, ctx.PackageManager, ctx.ReleaseID,
 	)
 	if err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to generate service file: %v", err)}
@@ -271,11 +295,11 @@ func (ch *CommandHandler) activateRelease(appName, domain, releaseDir, releaseID
 	}
 
 	_ = os.Remove(currentSymlink)
-	if err := os.Symlink(releaseDir, currentSymlink); err != nil {
+	if err := os.Symlink(ctx.ReleaseDir, currentSymlink); err != nil {
 		log.Printf("[activate] Warning: failed to update current symlink: %v", err)
 	}
 
-	if err := ch.caddyManager.GenerateConfig(appName, domain, outputMode, port, currentSymlink); err != nil {
+	if err := ch.caddyManager.GenerateConfig(ctx.AppName, ctx.Domain, ctx.OutputMode, port, currentSymlink); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to configure Caddy: %v", err)}
 	}
 	_ = ch.caddyManager.EnsureMainCaddyfile()
@@ -284,7 +308,7 @@ func (ch *CommandHandler) activateRelease(appName, domain, releaseDir, releaseID
 	}
 	_ = ch.caddyManager.Reload()
 
-	if services, err := ch.processManager.FindAppServices(appName); err == nil {
+	if services, err := ch.processManager.FindAppServices(ctx.AppName); err == nil {
 		for _, s := range services {
 			if s != serviceName {
 				log.Printf("[activate] Cleaning up old service: %s", s)
@@ -293,17 +317,17 @@ func (ch *CommandHandler) activateRelease(appName, domain, releaseDir, releaseID
 		}
 	}
 
-	if err := pruneReleases(appName, 5); err != nil {
+	if err := pruneReleases(ctx.AppName, 5); err != nil {
 		log.Printf("[activate] Warning: failed to prune releases: %v", err)
 	}
 
-	if tarballPath != "" {
-		_ = os.Remove(tarballPath)
+	if ctx.TarballPath != "" {
+		_ = os.Remove(ctx.TarballPath)
 	}
 
 	return types.Response{
 		Success: true,
-		Message: fmt.Sprintf("Successfully activated release %s for %s", releaseID, appName),
+		Message: fmt.Sprintf("Successfully activated release %s for %s", ctx.ReleaseID, ctx.AppName),
 	}
 }
 
@@ -313,7 +337,7 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
 	}
 
-	releasesDir := filepath.Join("/opt/nextdeploy/apps", appName, "releases")
+	releasesDir := filepath.Join(appsDir, appName, "releases")
 	entries, err := os.ReadDir(releasesDir)
 	if err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to read releases: %v", err)}
@@ -344,7 +368,18 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 	dopplerToken, _ := StringArg(args, "dopplerToken")
 
 	log.Printf("[rollback] Reverting %s to release %s", appName, previousReleaseID)
-	return ch.activateRelease(appName, domain, previousReleaseDir, previousReleaseID, outputMode, dopplerToken, meta.PackageManager, "")
+
+	ctx := ReleaseContext{
+		AppName:        appName,
+		Domain:         domain,
+		ReleaseDir:     previousReleaseDir,
+		ReleaseID:      previousReleaseID,
+		OutputMode:     outputMode,
+		DopplerToken:   dopplerToken,
+		PackageManager: meta.PackageManager,
+		TarballPath:    "",
+	}
+	return ch.activateRelease(ctx)
 }
 
 func extractTarGz(src, dest string) error {
@@ -408,7 +443,7 @@ func waitForHealthy(port int, timeout time.Duration) error {
 }
 
 func pruneReleases(appName string, keep int) error {
-	releasesDir := filepath.Join("/opt/nextdeploy/apps", appName, "releases")
+	releasesDir := filepath.Join(appsDir, appName, "releases")
 	entries, err := os.ReadDir(releasesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -489,7 +524,7 @@ func isCrossDevice(err error) bool {
 }
 
 func (ch *CommandHandler) ensureAppDirOwnership(appName string) {
-	appDir := filepath.Join("/opt/nextdeploy/apps", appName)
+	appDir := filepath.Join(appsDir, appName)
 	ch.ensureDirPermissions(appDir)
 }
 
