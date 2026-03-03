@@ -1,8 +1,6 @@
 package nextcore
 
 import (
-	"fmt"
-	"os"
 	"strings"
 )
 
@@ -22,53 +20,14 @@ type DetectedFeatures struct {
 	ExportDir          string   // path to export output (default: out)
 }
 
-// ParseNextConfigFile reads next.config.mjs/js and returns a parsed NextConfig
-func ParseNextConfigFile(configPath string) (*NextConfig, error) {
-	// try .mjs first, then .js, then .ts
-	paths := []string{
-		configPath,
-		strings.Replace(configPath, ".mjs", ".js", 1),
-		strings.Replace(configPath, ".mjs", ".ts", 1),
-	}
-
-	var content []byte
-	var err error
-	var usedPath string
-
-	for _, p := range paths {
-		content, err = os.ReadFile(p) // #nosec G304
-		if err == nil {
-			usedPath = p
-			break
-		}
-	}
-
-	if content == nil {
-		return nil, fmt.Errorf("could not find next.config file at %s", configPath)
-	}
-
-	NextCoreLogger.Info("Parsing Next.js config from: %s", usedPath)
-
-	raw := string(content)
-
-	// if typescript, strip types first
-	if strings.HasSuffix(usedPath, ".ts") {
-		raw = transpileTypeScriptConfig(raw)
-	}
-
-	configObj, err := extractConfigObject(raw)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract config object: %w", err)
-	}
-
-	return parseConfigObject(configObj)
-}
-
 // DetectFeatures inspects a NextConfig and returns what external services
 // the app uses — this drives the dynamic CSP generation in Caddy
 func DetectFeatures(config *NextConfig) *DetectedFeatures {
 	if config == nil {
-		return &DetectedFeatures{}
+		return &DetectedFeatures{
+			DistDir:   ".next",
+			ExportDir: "out",
+		}
 	}
 
 	f := &DetectedFeatures{}

@@ -8,6 +8,11 @@
 version: "1.0" # Config file versioning for forward compatibility with future NextDeploy updates
 
 # -----
+# TARGET TYPE — choose between "vps" (traditional server) or "serverless" (AWS Lambda + S3 + CloudFront)
+# -----
+target_type: vps  # "vps" | "serverless"
+
+# -----
 # APP METADATA
 # -----
 app:
@@ -139,3 +144,23 @@ CloudProvider:
   secret_key: YOUR_AWS_SECRET_KEY # IAM user secret key
   vpc_id: vpc-12345678 # VPC ID for networking (if applicable)
   subnet_id: subnet-12345678 # Subnet ID for deploying resources
+
+# -----
+# SERVERLESS DEPLOYMENT (set target_type: serverless above to enable)
+# Requires: AWS credentials configured via environment or ~/.aws/credentials
+# -----
+# serverless:
+#   provider: aws              # Only "aws" supported currently; cloudflare/gcp/azure coming soon
+#   region: us-east-1          # AWS region for all resources
+#   s3_bucket: my-app-assets   # S3 bucket where public/ and _next/static/ are uploaded
+#   cloudfront_id: EXXXXX      # CloudFront distribution ID — triggers cache invalidation after deploy
+#   lambda_function_name: my-app-handler  # Lambda function name (defaults to app name if omitted)
+#
+# How it works:
+#   1. `nextdeploy build` packages .next/standalone + public/ into .nextdeploy/app.tar.gz
+#   2. `nextdeploy ship` (with target_type: serverless):
+#      a. Loads your local secrets via SecretManager and pushes them to AWS Secrets Manager
+#      b. Uploads public/ and _next/static/ to S3 with correct Content-Type and Cache-Control
+#      c. Zips .next/standalone/ and deploys it to Lambda via UpdateFunctionCode
+#      d. Injects ND_SECRETS_ARN into Lambda env vars so your app can fetch secrets at runtime
+#      e. Creates a CloudFront invalidation (/*) to clear stale cached assets

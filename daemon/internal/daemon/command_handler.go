@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
+	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
@@ -213,7 +214,7 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	}()
 
 	log.Printf("[ship] Extracting to %s...", tmpDir)
-	if err := extractTarGz(tarballPath, tmpDir); err != nil {
+	if err := shared.ExtractTarGz(tarballPath, tmpDir); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("extraction failed: %v", err)}
 	}
 
@@ -432,20 +433,7 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 	return ch.activateRelease(ctx)
 }
 
-func extractTarGz(src, dest string) error {
-	if err := os.MkdirAll(dest, 0750); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dest, err)
-	}
-
-	tarPath := resolveTool("tar")
-	log.Printf("[extract] Using %s for faster extraction: %s -> %s", tarPath, src, dest)
-	// #nosec G204
-	cmd := exec.Command(tarPath, "--no-same-owner", "--no-same-permissions", "-xzf", src, "-C", dest)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("tar extraction failed: %v - %s", err, string(out))
-	}
-	return nil
-}
+// ExtractTarGz is now handled universally by shared.ExtractTarGz
 
 func readMetadata(unpackDir string) (*nextcore.NextCorePayload, error) {
 	candidates := []string{

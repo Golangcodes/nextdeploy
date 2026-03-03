@@ -35,10 +35,11 @@ type SafeConfig struct {
 }
 
 type ServerlessConfig struct {
-	Provider     string `yaml:"provider"` // e.g., "aws"
-	Region       string `yaml:"region"`
-	S3Bucket     string `yaml:"s3_bucket,omitempty"`
-	CloudFrontId string `yaml:"cloudfront_id,omitempty"`
+	Provider           string `yaml:"provider"` // e.g., "aws"
+	Region             string `yaml:"region"`
+	S3Bucket           string `yaml:"s3_bucket,omitempty"`
+	CloudFrontId       string `yaml:"cloudfront_id,omitempty"`
+	LambdaFunctionName string `yaml:"lambda_function_name,omitempty"` // defaults to app name
 }
 
 type WebServer struct {

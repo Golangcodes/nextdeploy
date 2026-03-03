@@ -188,3 +188,34 @@ func (sm *SecretManager) ExportSecrets(filePath string) error {
 
 	return nil
 }
+
+// FlattenSecrets returns all secrets as a plain map[string]string,
+// decrypting encrypted values in-place. Suitable for cloud injection.
+func (sm *SecretManager) FlattenSecrets() map[string]string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	result := make(map[string]string, len(sm.secrets))
+	for name, secret := range sm.secrets {
+		if !secret.IsEncrypted {
+			result[name] = secret.Value
+			continue
+		}
+
+		key, err := sm.GeneratePlatformKey()
+		if err != nil {
+			SLogs.Warn("Skipping secret %s — failed to derive key: %v", name, err)
+			continue
+		}
+
+		decrypted, err := Decrypt([]byte(secret.Value), []byte(key))
+		if err != nil {
+			SLogs.Warn("Skipping secret %s — decryption failed: %v", name, err)
+			continue
+		}
+
+		result[name] = string(decrypted)
+	}
+
+	return result
+}
