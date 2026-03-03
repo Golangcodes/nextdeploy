@@ -51,16 +51,17 @@
         state: present
       become: true
 
-    - name: "Phase 1 | Security | Add ansible user to nextdeploy group"
-      ansible.builtin.user:
-        name: "{{ ansible_user_id }}"
         groups: nextdeploy
         append: true
       become: true
 
-    # NOTE: The /run/nextdeployd/ runtime directory is created automatically
-    # by systemd's RuntimeDirectory=nextdeployd directive in the service unit.
-    # No manual mkdir needed here.
+    - name: "Phase 1 | Security | Add caddy user to nextdeploy group"
+      ansible.builtin.user:
+        name: caddy
+        groups: nextdeploy
+        append: true
+      become: true
+      ignore_errors: true # Caddy might not be installed yet, will retry later
 
     - name: "Phase 1 | Gather system info"
       ansible.builtin.shell: |
@@ -786,7 +787,59 @@
         - "{{ app_root }}/uploads"
 
     # ────────────────────────────────────────────────────────────────────────────
-    # PHASE 4 – Final verification (including socket)
+    # PHASE 5 – Fail2Ban & Security Hardening
+    # ────────────────────────────────────────────────────────────────────────────
+
+    - name: "Phase 5 | Fail2Ban | Install Fail2Ban"
+      ansible.builtin.apt:
+        name: fail2ban
+        state: present
+      become: true
+      when: ansible_pkg_mgr == "apt"
+
+    - name: "Phase 5 | Caddy | Create log directory"
+      ansible.builtin.file:
+        path: /var/log/caddy
+        state: directory
+        owner: caddy
+        group: caddy
+        mode: "0755"
+      become: true
+
+    - name: "Phase 5 | Fail2Ban | Create Caddy filter"
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/filter.d/caddy-auth.conf
+        content: |
+          [Definition]
+          failregex = ^.*"remote_ip":"<HOST>".*"status":401.*$
+                      ^.*"remote_ip":"<HOST>".*"status":403.*$
+          ignoreregex =
+        mode: "0644"
+      become: true
+
+    - name: "Phase 5 | Fail2Ban | Create Caddy jail"
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.d/caddy.conf
+        content: |
+          [caddy]
+          enabled = true
+          port = http,https
+          filter = caddy-auth
+          logpath = /var/log/caddy/access.log
+          maxretry = 5
+          bantime = 3600
+        mode: "0644"
+      become: true
+
+    - name: "Phase 5 | Fail2Ban | Restart Fail2Ban"
+      ansible.builtin.systemd:
+        name: fail2ban
+        state: restarted
+        enabled: true
+      become: true
+
+    # ────────────────────────────────────────────────────────────────────────────
+    # PHASE 6 – Final verification (including socket)
     # ────────────────────────────────────────────────────────────────────────────
 
     - name: "Phase 4 | Verify all tools and daemon socket"

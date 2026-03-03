@@ -41,6 +41,8 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 		X-XSS-Protection "1; mode=block"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "accelerometer=(), camera=(), geolocaton=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+		X-Permitted-Cross-Domain-Policies "none"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';"
 	}`
 
 	sDomain := domain
@@ -81,6 +83,14 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	handle {
 		reverse_proxy localhost:%d
 	}
+
+	log {
+		output file /var/log/caddy/access.log
+		format json
+	}
+
+	# Basic DDoS/Rate-limit protection (requires caddy-ratelimit module)
+	# import rate_limit_snippet
 }`, domainList, commonHeaders, nextStaticDir, port)
 }
 
