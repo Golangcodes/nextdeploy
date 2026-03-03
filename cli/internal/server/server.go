@@ -441,7 +441,9 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	}
 	defer remoteFile.Close()
 
-	_, err = io.Copy(remoteFile, localFile)
+	// Optimization: Use a larger pipe for faster SFTP transfer
+	// SFTP can be slow with small packets over high-latency links.
+	_, err = io.CopyBuffer(remoteFile, localFile, make([]byte, 128*1024))
 	if err != nil {
 		return fmt.Errorf("failed to copy file: %w", err)
 	}

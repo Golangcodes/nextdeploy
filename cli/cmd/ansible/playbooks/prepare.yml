@@ -50,7 +50,9 @@
         create_home: false
         state: present
       become: true
-
+    - name: "Phase 1 | Security | Add current user to nextdeploy group"
+      ansible.builtin.user:
+        name: "{{ ansible_user_id }}"
         groups: nextdeploy
         append: true
       become: true
