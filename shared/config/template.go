@@ -16,6 +16,11 @@ const sampleConfig = `
 version: "1.0" # Config file versioning for forward compatibility with future NextDeploy updates
 
 # -----
+# TARGET TYPE — choose between "vps" (traditional server) or "serverless" (AWS Lambda + S3 + CloudFront)
+# -----
+target_type: serverless
+
+# -----
 # APP METADATA
 # -----
 app:
@@ -29,26 +34,10 @@ app:
 # -----
 servers:
   - name: "production-01" # [REQUIRED] Friendly name for the server
-    host: 192.0.2.123 # [REQUIRED] IP or hostname of the server
+    host: 1.2.3.4 # [REQUIRED] IP or hostname of the server
     username: ubuntu # [REQUIRED] SSH user (e.g., ubuntu, debian, root)
-    key_path: ~/.ssh/id_rsa # [REQUIRED] Path to your private SSH key
+    key_path: ~/.ssh/id_rsa  # [REQUIRED] Path to your private SSH key
     # password: "" # Optional: SSH password (key_path takes precedence)
-
-# -----
-# DATABASE CONFIG
-# -----
-database:
-  type: postgres # Supported: postgres | mysql
-  host: 192.0.2.124 # IP of your database server (managed or self-hosted)
-  port: 5432
-  username: dbuser
-  password: secret
-  name: exampledb
-  migrate_on_deploy: true # Run database migrations automatically after deployment
-
-# Example:
-#   - Use Amazon RDS or DigitalOcean Managed PostgreSQL as the database host.
-#   - Schema is updated with migration tools like Goose, Flyway, or Prisma.
 
 # -----
 # LOGGING CONFIGURATION
@@ -91,13 +80,27 @@ backup:
     provider: s3 # Use S3-compatible storage (AWS S3, MinIO, Wasabi, etc.)
     bucket: nextdeploy-backups # S3 bucket name
     region: us-east-1 # AWS region
-    access_key: YOUR_ACCESS_KEY
-    secret_key: YOUR_SECRET_KEY
 
-# Example:
-#   - Database and volume data backed up to S3 every day.
-#   - Automatically deleted after 7 days unless extended.
+# -----
+# CLOUD PROVIDER — RECOMMENDED: USE LOCAL AWS PROFILE
+# -----
+CloudProvider:
+  name: aws
+  region: us-east-1
+  # access_key: "YOUR_ACCESS_KEY" # Optional: overridden by profile if set
+  # secret_key: "YOUR_SECRET_KEY" # Optional: overridden by profile if set
+  profile: "default"            # Recommended: uses credentials from aws configure
 
+# -----
+# SERVERLESS CONFIGURATION
+# -----
+serverless:
+  provider: aws
+  region: us-east-1
+  profile: "default"           # AWS CLI profile name
+  s3_bucket: "example-app-assets" # S3 bucket for static files (public/ and _next/static/)
+  cloudfront_id: "E1234567890ABC" # [OPTIONAL] If provided, NextDeploy will trigger an invalidation after deploy
+  lambda_function_name: "example-app-prod" # [OPTIONAL] Defaults to app name if not provided
 
 # -----
 # WEBHOOKS AFTER DEPLOYMENT
@@ -107,18 +110,6 @@ webhook:
     - curl -X POST https://your-api.com/deploy/success # Notify external system (e.g., Slack, Discord, CI dashboard)
   on_failure:
     - curl -X POST https://your-api.com/deploy/failure # Used for alerting, logging, or rollback triggers
-
-# Example:
-#   - You can hook this into Notion, Linear, Jira, Slack, or even a custom dashboard.
-#   - Also useful for CI/CD chaining (e.g., notify QA team that staging is ready).
-
-## CLOUD PROVIDER instructions
-
-CloudProvider:
-  name: aws # Supported: aws | gcp | azure | digitalocean
-  region: us-north-1 # AWS region (e.g., us-east-1, eu-west-1)
-  access_key: YOUR_AWS_ACCESS_KEY # IAM user access key
-  secret_key: YOUR_AWS_SECRET_KEY # IAM user secret key
 `
 
 func GetSampleConfigTemplate() string {

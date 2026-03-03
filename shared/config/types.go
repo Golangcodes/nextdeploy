@@ -40,6 +40,7 @@ type ServerlessConfig struct {
 	S3Bucket           string `yaml:"s3_bucket,omitempty"`
 	CloudFrontId       string `yaml:"cloudfront_id,omitempty"`
 	LambdaFunctionName string `yaml:"lambda_function_name,omitempty"` // defaults to app name
+	Profile            string `yaml:"profile,omitempty"`              // AWS CLI profile name
 }
 
 type WebServer struct {
@@ -70,6 +71,7 @@ type CloudProviderStruct struct {
 	// #nosec G117
 	AccessKey string `yaml:"access_key,omitempty"`
 	SecretKey string `yaml:"secret_key,omitempty"`
+	Profile   string `yaml:"profile,omitempty"` // AWS CLI profile name
 }
 type ServerConfig struct {
 	WebServer *WebServer `yaml:"web_server,omitempty"`

@@ -57,7 +57,7 @@ var shipCmd = &cobra.Command{
 		}
 
 		if cfg.TargetType == "serverless" {
-			log.Info("Deployment Target: SERVERLESS (No VPS or Daemon required): coming soon")
+			log.Info("Deployment Target: SERVERLESS (No VPS or Daemon required)")
 			if cfg.Serverless == nil {
 				log.Error("TargetType is 'serverless' but 'serverless' config block is missing.")
 				os.Exit(1)

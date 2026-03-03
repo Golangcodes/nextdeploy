@@ -11,12 +11,14 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
 	cfTypes "github.com/aws/aws-sdk-go-v2/service/cloudfront/types"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdaTypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/gabriel-vasile/mimetype"
 
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -40,7 +42,44 @@ func NewAWSProvider() *AWSProvider {
 
 func (p *AWSProvider) Initialize(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
 	p.log.Info("Initializing AWS Serverless Deployment session...")
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(appCfg.Serverless.Region))
+
+	var opts []func(*config.LoadOptions) error
+
+	// Determine region (priority: serverless block > cloudprovider block)
+	region := appCfg.Serverless.Region
+	if region == "" && appCfg.CloudProvider != nil {
+		region = appCfg.CloudProvider.Region
+	}
+	if region != "" {
+		opts = append(opts, config.WithRegion(region))
+	}
+
+	// Determine Profile (priority: serverless block > cloudprovider block)
+	profile := appCfg.Serverless.Profile
+	if profile == "" && appCfg.CloudProvider != nil {
+		profile = appCfg.CloudProvider.Profile
+	}
+
+	if profile != "" {
+		p.log.Info("Using AWS Profile: %s", profile)
+		opts = append(opts, config.WithSharedConfigProfile(profile))
+	}
+
+	// Explicit credentials (if still used, though profiles are preferred)
+	if appCfg.CloudProvider != nil && appCfg.CloudProvider.AccessKey != "" && appCfg.CloudProvider.SecretKey != "" {
+		p.log.Info("Using explicit credentials from CloudProvider config.")
+		opts = append(opts, config.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(
+				appCfg.CloudProvider.AccessKey,
+				appCfg.CloudProvider.SecretKey,
+				"",
+			),
+		))
+	} else if profile == "" {
+		p.log.Info("No profile or explicit credentials found, falling back to default SDK resolution (env/IAM).")
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
@@ -57,6 +96,12 @@ func (p *AWSProvider) DeployStatic(ctx context.Context, tarballPath string, appC
 	}
 
 	client := s3.NewFromConfig(p.cfg)
+
+	// Ensure bucket exists before uploading
+	if err := p.ensureBucketExists(ctx, client, appCfg.Serverless.S3Bucket, appCfg.Serverless.Region); err != nil {
+		return fmt.Errorf("failed to ensure S3 bucket exists: %w", err)
+	}
+
 	uploader := transfermanager.New(client)
 
 	// We need to unpack the tarball first to access static files
@@ -281,5 +326,37 @@ func (p *AWSProvider) InvalidateCache(ctx context.Context, appCfg *cfgTypes.Next
 	}
 
 	p.log.Info("CloudFront invalidation triggered.")
+	return nil
+}
+
+func (p *AWSProvider) ensureBucketExists(ctx context.Context, client *s3.Client, bucketName, region string) error {
+	_, err := client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err == nil {
+		return nil // Bucket exists and we have access
+	}
+
+	p.log.Info("S3 Bucket %s does not exist, creating in region %s...", bucketName, region)
+
+	createInput := &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	}
+
+	// S3 US-EAST-1 (us-east-1) does not require a LocationConstraint
+	if region != "us-east-1" {
+		createInput.CreateBucketConfiguration = &s3Types.CreateBucketConfiguration{
+			LocationConstraint: s3Types.BucketLocationConstraint(region),
+		}
+	}
+
+	_, err = client.CreateBucket(ctx, createInput)
+	if err != nil {
+		// Ignore if another user owns the bucket name (global namespace issue)
+		// but the SDK error should be clear if that's the case
+		return fmt.Errorf("failed to create S3 bucket: %w", err)
+	}
+
+	p.log.Info("S3 Bucket %s created successfully.", bucketName)
 	return nil
 }
