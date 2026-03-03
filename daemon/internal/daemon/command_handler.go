@@ -162,7 +162,7 @@ func (ch *CommandHandler) setUpCaddy(args map[string]interface{}) types.Response
 
 	if out, err := exec.Command("caddy", "reload", "--config", "/etc/caddy/Caddyfile").CombinedOutput(); err != nil {
 		log.Printf("caddy reload failed (%v: %s), attempting systemctl start...", err, string(out))
-		if out2, err2 := exec.Command("systemctl", "start", "caddy").CombinedOutput(); err2 != nil {
+		if out2, err2 := exec.Command(systemctlPath, "start", "caddy").CombinedOutput(); err2 != nil {
 			return types.Response{
 				Success: false,
 				Message: fmt.Sprintf("failed to start Caddy service: %v — %s", err2, string(out2)),

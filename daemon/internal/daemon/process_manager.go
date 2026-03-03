@@ -29,44 +29,13 @@ func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode st
 	log.Printf("[process] Generating service file: %s (mode=%s, dir=%s, port=%d, pkg=%s)",
 		servicePath, outputMode, projectDir, port, packageManager)
 
-	var execStart string
-	if outputMode == "standalone" {
-		bin := resolveBinary("node")
-		if packageManager == "bun" {
-			bin = resolveBinary("bun")
-		}
-		cmd := fmt.Sprintf("%s server.js", bin)
-
-		if dopplerToken != "" {
-			execStart = fmt.Sprintf("%s run -- %s", resolveBinary("doppler"), cmd)
-		} else {
-			execStart = cmd
-		}
-	} else if outputMode == "default" {
-		bin := resolveBinary("npm")
-		args := "start"
-		if packageManager == "bun" {
-			bin = resolveBinary("bun")
-			args = "run start"
-		} else if packageManager == "yarn" {
-			bin = resolveBinary("yarn")
-			args = "start"
-		} else if packageManager == "pnpm" {
-			bin = resolveBinary("pnpm")
-			args = "start"
-		}
-		cmd := fmt.Sprintf("%s %s", bin, args)
-
-		if dopplerToken != "" {
-			execStart = fmt.Sprintf("%s run -- %s", resolveBinary("doppler"), cmd)
-		} else {
-			execStart = cmd
-		}
-	} else if outputMode == "export" {
+	execStart, err := pm.resolveExecStart(outputMode, packageManager, dopplerToken)
+	if err != nil {
+		return "", false, err
+	}
+	if execStart == "" { // Export mode
 		log.Printf("[process] Export mode detected for %s; no systemd service needed.", appName)
 		return "", false, nil
-	} else {
-		return "", false, fmt.Errorf("unknown or unsupported output mode: %q (check your next.config.js output setting)", outputMode)
 	}
 
 	serviceContent := fmt.Sprintf(`[Unit]
@@ -112,7 +81,7 @@ WantedBy=multi-user.target
 	}
 
 	// #nosec G306
-	err := os.WriteFile(servicePath, []byte(serviceContent), 0644)
+	err = os.WriteFile(servicePath, []byte(serviceContent), 0644)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to write systemd service file %s: %w", servicePath, err)
 	}
@@ -130,6 +99,40 @@ WantedBy=multi-user.target
 	time.Sleep(500 * time.Millisecond)
 
 	return serviceName, true, nil
+}
+
+func (pm *ProcessManager) resolveExecStart(outputMode, packageManager, dopplerToken string) (string, error) {
+	var cmd string
+	switch outputMode {
+	case "standalone":
+		bin := resolveBinary("node")
+		if packageManager == "bun" {
+			bin = resolveBinary("bun")
+		}
+		cmd = fmt.Sprintf("%s server.js", bin)
+	case "default":
+		bin := resolveBinary("npm")
+		args := "start"
+		switch packageManager {
+		case "bun":
+			bin = resolveBinary("bun")
+			args = "run start"
+		case "yarn":
+			bin = resolveBinary("yarn")
+		case "pnpm":
+			bin = resolveBinary("pnpm")
+		}
+		cmd = fmt.Sprintf("%s %s", bin, args)
+	case "export":
+		return "", nil
+	default:
+		return "", fmt.Errorf("unknown output mode: %q", outputMode)
+	}
+
+	if dopplerToken != "" {
+		return fmt.Sprintf("%s run -- %s", resolveBinary("doppler"), cmd), nil
+	}
+	return cmd, nil
 }
 
 func resolveBinary(name string) string {
@@ -159,7 +162,7 @@ func resolveBinary(name string) string {
 
 func (pm *ProcessManager) reloadDaemon() error {
 	log.Printf("[process] Running systemctl daemon-reload")
-	cmd := exec.Command("systemctl", "daemon-reload")
+	cmd := exec.Command(systemctlPath, "daemon-reload")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to reload systemd daemon: %v - %s", err, out)
 	}
@@ -170,14 +173,14 @@ func (pm *ProcessManager) reloadDaemon() error {
 func (pm *ProcessManager) StartService(serviceName string) error {
 	log.Printf("[process] Enabling service %s", serviceName)
 	// #nosec G204
-	cmd := exec.Command("systemctl", "enable", serviceName)
+	cmd := exec.Command(systemctlPath, "enable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("[process] Warning: failed to enable service %s: %v - %s", serviceName, err, string(out))
 	}
 
 	log.Printf("[process] Starting service %s", serviceName)
 	// #nosec G204
-	cmd = exec.Command("systemctl", "start", serviceName)
+	cmd = exec.Command(systemctlPath, "start", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to start service %s: %v - %s", serviceName, err, string(out))
 	}
@@ -188,12 +191,12 @@ func (pm *ProcessManager) StartService(serviceName string) error {
 
 func (pm *ProcessManager) StopService(serviceName string) error {
 	// #nosec G204
-	cmd := exec.Command("systemctl", "stop", serviceName)
+	cmd := exec.Command(systemctlPath, "stop", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
 		log.Printf("Warning: failed to stop service %s: %s", serviceName, out)
 	}
 	// #nosec G204
-	cmd = exec.Command("systemctl", "disable", serviceName)
+	cmd = exec.Command(systemctlPath, "disable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
 		log.Printf("Warning: failed to disable service %s: %s", serviceName, out)
 	}
@@ -207,7 +210,7 @@ func (pm *ProcessManager) CurrentServiceName() string {
 
 func (pm *ProcessManager) RestartService(serviceName string) error {
 	// #nosec G204
-	cmd := exec.Command("systemctl", "restart", serviceName)
+	cmd := exec.Command(systemctlPath, "restart", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to restart service %s: %v - %s", serviceName, err, out)
 	}

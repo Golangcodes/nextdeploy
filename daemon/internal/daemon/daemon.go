@@ -13,6 +13,8 @@ import (
 	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 )
 
+const systemctlPath = "/usr/bin/systemctl" // Assuming a default path for systemctl
+
 type NextDeployDaemon struct {
 	ctx            context.Context
 	cancel         context.CancelFunc

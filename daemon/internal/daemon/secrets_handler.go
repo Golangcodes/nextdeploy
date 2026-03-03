@@ -12,8 +12,12 @@ import (
 	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 )
 
-// #nosec G101
-const secretsDir = "/opt/nextdeploy/secrets"
+const (
+	// #nosec G101
+	secretsDir     = "/opt/nextdeploy/secrets"
+	errMissingKey  = "missing 'key' argument"
+	errLoadSecrets = "failed to load secrets: %v"
+)
 
 func (ch *CommandHandler) handleSecrets(args map[string]interface{}) types.Response {
 	action, ok := StringArg(args, "action")
@@ -43,7 +47,7 @@ func (ch *CommandHandler) handleSecrets(args map[string]interface{}) types.Respo
 func (ch *CommandHandler) setSecret(appName string, args map[string]interface{}) types.Response {
 	key, ok := StringArg(args, "key")
 	if !ok {
-		return types.Response{Success: false, Message: "missing 'key' argument"}
+		return types.Response{Success: false, Message: errMissingKey}
 	}
 	value, ok := StringArg(args, "value")
 	if !ok {
@@ -52,7 +56,7 @@ func (ch *CommandHandler) setSecret(appName string, args map[string]interface{})
 
 	secrets, err := ch.loadSecrets(appName)
 	if err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("failed to load secrets: %v", err)}
+		return types.Response{Success: false, Message: fmt.Sprintf(errLoadSecrets, err)}
 	}
 
 	secrets[key] = value
@@ -71,12 +75,12 @@ func (ch *CommandHandler) setSecret(appName string, args map[string]interface{})
 func (ch *CommandHandler) getSecret(appName string, args map[string]interface{}) types.Response {
 	key, ok := StringArg(args, "key")
 	if !ok {
-		return types.Response{Success: false, Message: "missing 'key' argument"}
+		return types.Response{Success: false, Message: errMissingKey}
 	}
 
 	secrets, err := ch.loadSecrets(appName)
 	if err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("failed to load secrets: %v", err)}
+		return types.Response{Success: false, Message: fmt.Sprintf(errLoadSecrets, err)}
 	}
 
 	value, exists := secrets[key]
@@ -90,12 +94,12 @@ func (ch *CommandHandler) getSecret(appName string, args map[string]interface{})
 func (ch *CommandHandler) unsetSecret(appName string, args map[string]interface{}) types.Response {
 	key, ok := StringArg(args, "key")
 	if !ok {
-		return types.Response{Success: false, Message: "missing 'key' argument"}
+		return types.Response{Success: false, Message: errMissingKey}
 	}
 
 	secrets, err := ch.loadSecrets(appName)
 	if err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("failed to load secrets: %v", err)}
+		return types.Response{Success: false, Message: fmt.Sprintf(errLoadSecrets, err)}
 	}
 
 	if _, exists := secrets[key]; !exists {
@@ -119,7 +123,7 @@ func (ch *CommandHandler) unsetSecret(appName string, args map[string]interface{
 func (ch *CommandHandler) listSecrets(appName string) types.Response {
 	secrets, err := ch.loadSecrets(appName)
 	if err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("failed to load secrets: %v", err)}
+		return types.Response{Success: false, Message: fmt.Sprintf(errLoadSecrets, err)}
 	}
 
 	keys := make([]string, 0, len(secrets))
