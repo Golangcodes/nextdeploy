@@ -720,7 +720,7 @@
           # Minimal sandboxing: the daemon writes to /etc/caddy, /opt/nextdeploy,
           # /run/nextdeployd, and /var/log/nextdeploy — broad access is needed.
           NoNewPrivileges=yes
-          CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_NET_BIND_SERVICE
+          CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_NET_BIND_SERVICE CAP_CHOWN CAP_FOWNER
 
           [Install]
           WantedBy=multi-user.target
@@ -785,6 +785,7 @@
         - "{{ app_root }}"
         - "{{ app_dir }}"
         - "{{ app_root }}/uploads"
+        - "{{ app_root }}/tmp"
 
     # ────────────────────────────────────────────────────────────────────────────
     # PHASE 5 – Fail2Ban & Security Hardening

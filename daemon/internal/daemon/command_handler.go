@@ -17,7 +17,12 @@ import (
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
-const appsDir = "/opt/nextdeploy/apps"
+const (
+	baseDir    = "/opt/nextdeploy"
+	appsDir    = "/opt/nextdeploy/apps"
+	uploadsDir = "/opt/nextdeploy/uploads"
+	workTmpDir = "/opt/nextdeploy/tmp"
+)
 
 type CommandHandler struct {
 	config         *types.DaemonConfig
@@ -182,9 +187,12 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 
 	log.Printf("[ship] Starting deployment from: %s", tarballPath)
 
-	tmpDir, err := os.MkdirTemp("", "nextdeploy-unpack-*")
+	// Ensure workTmpDir exists
+	_ = os.MkdirAll(workTmpDir, 0755)
+
+	tmpDir, err := os.MkdirTemp(workTmpDir, "unpack-*")
 	if err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("failed to create temp dir: %v", err)}
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to create temp dir in %s: %v", workTmpDir, err)}
 	}
 	cleanupTmp := true
 	defer func() {
@@ -221,6 +229,7 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	// Ensure the app directory is owned by nextdeploy
 	ch.ensureAppDirOwnership(appName)
 
+	log.Printf("[ship] Moving %s -> %s", tmpDir, releaseDir)
 	if err := os.Rename(tmpDir, releaseDir); err != nil {
 		if isCrossDevice(err) {
 			log.Printf("[ship] Cross-device rename, falling back to copy...")
@@ -390,7 +399,7 @@ func extractTarGz(src, dest string) error {
 
 	log.Printf("[extract] Using system tar for faster extraction: %s -> %s", src, dest)
 	// #nosec G204
-	cmd := exec.Command("tar", "--no-same-owner", "--no-same-permissions", "-xzf", src, "-C", dest)
+	cmd := exec.Command("/usr/bin/tar", "--no-same-owner", "--no-same-permissions", "-xzf", src, "-C", dest)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tar extraction failed: %v - %s", err, string(out))
 	}
@@ -529,21 +538,25 @@ func (ch *CommandHandler) ensureAppDirOwnership(appName string) {
 }
 
 func (ch *CommandHandler) ensureDirPermissions(root string) {
-	log.Printf("[ship] Fixing permissions recursively for %s", root)
+	// Optimization: Skip chown if already correct. This saves thousands of syscalls.
+	// We use 'find' with '-not -user nextdeploy' to only touch what's necessary.
 	// #nosec G204
-	chownCmd := exec.Command("chown", "-R", "nextdeploy:nextdeploy", root)
+	chownCmd := exec.Command("find", root, "(", "-not -user", "nextdeploy", "-o", "-not -group", "nextdeploy", ")", "-exec", "chown", "nextdeploy:nextdeploy", "{}", "+")
 	if out, err := chownCmd.CombinedOutput(); err != nil {
-		log.Printf("[ship] Warning: failed to chown %s: %v - %s", root, err, string(out))
+		log.Printf("[ship] Warning: optimized chown failed: %v - %s", err, string(out))
+		// Fallback to simple chown -R if find fails
+		_ = exec.Command("chown", "-R", "nextdeploy:nextdeploy", root).Run()
 	}
 
+	// Optimization: Use '+' instead of ';' for find -exec to batch calls
 	// #nosec G204
-	chmodDirCmd := exec.Command("find", root, "-type", "d", "-exec", "chmod", "0755", "{}", "+")
+	chmodDirCmd := exec.Command("find", root, "-type", "d", "-not -perm", "0755", "-exec", "chmod", "0755", "{}", "+")
 	if out, err := chmodDirCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod dirs in %s: %v - %s", root, err, string(out))
 	}
 
 	// #nosec G204
-	chmodFileCmd := exec.Command("find", root, "-type", "f", "-exec", "chmod", "0644", "{}", "+")
+	chmodFileCmd := exec.Command("find", root, "-type", "f", "-not -perm", "0644", "-exec", "chmod", "0644", "{}", "+")
 	if out, err := chmodFileCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod files in %s: %v - %s", root, err, string(out))
 	}
