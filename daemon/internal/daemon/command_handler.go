@@ -541,7 +541,7 @@ func (ch *CommandHandler) ensureDirPermissions(root string) {
 	// Optimization: Skip chown if already correct. This saves thousands of syscalls.
 	// We use 'find' with '-not -user nextdeploy' to only touch what's necessary.
 	// #nosec G204
-	chownCmd := exec.Command("find", root, "(", "-not -user", "nextdeploy", "-o", "-not -group", "nextdeploy", ")", "-exec", "chown", "nextdeploy:nextdeploy", "{}", "+")
+	chownCmd := exec.Command("find", root, "(", "!", "-user", "nextdeploy", "-o", "!", "-group", "nextdeploy", ")", "-exec", "chown", "nextdeploy:nextdeploy", "{}", "+")
 	if out, err := chownCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: optimized chown failed: %v - %s", err, string(out))
 		// Fallback to simple chown -R if find fails
@@ -550,13 +550,13 @@ func (ch *CommandHandler) ensureDirPermissions(root string) {
 
 	// Optimization: Use '+' instead of ';' for find -exec to batch calls
 	// #nosec G204
-	chmodDirCmd := exec.Command("find", root, "-type", "d", "-not -perm", "0755", "-exec", "chmod", "0755", "{}", "+")
+	chmodDirCmd := exec.Command("find", root, "-type", "d", "!", "-perm", "0755", "-exec", "chmod", "0755", "{}", "+")
 	if out, err := chmodDirCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod dirs in %s: %v - %s", root, err, string(out))
 	}
 
 	// #nosec G204
-	chmodFileCmd := exec.Command("find", root, "-type", "f", "-not -perm", "0644", "-exec", "chmod", "0644", "{}", "+")
+	chmodFileCmd := exec.Command("find", root, "-type", "f", "!", "-perm", "0644", "-exec", "chmod", "0644", "{}", "+")
 	if out, err := chmodFileCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod files in %s: %v - %s", root, err, string(out))
 	}
