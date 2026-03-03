@@ -76,7 +76,8 @@ WantedBy=multi-user.target
 
 	log.Printf("[process] Writing service file to %s", servicePath)
 	// #nosec G301
-	if err := os.MkdirAll(filepath.Dir(servicePath), 0755); err != nil {
+	// #nosec G301
+	if err := os.MkdirAll(filepath.Dir(servicePath), 0750); err != nil {
 		return "", false, fmt.Errorf("failed to create systemd dir: %w", err)
 	}
 

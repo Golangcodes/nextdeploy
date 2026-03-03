@@ -241,7 +241,7 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	releaseDir := filepath.Join(appsDir, appName, "releases", releaseID)
 
 	// #nosec G301 G703
-	if err := os.MkdirAll(filepath.Dir(releaseDir), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(releaseDir), 0750); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to create releases dir: %v", err)}
 	}
 
@@ -536,7 +536,7 @@ func copyDir(src, dst string) error {
 		target := filepath.Join(dst, rel)
 		if d.IsDir() {
 			// #nosec G301 G703
-			return os.MkdirAll(target, 0755)
+			return os.MkdirAll(target, 0750)
 		}
 		if d.Type()&os.ModeSymlink != 0 {
 			linkTarget, err := os.Readlink(path)
@@ -544,7 +544,7 @@ func copyDir(src, dst string) error {
 				return fmt.Errorf("readlink %s: %w", path, err)
 			}
 			// #nosec G301 G703
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
 				return err
 			}
 			return os.Symlink(linkTarget, target)
@@ -562,7 +562,7 @@ func copyFile(src, dst string) error {
 	defer in.Close()
 
 	// #nosec G301 G703
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
 		return err
 	}
 	// #nosec G304 G703
@@ -600,7 +600,7 @@ func (ch *CommandHandler) ensureDirPermissions(root string) {
 	}
 
 	// #nosec G204
-	chmodDirCmd := exec.Command(findPath, root, "-type", "d", "!", "-perm", "0755", "-exec", chmodPath, "0755", "{}", "+")
+	chmodDirCmd := exec.Command(findPath, root, "-type", "d", "!", "-perm", "0750", "-exec", chmodPath, "0750", "{}", "+")
 	if out, err := chmodDirCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod dirs in %s: %v - %s", root, err, string(out))
 	}
