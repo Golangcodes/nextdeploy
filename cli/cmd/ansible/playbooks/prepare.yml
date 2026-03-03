@@ -778,7 +778,7 @@
         state: directory
         owner: nextdeploy
         group: nextdeploy
-        mode: "0770"
+        mode: "0755"
       become: true
       loop:
         - "{{ app_root }}"
