@@ -2,13 +2,10 @@
 
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Golangcodes_nextdeploy&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Golangcodes_nextdeploy)
 
+
 ## 📚 Documentation
 
-For a deep dive into the architecture, commands, and security of NextDeploy, visit our **[Documentation Site](docs/README.md)**.
-
-- **[Introduction](docs/INTRODUCTION.md)**: Why NextDeploy?
-- **[Architecture](docs/ARCHITECTURE.md)**: How it works under the hood.
-- **[Command Reference](docs/COMMANDS.md)**: Complete CLI guide.
+For a deep dive into the architecture, commands, and security of NextDeploy, visit our **[Documentation Site](https://nextdeploy.one/docs)**.
 
 NextDeploy is an open-source CLI and daemon for deploying and managing Next.js applications on your own infrastructure.
 No lock-in. No magic. Just Native Execution, SSH, and full control.
@@ -100,7 +97,7 @@ Other platforms abstract until you lose control. NextDeploy flips that. You own 
 ## Roadmap
 
 * [x] Native VPS Deployment (systemd)
-* [ ] AWS Serverless support (Lambda + CloudFront)
+* [x] AWS Serverless support (Lambda + CloudFront)
 * [x] Integrated Secret Management
 * [x] Live Logs and Status metrics
 * [ ] CI/CD via GitHub Actions / Webhooks

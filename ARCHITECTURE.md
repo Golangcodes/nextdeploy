@@ -68,3 +68,27 @@ Unlike many "modern" deployment tools, NextDeploy chooses native execution over 
 - **Performance**: Zero virtualization overhead.
 - **Resource Usage**: Lower RAM/CPU footprint.
 - **Transparency**: Devs can use standard Linux tools (`top`, `ps`, `cd`) to see their app exactly as it is.
+
+---
+
+## ☁️ Cloud / Serverless Architecture
+
+In addition to VPS targets, NextDeploy supports **AWS Serverless** as a first-class citizen.
+
+### 1. Artifact Discovery
+The CLI looks for `.nextdeploy/app.tar.gz`. This artifact is cross-platform; the same build used for VPS can be used for Serverless.
+
+### 2. Static Asset Offloading
+- `public/` and `_next/static/` are uploaded to **Amazon S3**.
+- Correct `Content-Type` is detected via magic bytes.
+- Cache-Control is set to `public, max-age=31536000, immutable` for hashed assets.
+
+### 3. Compute Layer (Lambda)
+- The `.next/standalone` directory is zipped and deployed to **AWS Lambda**.
+- NextDeploy triggers `UpdateFunctionCode` to swap versions.
+
+### 4. Zero-Leak Secrets
+Secrets are pushed to **AWS Secrets Manager**. NextDeploy injects only the `ND_SECRETS_ARN` environment variable into the Lambda environment. The application code fetches actual values at runtime via IAM, ensuring secrets never touch the deployment zip or build logs.
+
+### 5. CDN Invalidation
+If a `cloudfront_id` is provided, a `/*` invalidation is triggered automatically to ensure immediate global availability of the new version.
