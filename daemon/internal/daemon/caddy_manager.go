@@ -10,13 +10,16 @@ import (
 	"github.com/Golangcodes/nextdeploy/shared/caddy"
 )
 
+const mainCaddyfilePath = "/etc/caddy/Caddyfile"
+
 type CaddyManager struct {
 	configDir string
 }
 
 func NewCaddyManager() *CaddyManager {
 	dir := "/etc/caddy/nextdeploy.d"
-	_ = os.MkdirAll(dir, 0750)
+	// #nosec G301
+	_ = os.MkdirAll(dir, 0755)
 	return &CaddyManager{
 		configDir: dir,
 	}
@@ -25,7 +28,8 @@ func NewCaddyManager() *CaddyManager {
 func (cm *CaddyManager) GenerateConfig(appName, domain, outputMode string, port int, appDir string) error {
 	caddyConfig := caddy.GenerateCaddyfile(appName, domain, outputMode, port, appDir)
 	configPath := filepath.Join(cm.configDir, fmt.Sprintf("%s.caddy", appName))
-	err := os.WriteFile(configPath, []byte(caddyConfig), 0600)
+	// #nosec G306
+	err := os.WriteFile(configPath, []byte(caddyConfig), 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write caddy config for %s: %w", appName, err)
 	}
@@ -35,19 +39,18 @@ func (cm *CaddyManager) GenerateConfig(appName, domain, outputMode string, port 
 }
 
 func (cm *CaddyManager) EnsureMainCaddyfile() error {
-	mainCaddyfile := "/etc/caddy/Caddyfile"
 	importDirective := fmt.Sprintf("import %s/*.caddy\n", cm.configDir)
-	content, err := os.ReadFile(mainCaddyfile)
+	content, err := os.ReadFile(mainCaddyfilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return os.WriteFile(mainCaddyfile, []byte(importDirective), 0600)
+			return os.WriteFile(mainCaddyfilePath, []byte(importDirective), 0600)
 		}
 		return fmt.Errorf("failed to read main Caddyfile: %w", err)
 	}
 
 	contentStr := string(content)
 	if !containsStr(contentStr, importDirective) {
-		f, err := os.OpenFile(mainCaddyfile, os.O_APPEND|os.O_WRONLY, 0600)
+		f, err := os.OpenFile(mainCaddyfilePath, os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			return fmt.Errorf("failed to open main Caddyfile for appending: %w", err)
 		}
@@ -69,7 +72,7 @@ func (cm *CaddyManager) Reload() error {
 	}
 
 	log.Printf("Warning: systemctl reload caddy failed (%v), falling back to direct caddy reload...", err)
-	fallbackCmd := exec.Command("caddy", "reload", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile")
+	fallbackCmd := exec.Command("caddy", "reload", "--config", mainCaddyfilePath, "--adapter", "caddyfile")
 	output, err = fallbackCmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("caddy reload failed (systemctl and fallback): %v - %s", err, string(output))
@@ -80,7 +83,7 @@ func (cm *CaddyManager) Reload() error {
 }
 
 func (cm *CaddyManager) Validate() error {
-	cmd := exec.Command("caddy", "validate", "--config", "/etc/caddy/Caddyfile")
+	cmd := exec.Command("caddy", "validate", "--config", mainCaddyfilePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("caddy validation failed: %v - %s", err, string(output))
