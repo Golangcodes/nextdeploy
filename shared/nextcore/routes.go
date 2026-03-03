@@ -4,7 +4,10 @@ import (
 	"path/filepath"
 )
 
-func getRoutesFromManifests(buildMeta *NextBuildMetadata) (*RouteInfo, error) {
+func getRoutesFromManifests(buildMeta *NextBuildMetadata, distDir string) (*RouteInfo, error) {
+	if distDir == "" {
+		distDir = ".next"
+	}
 	info := &RouteInfo{
 		SSGRoutes:      make(map[string]string),
 		ISRRoutes:      make(map[string]string),
@@ -36,9 +39,9 @@ func getRoutesFromManifests(buildMeta *NextBuildMetadata) (*RouteInfo, error) {
 				if detailMap, ok := details.(map[string]interface{}); ok {
 					if initialRevalidate, ok := detailMap["initialRevalidateSeconds"].(float64); ok {
 						if initialRevalidate > 0 {
-							info.ISRRoutes[route] = filepath.Join(".next", "server", detailMap["dataRoute"].(string))
+							info.ISRRoutes[route] = filepath.Join(distDir, "server", detailMap["dataRoute"].(string))
 						} else {
-							info.SSGRoutes[route] = filepath.Join(".next", "server", "pages", route+".html")
+							info.SSGRoutes[route] = filepath.Join(distDir, "server", "pages", route+".html")
 						}
 					}
 				}

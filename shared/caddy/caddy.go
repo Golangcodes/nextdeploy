@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
 type CaddyManager struct {
@@ -31,8 +33,16 @@ type Config struct {
 	Format  string
 }
 
-func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir string) string {
-	commonHeaders := `
+func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir string, features *nextcore.DetectedFeatures, distDir, exportDir string) string {
+	if distDir == "" {
+		distDir = ".next"
+	}
+	if exportDir == "" {
+		exportDir = "out"
+	}
+
+	csp := nextcore.BuildCSP(features)
+	commonHeaders := fmt.Sprintf(`
 	encode zstd gzip
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
@@ -40,18 +50,16 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 		X-Frame-Options "SAMEORIGIN"
 		X-XSS-Protection "1; mode=block"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		Permissions-Policy "accelerometer=(), camera=(), geolocaton=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+		Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
 		X-Permitted-Cross-Domain-Policies "none"
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';"
-	}`
+		Content-Security-Policy "%s"
+	}`, csp)
 
 	sDomain := domain
 	sDomain = strings.TrimPrefix(sDomain, "https://")
 	sDomain = strings.TrimPrefix(sDomain, "http://")
 	sDomain = strings.TrimSuffix(sDomain, "/")
 
-	// Guard: if domain is empty after stripping, fall back to a placeholder
-	// so we don't generate a broken ', www.' Caddy site address.
 	if sDomain == "" {
 		sDomain = "localhost"
 	}
@@ -66,13 +74,14 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 
 	if outputMode == "export" {
 		// Static site hosting
-		staticDir := filepath.Join(appDir, "out")
+		staticDir := filepath.Join(appDir, exportDir)
 		return fmt.Sprintf(`%s {%s
 	root * %s
 	file_server
 }`, domainList, commonHeaders, staticDir)
 	}
-	nextStaticDir := filepath.Join(appDir, ".next", "static")
+
+	nextStaticDir := filepath.Join(appDir, distDir, "static")
 	return fmt.Sprintf(`%s {%s
 	handle_path /_next/static/* {
 		root * %s
@@ -88,9 +97,6 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 		output file /var/log/caddy/access.log
 		format json
 	}
-
-	# Basic DDoS/Rate-limit protection (requires caddy-ratelimit module)
-	# import rate_limit_snippet
 }`, domainList, commonHeaders, nextStaticDir, port)
 }
 
@@ -139,7 +145,7 @@ func (cm *CaddyManager) ApplyConfig(ctx context.Context, config *Config) error {
 		return fmt.Errorf("unsupported config format: %s", config.Format)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, body)
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, body)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -166,15 +172,23 @@ func (cm *CaddyManager) ApplyConfig(ctx context.Context, config *Config) error {
 }
 
 func (cm *CaddyManager) ValidateConfig(ctx context.Context, config *Config) error {
-	if config.Format != "caddyfile" {
-		return fmt.Errorf("validation is only supported for caddyfile format")
+	var req *http.Request
+	var err error
+
+	switch config.Format {
+	case "caddyfile":
+		req, err = http.NewRequestWithContext(ctx, "POST", cm.adminAPI+"/adapt", strings.NewReader(config.Content))
+		req.Header.Set("Content-Type", "text/caddyfile")
+	case "json":
+		req, err = http.NewRequestWithContext(ctx, "POST", cm.adminAPI+"/load", strings.NewReader(config.Content))
+		req.Header.Set("Content-Type", "application/json")
+	default:
+		return fmt.Errorf("unsupported config format: %s", config.Format)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", cm.adminAPI+"/validate", strings.NewReader(config.Content))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "text/caddyfile")
 
 	// #nosec G704
 	resp, err := cm.client.Do(req)
@@ -218,7 +232,7 @@ func (cm *CaddyManager) PatchConfig(ctx context.Context, path string, config int
 	return nil
 }
 
-func (cm *CaddyManager) LoadConfig(ctx context.Context, filePath string) (*Config, error) {
+func (cm *CaddyManager) LoadConfig(filePath string) (*Config, error) {
 	// #nosec G304
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -235,6 +249,10 @@ func (cm *CaddyManager) LoadConfig(ctx context.Context, filePath string) (*Confi
 	}, nil
 }
 
-func (cm *CaddyManager) SaveConfig(ctx context.Context, config *Config, filePath string) error {
-	return os.WriteFile(filePath, []byte(config.Content), 0600)
+func (cm *CaddyManager) SaveConfig(config *Config, filePath string) error {
+	tmp := filePath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(config.Content), 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filePath)
 }

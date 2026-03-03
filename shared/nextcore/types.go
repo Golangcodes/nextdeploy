@@ -34,6 +34,9 @@ type NextCorePayload struct {
 	Config            config.SafeConfig `json:"config,omitempty"`
 	ImageAssets       ImageAssets       `json:"image_assets"`
 	RouteInfo         RouteInfo         `json:"route_info"`
+	DetectedFeatures  *DetectedFeatures `json:"detected_features,omitempty"`
+	DistDir           string            `json:"dist_dir"`
+	ExportDir         string            `json:"export_dir"`
 	OutputMode        OutputMode        `json:"output_mode"`
 	NextBuild         NextBuild         `json:"next_build"`
 	WorkingDir        string            `json:"working_dir"`

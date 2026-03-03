@@ -42,21 +42,30 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		return NextCorePayload{}, err
 	}
 	NextCoreLogger.Info("Next.js version: %s", NextJsVersion)
+	cwd, err := os.Getwd()
+	if err != nil {
+		NextCoreLogger.Error("Error getting current working directory")
+		return NextCorePayload{}, err
+	}
+
+	configPath := filepath.Join(cwd, "next.config.mjs")
+	nextConfig, err := ParseNextConfigFile(configPath)
+	if err != nil {
+		NextCoreLogger.Error("Failed to parse next config (non-fatal): %v", err)
+	}
+	features := DetectFeatures(nextConfig)
+
 	NextCoreLogger.Info("Collecting build metadata...")
 	buildMeta, err := CollectBuildMetadata()
 	if err != nil {
 		NextCoreLogger.Error("Failed to collect build metadata: %v", err)
 		return NextCorePayload{}, err
 	}
-	routeInfo, err := getRoutesFromManifests(buildMeta)
+	routeInfo, err := getRoutesFromManifests(buildMeta, features.DistDir)
 	if err != nil {
 		return NextCorePayload{}, err
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		NextCoreLogger.Error("Error getting current working directory")
-		return NextCorePayload{}, err
-	}
+
 	packageManager, err := DetectPackageManager(cwd)
 	if err != nil {
 		NextCoreLogger.Error("Failed to detect package manager: %v", err)
@@ -72,7 +81,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		NextCoreLogger.Error("Failed to get start command: %v", err)
 		return NextCorePayload{}, err
 	}
-	imagesAssets, err := detectImageAssets(buildMeta, cwd)
+	imagesAssets, err := detectImageAssets(buildMeta, cwd, features.DistDir)
 	var HasImageAssets bool
 	if err != nil {
 		NextCoreLogger.Error("Failed to detect image assets: %v", err)
@@ -92,7 +101,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		return NextCorePayload{}, err
 	}
 
-	StaticAssets, err := ParseStaticAssets(cwd)
+	StaticAssets, err := ParseStaticAssets(cwd, features.DistDir)
 	if err != nil {
 		NextCoreLogger.Error("Failed to parse static assets: %v", err)
 		return NextCorePayload{}, err
@@ -146,6 +155,9 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		CDNEnabled:       cfg.App.CDNEnabled,
 		Domain:           domainName,
 		RouteInfo:        *routeInfo,
+		DetectedFeatures: features,
+		DistDir:          features.DistDir,
+		ExportDir:        features.ExportDir,
 		StaticRoutes:     routeInfo.StaticRoutes,
 		DynamicRoutes:    routeInfo.DynamicRoutes,
 		Middleware:       middlewareConfig,
@@ -164,7 +176,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		NextBuild: NextBuild{
 			HasAppRouter: buildMeta.HasAppRouter,
 			RootFiles: RootFiles{
-				BuildManifest:      filepath.Join(cwd, ".next", "build-manifest.json"),
+				BuildManifest:      filepath.Join(cwd, features.DistDir, "build-manifest.json"),
 				PackageJSON:        filepath.Join(cwd, "package.json"),
 				LastBuildTimestamp: time.Now().Format(time.RFC3339),
 			},
@@ -402,8 +414,12 @@ var assetExtensions = map[string]string{
 }
 
 // ParseStaticAssets scans the project for static assets
-func ParseStaticAssets(projectDir string) (*StaticAssets, error) {
+func ParseStaticAssets(projectDir string, distDir string) (*StaticAssets, error) {
 	assets := &StaticAssets{}
+
+	if distDir == "" {
+		distDir = ".next"
+	}
 
 	// 1. Scan public directory
 	publicDir := filepath.Join(projectDir, "public")
@@ -429,10 +445,10 @@ func ParseStaticAssets(projectDir string) (*StaticAssets, error) {
 		assets.StaticFolder = staticAssets
 	}
 
-	// 3. Scan .next/static directory
-	nextStaticDir := filepath.Join(projectDir, ".next", "static")
+	// 3. Scan distDir/static directory
+	nextStaticDir := filepath.Join(projectDir, distDir, "static")
 	if _, err := os.Stat(nextStaticDir); err == nil {
-		NextCoreLogger.Debug("Scanning .next/static directory: %s", nextStaticDir)
+		NextCoreLogger.Debug("Scanning %s/static directory: %s", distDir, nextStaticDir)
 		nextStaticAssets, err := scanDirectory(nextStaticDir, projectDir, "/_next/static")
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan .next/static directory: %w", err)
@@ -773,7 +789,7 @@ func parseImageConfig(images map[string]interface{}) ImageConfig {
 	return result
 }
 
-func detectImageAssets(buildMeta *NextBuildMetadata, projectDir string) (*ImageAssets, error) {
+func detectImageAssets(buildMeta *NextBuildMetadata, projectDir string, distDir string) (*ImageAssets, error) {
 	assets := &ImageAssets{}
 	var err error
 
@@ -786,7 +802,8 @@ func detectImageAssets(buildMeta *NextBuildMetadata, projectDir string) (*ImageA
 
 	if buildMeta.ImagesManifest != nil {
 		if imagesManifest, ok := buildMeta.ImagesManifest.(map[string]interface{}); ok {
-			assets.OptimizedImages = parseImagesManifest(imagesManifest, projectDir)
+			manifestImages := parseImagesManifest(imagesManifest, projectDir, distDir)
+			assets.OptimizedImages = append(assets.OptimizedImages, manifestImages...)
 		}
 	}
 
@@ -841,7 +858,10 @@ func findPublicImages(publicDir, projectDir string) ([]ImageAsset, error) {
 	return images, err
 }
 
-func parseImagesManifest(manifest map[string]interface{}, projectDir string) []ImageAsset {
+func parseImagesManifest(manifest map[string]interface{}, projectDir string, distDir string) []ImageAsset {
+	if distDir == "" {
+		distDir = ".next"
+	}
 	var images []ImageAsset
 
 	if imagesMap, ok := manifest["images"].(map[string]interface{}); ok {
@@ -852,7 +872,7 @@ func parseImagesManifest(manifest map[string]interface{}, projectDir string) []I
 
 				asset := ImageAsset{
 					Path:         path,
-					AbsolutePath: filepath.Join(projectDir, ".next", "server", path),
+					AbsolutePath: filepath.Join(projectDir, distDir, "server", path),
 					PublicPath:   "/_next/image?url=" + path + "&w=3840&q=75", // Example URL
 					Format:       format,
 					IsOptimized:  true,

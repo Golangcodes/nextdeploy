@@ -268,27 +268,33 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	log.Printf("[ship] %s extracted to %s, activating...", appName, releaseDir)
 
 	ctx := ReleaseContext{
-		AppName:        appName,
-		Domain:         domain,
-		ReleaseDir:     releaseDir,
-		ReleaseID:      releaseID,
-		OutputMode:     outputMode,
-		DopplerToken:   dopplerToken,
-		PackageManager: meta.PackageManager,
-		TarballPath:    tarballPath,
+		AppName:          appName,
+		Domain:           domain,
+		ReleaseDir:       releaseDir,
+		ReleaseID:        releaseID,
+		OutputMode:       outputMode,
+		DopplerToken:     dopplerToken,
+		PackageManager:   meta.PackageManager,
+		TarballPath:      tarballPath,
+		DetectedFeatures: meta.DetectedFeatures,
+		DistDir:          meta.DistDir,
+		ExportDir:        meta.ExportDir,
 	}
 	return ch.activateRelease(ctx)
 }
 
 type ReleaseContext struct {
-	AppName        string
-	Domain         string
-	ReleaseDir     string
-	ReleaseID      string
-	OutputMode     string
-	DopplerToken   string
-	PackageManager string
-	TarballPath    string
+	AppName          string
+	Domain           string
+	ReleaseDir       string
+	ReleaseID        string
+	OutputMode       string
+	DopplerToken     string
+	PackageManager   string
+	TarballPath      string
+	DetectedFeatures *nextcore.DetectedFeatures
+	DistDir          string
+	ExportDir        string
 }
 
 func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
@@ -336,7 +342,7 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to rename atomic symlink: %v", err)}
 	}
 
-	if err := ch.caddyManager.GenerateConfig(ctx.AppName, ctx.Domain, ctx.OutputMode, port, currentSymlink); err != nil {
+	if err := ch.caddyManager.GenerateConfig(ctx.AppName, ctx.Domain, ctx.OutputMode, port, currentSymlink, ctx.DetectedFeatures, ctx.DistDir, ctx.ExportDir); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to configure Caddy: %v", err)}
 	}
 	_ = ch.caddyManager.EnsureMainCaddyfile()
@@ -410,14 +416,17 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 	log.Printf("[rollback] Reverting %s to release %s", appName, previousReleaseID)
 
 	ctx := ReleaseContext{
-		AppName:        appName,
-		Domain:         domain,
-		ReleaseDir:     previousReleaseDir,
-		ReleaseID:      previousReleaseID,
-		OutputMode:     outputMode,
-		DopplerToken:   dopplerToken,
-		PackageManager: meta.PackageManager,
-		TarballPath:    "",
+		AppName:          appName,
+		Domain:           domain,
+		ReleaseDir:       previousReleaseDir,
+		ReleaseID:        previousReleaseID,
+		OutputMode:       outputMode,
+		DopplerToken:     dopplerToken,
+		PackageManager:   meta.PackageManager,
+		TarballPath:      "",
+		DetectedFeatures: meta.DetectedFeatures,
+		DistDir:          meta.DistDir,
+		ExportDir:        meta.ExportDir,
 	}
 	return ch.activateRelease(ctx)
 }

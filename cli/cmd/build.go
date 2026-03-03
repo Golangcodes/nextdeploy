@@ -58,7 +58,6 @@ var excludedDirs = map[string]struct{}{
 	"coverage":     {},
 	".turbo":       {},
 	".vercel":      {},
-	".next":        {},
 }
 
 func isTempTarball(name string) bool {
@@ -132,19 +131,21 @@ var buildCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		log.Info("Build mode: %s", payload.OutputMode)
+		log.Info("Dist directory: %s", payload.DistDir)
+		log.Info("Export directory: %s", payload.ExportDir)
 
 		releaseDir := ""
 		switch payload.OutputMode {
 		case nextcore.OutputModeStandalone:
-			releaseDir = filepath.Join(".next", "standalone")
-			log.Info("Copying public/ → standalone/public/...")
+			releaseDir = filepath.Join(payload.DistDir, "standalone")
+			log.Info("Copying public/ → %s/public/...", releaseDir)
 			if err := copyDir("public", filepath.Join(releaseDir, "public")); err != nil {
 				log.Error("Failed to copy public/: %v", err)
 				os.Exit(1)
 			}
-			log.Info("Copying .next/static/ → standalone/.next/static/...")
-			if err := copyDir(filepath.Join(".next", "static"), filepath.Join(releaseDir, ".next", "static")); err != nil {
-				log.Error("Failed to copy .next/static/: %v", err)
+			log.Info("Copying %s/static/ → %s/%s/static/...", payload.DistDir, releaseDir, payload.DistDir)
+			if err := copyDir(filepath.Join(payload.DistDir, "static"), filepath.Join(releaseDir, payload.DistDir, "static")); err != nil {
+				log.Error("Failed to copy %s/static/: %v", payload.DistDir, err)
 				os.Exit(1)
 			}
 			log.Info("Copying deployment metadata...")
@@ -153,7 +154,7 @@ var buildCmd = &cobra.Command{
 				os.Exit(1)
 			}
 		case nextcore.OutputModeExport:
-			releaseDir = "out"
+			releaseDir = payload.ExportDir
 			if err := copyFile(".nextdeploy/metadata.json", filepath.Join(releaseDir, "metadata.json")); err != nil {
 				log.Error("Failed to copy metadata.json: %v", err)
 				os.Exit(1)
@@ -172,7 +173,7 @@ var buildCmd = &cobra.Command{
 		tarballName := "app.tar.gz"
 		log.Info("Creating tarball: %s", tarballName)
 
-		if err := createTarball(releaseDir, tarballName, payload.OutputMode, log); err != nil {
+		if err := createTarball(releaseDir, tarballName, &payload, log); err != nil {
 			log.Error("Failed to create tarball: %v", err)
 			os.Exit(1)
 		}
@@ -190,7 +191,8 @@ type logger interface {
 	Error(msg string, args ...interface{})
 }
 
-func createTarball(sourceDir, targetTar string, outputMode nextcore.OutputMode, log logger) error {
+func createTarball(sourceDir, targetTar string, payload *nextcore.NextCorePayload, log logger) error {
+	outputMode := payload.OutputMode
 	log.Info("[tarball] Starting — source=%s target=%s mode=%s workers=%d",
 		sourceDir, targetTar, outputMode, workerCount)
 
@@ -246,14 +248,28 @@ func createTarball(sourceDir, targetTar string, outputMode nextcore.OutputMode, 
 		}
 
 		if d.IsDir() {
-			if outputMode != nextcore.OutputModeStandalone && shouldExcludeDir(d.Name()) {
-				log.Info("[tarball] Skip dir (excluded): %s", relPath)
-				return filepath.SkipDir // prune entire subtree — DFS optimisation
-			}
-			if outputMode == nextcore.OutputModeStandalone && (d.Name() == ".git" || d.Name() == ".nextdeploy") {
+			// Dynamic exclusion of build/export dirs
+			if d.Name() == ".git" || d.Name() == ".nextdeploy" {
 				log.Info("[tarball] Skip dir (excluded): %s", relPath)
 				return filepath.SkipDir
 			}
+
+			// Exclude the configured distDir and exportDir from the source walk
+			if d.Name() == payload.DistDir || d.Name() == payload.ExportDir {
+				// But only if we are walking the ROOT of the project (sourceDir == ".")
+				// If sourceDir is "out", we are already inside it, and we shouldn't skip it.
+				// However, the walk starts at sourceDir, so d.Name() will be children.
+				if sourceDir == "." || sourceDir == "./" {
+					log.Info("[tarball] Skip build/export dir: %s", relPath)
+					return filepath.SkipDir
+				}
+			}
+
+			if shouldExcludeDir(d.Name()) {
+				log.Info("[tarball] Skip dir (excluded): %s", relPath)
+				return filepath.SkipDir
+			}
+
 			info, err := d.Info()
 			if err != nil {
 				return nil

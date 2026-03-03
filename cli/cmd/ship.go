@@ -44,7 +44,7 @@ var shipCmd = &cobra.Command{
 				if domain == "" {
 					log.Warn("  Caddy Configuration Plan: no domain configured in nextdeploy.yml — plan preview skipped")
 				} else {
-					caddyPlan := caddy.GenerateCaddyfile(meta.AppName, domain, string(meta.OutputMode), meta.Config.Port, "/opt/nextdeploy/apps/"+meta.AppName+"/current")
+					caddyPlan := caddy.GenerateCaddyfile(meta.AppName, domain, string(meta.OutputMode), meta.Config.Port, "/opt/nextdeploy/apps/"+meta.AppName+"/current", meta.DetectedFeatures, meta.DistDir, meta.ExportDir)
 					log.Info("  Caddy Configuration Plan:")
 					lines := strings.Split(caddyPlan, "\n")
 					for _, line := range lines {

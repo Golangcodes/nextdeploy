@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/Golangcodes/nextdeploy/shared/caddy"
+	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
 const mainCaddyfilePath = "/etc/caddy/Caddyfile"
@@ -25,8 +26,8 @@ func NewCaddyManager() *CaddyManager {
 	}
 }
 
-func (cm *CaddyManager) GenerateConfig(appName, domain, outputMode string, port int, appDir string) error {
-	caddyConfig := caddy.GenerateCaddyfile(appName, domain, outputMode, port, appDir)
+func (cm *CaddyManager) GenerateConfig(appName, domain, outputMode string, port int, appDir string, features *nextcore.DetectedFeatures, distDir, exportDir string) error {
+	caddyConfig := caddy.GenerateCaddyfile(appName, domain, outputMode, port, appDir, features, distDir, exportDir)
 	configPath := filepath.Join(cm.configDir, fmt.Sprintf("%s.caddy", appName))
 	// #nosec G306
 	err := os.WriteFile(configPath, []byte(caddyConfig), 0644)
