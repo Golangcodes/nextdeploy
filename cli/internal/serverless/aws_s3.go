@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,10 +147,15 @@ func (p *AWSProvider) DeployStatic(ctx context.Context, tarballPath string, appC
 			}
 			defer file.Close()
 
-			mtype, err := mimetype.DetectFile(path)
-			contentType := "application/octet-stream"
-			if err == nil {
-				contentType = mtype.String()
+			ext := filepath.Ext(path)
+			contentType := mime.TypeByExtension(ext)
+			if contentType == "" {
+				mtype, err := mimetype.DetectFile(path)
+				if err == nil {
+					contentType = mtype.String()
+				} else {
+					contentType = "application/octet-stream"
+				}
 			}
 
 			// Add basic Cache-Control
@@ -283,8 +289,11 @@ func (p *AWSProvider) updateS3BucketPolicyForOAC(ctx context.Context, bucketName
 		"Principal": map[string]interface{}{
 			"Service": "cloudfront.amazonaws.com",
 		},
-		"Action":   "s3:GetObject",
-		"Resource": fmt.Sprintf("arn:aws:s3:::%s/*", bucketName),
+		"Action": []string{"s3:GetObject", "s3:ListBucket"},
+		"Resource": []string{
+			fmt.Sprintf("arn:aws:s3:::%s/*", bucketName),
+			fmt.Sprintf("arn:aws:s3:::%s", bucketName),
+		},
 		"Condition": map[string]interface{}{
 			"StringEquals": map[string]interface{}{
 				"AWS:SourceArn": fmt.Sprintf("arn:aws:cloudfront::%s:distribution/%s", p.accountID, distributionId),
