@@ -463,10 +463,6 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 
 	var notFound *lambdaTypes.ResourceNotFoundException
 	if errors.As(err, &notFound) {
-		if sCfg.IAMRole == "" {
-			return fmt.Errorf("lambda function %s not found and no IAM Role ARN provided (iam_role in nextdeploy.yml). Please provide an IAM role to auto-provision the function", name)
-		}
-
 		// Use configured values or sensible defaults
 		handler := "server.handler"
 		if sCfg.Handler != "" {
