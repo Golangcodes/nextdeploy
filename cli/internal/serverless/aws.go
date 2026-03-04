@@ -343,17 +343,31 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 
 	// Update Lambda config to inject secrets securely
 	secretArn := fmt.Sprintf("nextdeploy/apps/%s/production", appCfg.App.Name)
-	_, configErr := client.UpdateFunctionConfiguration(ctx, &lambda.UpdateFunctionConfigurationInput{
-		FunctionName: aws.String(functionName),
-		Environment: &lambdaTypes.Environment{
-			Variables: map[string]string{
-				"ND_SECRETS_ARN": secretArn,
+
+	p.log.Info("Updating Lambda configuration...")
+	maxRetries := 5
+	for i := 0; i < maxRetries; i++ {
+		_, err := client.UpdateFunctionConfiguration(ctx, &lambda.UpdateFunctionConfigurationInput{
+			FunctionName: aws.String(functionName),
+			Environment: &lambdaTypes.Environment{
+				Variables: map[string]string{
+					"ND_SECRETS_ARN": secretArn,
+				},
 			},
-		},
-	})
-	if configErr != nil {
-		p.log.Error("Failed to update Lambda configuration: %v", configErr)
+		})
+		if err == nil {
+			break
+		}
+		var conflict *lambdaTypes.ResourceConflictException
+		if errors.As(err, &conflict) && i < maxRetries-1 {
+			p.log.Warn("Lambda is busy, retrying configuration update (%d/%d)...", i+1, maxRetries)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		p.log.Error("Failed to update Lambda configuration: %v", err)
+		break
 	}
+
 	return nil
 }
 
