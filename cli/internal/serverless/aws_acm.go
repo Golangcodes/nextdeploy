@@ -114,30 +114,42 @@ func (p *AWSProvider) printDNSValidationRecords(ctx context.Context, client *acm
 		fmt.Fprintf(dnsFile, "To enable your custom domain, you MUST add the following CNAME records to your DNS provider (e.g. Cloudflare, Namecheap, GoDaddy):\n\n")
 	}
 
-	p.log.Info("📋 Add these DNS CNAME records to validate your certificate for %s:", domain)
+	// High visibility banner in CLI
+	p.log.Info("────────────────────────────────────────────────────────────")
+	p.log.Info("� ACTION REQUIRED: DNS VALIDATION NEEDED")
+	p.log.Info("────────────────────────────────────────────────────────────")
+	p.log.Info("To enable your custom domain (%s), you must add these records:", domain)
+
 	for _, dvo := range cert.DomainValidationOptions {
 		if dvo.ResourceRecord != nil {
 			name := *dvo.ResourceRecord.Name
 			value := *dvo.ResourceRecord.Value
-			p.log.Info("  CNAME  %s  →  %s", name, value)
+			p.log.Info("  CNAME: %s", name)
+			p.log.Info("  VALUE: %s", value)
+			p.log.Info("  ───")
 			if dnsFile != nil {
-				fmt.Fprintf(dnsFile, "  Type:  CNAME\n")
-				fmt.Fprintf(dnsFile, "  Name:  %s\n", name)
-				fmt.Fprintf(dnsFile, "  Value: %s\n\n", value)
+				fmt.Fprintf(dnsFile, "RECORD TYPE: CNAME\n")
+				fmt.Fprintf(dnsFile, "NAME/HOST:   %s\n", name)
+				fmt.Fprintf(dnsFile, "VALUE/TARGET: %s\n", value)
+				fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n")
 			}
 		}
 	}
 
 	if dnsFile != nil {
-		fmt.Fprintf(dnsFile, "Instructions:\n")
-		fmt.Fprintf(dnsFile, "1. Log in to your DNS provider.\n")
-		fmt.Fprintf(dnsFile, "2. Add the CNAME records listed above.\n")
-		fmt.Fprintf(dnsFile, "3. Wait for validation (usually 2-5 minutes, but can take up to 30 mins).\n")
-		fmt.Fprintf(dnsFile, "4. Run 'nextdeploy ship' again. NextDeploy will detect the validated certificate and automatically link it to your CloudFront distribution.\n")
+		fmt.Fprintf(dnsFile, "\nNEXT STEPS:\n")
+		fmt.Fprintf(dnsFile, "1. Log in to your Domain Registrar (e.g. Cloudflare, GoDaddy, Namecheap).\n")
+		fmt.Fprintf(dnsFile, "2. Navigate to DNS Management / Advanced DNS.\n")
+		fmt.Fprintf(dnsFile, "3. Add the CNAME record(s) shown above.\n")
+		fmt.Fprintf(dnsFile, "4. Wait for AWS to validate (usually 2-10 minutes).\n")
+		fmt.Fprintf(dnsFile, "5. Run 'nextdeploy ship' again to finish the setup.\n\n")
+		fmt.Fprintf(dnsFile, "NextDeploy will automatically detect when the certificate is ready.\n")
 	}
 
-	p.log.Info("✅ Validation records saved to 'dns.txt' in your current directory.")
-	p.log.Info("Once DNS propagates, the certificate will be automatically validated by AWS.")
+	p.log.Info("✅ Instructions saved to high-visibility file: dns.txt")
+	p.log.Info("────────────────────────────────────────────────────────────")
+	p.log.Info("Once DNS propagates, run 'nextdeploy ship' again to complete.")
+	p.log.Info("────────────────────────────────────────────────────────────")
 }
 
 func (p *AWSProvider) isCertificateIssued(ctx context.Context, certARN string) bool {
