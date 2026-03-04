@@ -65,13 +65,24 @@ func runSecretAction(action string, args []string) {
 	}
 
 	appName := cfg.App.Name
+	target := strings.ToLower(cfg.TargetType)
 
-	if cfg.TargetType == "serverless" {
-		runServerlessSecretAction(action, args, appName, cfg, log)
-		return
+	if target == "" {
+		log.Warn("No target_type specified in nextdeploy.yml, defaulting to VPS")
+		target = "vps"
 	}
 
-	runVPSSecretAction(action, args, appName, log)
+	switch target {
+	case "serverless":
+		log.Info("Using Cloud Secrets (AWS Secrets Manager)")
+		runServerlessSecretAction(action, args, appName, cfg, log)
+	case "vps":
+		log.Info("Using Server Secrets (VPS NextDeploy Daemon)")
+		runVPSSecretAction(action, args, appName, log)
+	default:
+		log.Warn("Unknown target_type '%s', attempting VPS fallback", target)
+		runVPSSecretAction(action, args, appName, log)
+	}
 }
 
 func runServerlessSecretAction(action string, args []string, appName string, cfg *config.NextDeployConfig, log *shared.Logger) {
