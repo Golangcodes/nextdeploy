@@ -277,7 +277,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 	}
 
 	// 3. Ensure Lambda function exists (provision if missing)
-	err = p.ensureLambdaFunctionExists(ctx, client, functionName, appCfg.Serverless.IAMRole, zipContents)
+	err = p.ensureLambdaFunctionExists(ctx, client, functionName, appCfg.Serverless, zipContents)
 	if err != nil {
 		return err
 	}
@@ -373,7 +373,7 @@ func (p *AWSProvider) ensureBucketExists(ctx context.Context, client *s3.Client,
 	return nil
 }
 
-func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *lambda.Client, name string, role string, zipContents []byte) error {
+func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *lambda.Client, name string, sCfg *cfgTypes.ServerlessConfig, zipContents []byte) error {
 	_, err := client.GetFunction(ctx, &lambda.GetFunctionInput{
 		FunctionName: aws.String(name),
 	})
@@ -383,26 +383,47 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 
 	var notFound *lambdaTypes.ResourceNotFoundException
 	if errors.As(err, &notFound) {
-		if role == "" {
+		if sCfg.IAMRole == "" {
 			return fmt.Errorf("lambda function %s not found and no IAM Role ARN provided (iam_role in nextdeploy.yml). Please provide an IAM role to auto-provision the function", name)
 		}
 
-		p.log.Info("Lambda function %s does not exist, creating with role %s...", name, role)
+		// Use configured values or sensible defaults
+		handler := "server.handler"
+		if sCfg.Handler != "" {
+			handler = sCfg.Handler
+		}
+
+		runtime := lambdaTypes.RuntimeNodejs20x
+		if sCfg.Runtime != "" {
+			runtime = lambdaTypes.Runtime(sCfg.Runtime)
+		}
+
+		memory := int32(1024)
+		if sCfg.MemorySize != 0 {
+			memory = sCfg.MemorySize
+		}
+
+		timeout := int32(30)
+		if sCfg.Timeout != 0 {
+			timeout = sCfg.Timeout
+		}
+
+		p.log.Info("Lambda function %s does not exist, creating with role %s (Handler: %s, Runtime: %s)...", name, sCfg.IAMRole, handler, runtime)
 		_, err := client.CreateFunction(ctx, &lambda.CreateFunctionInput{
 			Code: &lambdaTypes.FunctionCode{
 				ZipFile: zipContents,
 			},
 			FunctionName: aws.String(name),
-			Role:         aws.String(role),
-			Handler:      aws.String("server.handler"), // Default for common Next.js Lambda adapters
-			Runtime:      lambdaTypes.RuntimeNodejs20x,
+			Role:         aws.String(sCfg.IAMRole),
+			Handler:      aws.String(handler),
+			Runtime:      runtime,
 			Environment: &lambdaTypes.Environment{
 				Variables: map[string]string{
 					"NODE_ENV": "production",
 				},
 			},
-			Timeout:    aws.Int32(30),
-			MemorySize: aws.Int32(1024), // Recommended for Next.js
+			Timeout:    aws.Int32(timeout),
+			MemorySize: aws.Int32(memory),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create Lambda function: %w", err)

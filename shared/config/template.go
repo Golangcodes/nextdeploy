@@ -98,10 +98,14 @@ serverless:
   provider: aws
   region: us-east-1
   profile: "default"           # AWS CLI profile name
-  s3_bucket: "example-app-assets" # S3 bucket for static files (public/ and _next/static/)
+  s3_bucket: "your-app-assets" # S3 bucket for static files (public/ and _next/static/)
   cloudfront_id: "E1234567890ABC" # [OPTIONAL] If provided, NextDeploy will trigger an invalidation after deploy
-  lambda_function_name: "example-app-prod" # [OPTIONAL] Defaults to app name if not provided
-  iam_role: "arn:aws:iam::123456789012:role/nextdeploy-lambda-role" # [REQUIRED for first deploy] IAM Role ARN
+  lambda_function_name: "your-app-production" # [OPTIONAL] Defaults to app name if not provided
+  iam_role: "arn:aws:iam::ACCOUNT_ID:role/role-name" # [REQUIRED for first deploy] IAM Role ARN for Lambda
+  # handler: "server.handler" # [OPTIONAL] Lambda handler (defaults to server.handler)
+  # runtime: "nodejs20.x"    # [OPTIONAL] Lambda runtime (defaults to nodejs20.x)
+  # memory_size: 1024        # [OPTIONAL] Memory in MB (defaults to 1024)
+  # timeout: 30              # [OPTIONAL] Timeout in seconds (defaults to 30)
 
 # -----
 # WEBHOOKS AFTER DEPLOYMENT
