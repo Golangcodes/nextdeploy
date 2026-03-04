@@ -155,26 +155,30 @@ func (p *AWSProvider) applyDistributionConfig(dc *cfTypes.DistributionConfig, ca
 
 	// 1. Handle Domain Aliases
 	if domain != "" {
-		found := false
-		if dc.Aliases != nil {
-			for _, alias := range dc.Aliases.Items {
-				if alias == domain {
-					found = true
-					break
+		// 2. Handle Viewer Certificate & Aliases
+		// CRITICAL: We can ONLY add the alias to CloudFront if we have a valid, issued certificate.
+		// Otherwise, CloudFront returns "InvalidViewerCertificate" error.
+		if certARN != "" && p.isCertificateIssued(context.Background(), certARN) {
+			// Ensure Aliases
+			found := false
+			if dc.Aliases != nil {
+				for _, alias := range dc.Aliases.Items {
+					if alias == domain {
+						found = true
+						break
+					}
 				}
 			}
-		}
-		if !found {
-			if dc.Aliases == nil {
-				dc.Aliases = &cfTypes.Aliases{Items: []string{}, Quantity: aws.Int32(0)}
+			if !found {
+				if dc.Aliases == nil {
+					dc.Aliases = &cfTypes.Aliases{Items: []string{}, Quantity: aws.Int32(0)}
+				}
+				dc.Aliases.Items = append(dc.Aliases.Items, domain)
+				dc.Aliases.Quantity = aws.Int32(int32(len(dc.Aliases.Items)))
+				changed = true
 			}
-			dc.Aliases.Items = append(dc.Aliases.Items, domain)
-			dc.Aliases.Quantity = aws.Int32(int32(len(dc.Aliases.Items)))
-			changed = true
-		}
 
-		// 2. Handle Viewer Certificate
-		if certARN != "" && p.isCertificateIssued(context.Background(), certARN) {
+			// Ensure Viewer Certificate
 			if dc.ViewerCertificate == nil || dc.ViewerCertificate.ACMCertificateArn == nil || *dc.ViewerCertificate.ACMCertificateArn != certARN {
 				dc.ViewerCertificate = &cfTypes.ViewerCertificate{
 					ACMCertificateArn:            aws.String(certARN),
@@ -184,6 +188,15 @@ func (p *AWSProvider) applyDistributionConfig(dc *cfTypes.DistributionConfig, ca
 				}
 				changed = true
 			}
+		} else {
+			// If certificate is not issued yet, we keep the default certificate and NO aliases
+			if dc.ViewerCertificate == nil {
+				dc.ViewerCertificate = &cfTypes.ViewerCertificate{
+					CloudFrontDefaultCertificate: aws.Bool(true),
+				}
+				changed = true
+			}
+			// Important: Don't add aliases yet if the cert isn't ready.
 		}
 	} else if dc.ViewerCertificate == nil {
 		dc.ViewerCertificate = &cfTypes.ViewerCertificate{

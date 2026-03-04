@@ -3,6 +3,7 @@ package serverless
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -103,12 +104,38 @@ func (p *AWSProvider) printDNSValidationRecords(ctx context.Context, client *acm
 		return
 	}
 
+	dnsFile, _ := os.Create("dns.txt")
+	if dnsFile != nil {
+		defer dnsFile.Close()
+		fmt.Fprintf(dnsFile, "=== NextDeploy Domain Validation Instructions ===\n\n")
+		fmt.Fprintf(dnsFile, "Project: %s\n", domain)
+		fmt.Fprintf(dnsFile, "Date: %s\n\n", time.Now().Format(time.RFC1123))
+		fmt.Fprintf(dnsFile, "To enable your custom domain, you MUST add the following CNAME records to your DNS provider (e.g. Cloudflare, Namecheap, GoDaddy):\n\n")
+	}
+
 	p.log.Info("📋 Add these DNS CNAME records to validate your certificate for %s:", domain)
 	for _, dvo := range cert.DomainValidationOptions {
 		if dvo.ResourceRecord != nil {
-			p.log.Info("  CNAME  %s  →  %s", *dvo.ResourceRecord.Name, *dvo.ResourceRecord.Value)
+			name := *dvo.ResourceRecord.Name
+			value := *dvo.ResourceRecord.Value
+			p.log.Info("  CNAME  %s  →  %s", name, value)
+			if dnsFile != nil {
+				fmt.Fprintf(dnsFile, "  Type:  CNAME\n")
+				fmt.Fprintf(dnsFile, "  Name:  %s\n", name)
+				fmt.Fprintf(dnsFile, "  Value: %s\n\n", value)
+			}
 		}
 	}
+
+	if dnsFile != nil {
+		fmt.Fprintf(dnsFile, "Instructions:\n")
+		fmt.Fprintf(dnsFile, "1. Log in to your DNS provider.\n")
+		fmt.Fprintf(dnsFile, "2. Add the CNAME records listed above.\n")
+		fmt.Fprintf(dnsFile, "3. Wait for validation (usually 2-5 minutes, but can take up to 30 mins).\n")
+		fmt.Fprintf(dnsFile, "4. Run 'nextdeploy ship' again. NextDeploy will detect the validated certificate and automatically link it to your CloudFront distribution.\n")
+	}
+
+	p.log.Info("✅ Validation records saved to 'dns.txt' in your current directory.")
 	p.log.Info("Once DNS propagates, the certificate will be automatically validated by AWS.")
 }
 
