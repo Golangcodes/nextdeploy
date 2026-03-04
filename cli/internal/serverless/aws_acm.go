@@ -94,6 +94,11 @@ func (p *AWSProvider) printDNSValidationRecords(ctx context.Context, client *acm
 	p.printDNSValidationRecordsWithCF(ctx, client, certARN, domain, "")
 }
 
+const (
+	mdTableHeader = "| Type | Host (Name) | Target (Value) |\n"
+	mdTableSep    = "| :--- | :--- | :--- |\n"
+)
+
 func (p *AWSProvider) printDNSValidationRecordsWithCF(ctx context.Context, client *acm.Client, certARN, domain, cfDomain string) {
 	descOutput, err := client.DescribeCertificate(ctx, &acm.DescribeCertificateInput{
 		CertificateArn: aws.String(certARN),
@@ -114,108 +119,88 @@ func (p *AWSProvider) printDNSValidationRecordsWithCF(ctx context.Context, clien
 		return
 	}
 
-	dnsFile, _ := os.Create("dns.txt")
+	dnsFile, _ := os.Create("dns.md")
 	if dnsFile != nil {
 		defer dnsFile.Close()
-		sep := "════════════════════════════════════════════════════════════\n"
-		fmt.Fprintf(dnsFile, sep)
-		fmt.Fprintf(dnsFile, "  NextDeploy — DNS Setup for: %s\n", domain)
-		fmt.Fprintf(dnsFile, "  Generated: %s\n", time.Now().Format(time.RFC1123))
-		fmt.Fprintf(dnsFile, sep)
-		fmt.Fprintf(dnsFile, "\nYou need to add TWO sets of DNS records:\n\n")
+		fmt.Fprintf(dnsFile, "# 🌐 NextDeploy DNS Setup Guide\n\n")
+		fmt.Fprintf(dnsFile, "Target Domain: **%s**\n", domain)
+		fmt.Fprintf(dnsFile, "Generated: `%s`\n\n", time.Now().Format(time.RFC1123))
 
-		// Step 1: CloudFront CNAME (the most important one)
-		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n")
-		fmt.Fprintf(dnsFile, "  STEP 1 — POINT YOUR DOMAIN AT CLOUDFRONT\n")
-		fmt.Fprintf(dnsFile, "  (This is what makes your site actually load)\n")
-		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n\n")
+		fmt.Fprintf(dnsFile, "> [!IMPORTANT]\n")
+		fmt.Fprintf(dnsFile, "> You need to add **TWO** sets of DNS records to your registrar (e.g. Namecheap, Godaddy, Cloudflare) to go live.\n\n")
+
+		// Step 1: CloudFront CNAME
+		fmt.Fprintf(dnsFile, "## 1️⃣ Point your domain at CloudFront\n")
+		fmt.Fprintf(dnsFile, "This record makes your website actually load.\n\n")
+
 		if cfDomain != "" {
-			fmt.Fprintf(dnsFile, "  TYPE:   CNAME  (or ALIAS for root domains on Cloudflare)\n")
-			fmt.Fprintf(dnsFile, "  NAME:   @  (or %s)\n", domain)
-			fmt.Fprintf(dnsFile, "  VALUE:  %s\n\n", cfDomain)
-			fmt.Fprintf(dnsFile, "  TYPE:   CNAME\n")
-			fmt.Fprintf(dnsFile, "  NAME:   www\n")
-			fmt.Fprintf(dnsFile, "  VALUE:  %s\n\n", cfDomain)
-			fmt.Fprintf(dnsFile, "  💡 Cloudflare tip: Use \"CNAME\" with proxy OFF (grey cloud).\n\n")
+			fmt.Fprintf(dnsFile, mdTableHeader)
+			fmt.Fprintf(dnsFile, mdTableSep)
+			fmt.Fprintf(dnsFile, "| **CNAME** | `@` (or `%s`) | `%s` |\n", domain, cfDomain)
+			fmt.Fprintf(dnsFile, "| **CNAME** | `www` | `%s` |\n\n", cfDomain)
+
+			fmt.Fprintf(dnsFile, "> [!TIP]\n")
+			fmt.Fprintf(dnsFile, "> **Cloudflare Users**: Set Proxy status to **DNS Only** (Grey Cloud) for these records.\n\n")
 		} else {
-			fmt.Fprintf(dnsFile, "  CLOUD FRONT DOMAIN: [Pending — Run 'nextdeploy ship' again]\n")
-			fmt.Fprintf(dnsFile, "  Once your certificate below is validated, CloudFront will be\n")
-			fmt.Fprintf(dnsFile, "  fully provisioned and this value will be updated here.\n\n")
+			fmt.Fprintf(dnsFile, "⚠️ **CloudFront Domain: [Pending]**\n")
+			fmt.Fprintf(dnsFile, "Once your SSL certificate (Step 2) is validated, run `nextdeploy ship` again and this field will update automatically.\n\n")
 		}
 
-		// Step 2: ACM Validation CNAMEs
-		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n")
-		fmt.Fprintf(dnsFile, "  STEP 2 — SSL CERTIFICATE VALIDATION (AWS ACM)\n")
-		fmt.Fprintf(dnsFile, "  (These prove you own the domain so HTTPS works)\n")
-		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n\n")
+		// Step 2: ACM Validation
+		fmt.Fprintf(dnsFile, "## 2️⃣ SSL Certificate Validation (AWS ACM)\n")
+		fmt.Fprintf(dnsFile, "This secure your site with HTTPS. Without these, your site will show \"Not Secure\".\n\n")
 
+		fmt.Fprintf(dnsFile, "| Type | Host (Name) | Target (Value) |\n")
+		fmt.Fprintf(dnsFile, "| :--- | :--- | :--- |\n")
 		for _, dvo := range cert.DomainValidationOptions {
 			if dvo.ResourceRecord != nil {
-				fmt.Fprintf(dnsFile, "  TYPE:   CNAME\n")
-				fmt.Fprintf(dnsFile, "  NAME:   %s\n", *dvo.ResourceRecord.Name)
-				fmt.Fprintf(dnsFile, "  VALUE:  %s\n\n", *dvo.ResourceRecord.Value)
+				fmt.Fprintf(dnsFile, "| **CNAME** | `%s` | `%s` |\n", *dvo.ResourceRecord.Name, *dvo.ResourceRecord.Value)
 			}
 		}
+		fmt.Fprintf(dnsFile, "\n")
 
-		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n")
-		fmt.Fprintf(dnsFile, "  NEXT STEPS\n")
-		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n\n")
-		fmt.Fprintf(dnsFile, "  1. Log in to your DNS provider (Cloudflare, GoDaddy, etc.)\n")
-		fmt.Fprintf(dnsFile, "  2. Add ALL records above (both Step 1 and Step 2)\n")
-		fmt.Fprintf(dnsFile, "  3. Wait 2-10 minutes for propagation\n")
-		fmt.Fprintf(dnsFile, "  4. Run: nextdeploy ship\n")
-		fmt.Fprintf(dnsFile, "     NextDeploy will detect the validated cert and finalize\n\n")
-		fmt.Fprintf(dnsFile, sep)
+		fmt.Fprintf(dnsFile, "> [!WARNING]\n")
+		fmt.Fprintf(dnsFile, "> **NAMECHEAP & GODADDY USERS**: Your registrar automatically adds your domain to the Host field. **DO NOT** include `.nextdeploy.one` in the Name/Host field or it will fail.\n")
+		fmt.Fprintf(dnsFile, "> \n")
+		fmt.Fprintf(dnsFile, "> ✅ **Correct Host**: `_5f2eb7...` \n")
+		fmt.Fprintf(dnsFile, "> ❌ **Wrong Host**: `_5f2eb7....nextdeploy.one`\n\n")
+
+		fmt.Fprintf(dnsFile, "## 🚀 Final Steps\n")
+		fmt.Fprintf(dnsFile, "1. Add the records above in your DNS panel.\n")
+		fmt.Fprintf(dnsFile, "2. Wait 2-5 minutes for propagation.\n")
+		fmt.Fprintf(dnsFile, "3. Run `nextdeploy ship` again to finish setup.\n")
 	}
 
 	// High visibility CLI banner
-	p.log.Info("════ ACTION REQUIRED: DNS SETUP NEEDED ════")
-	if cfDomain != "" {
-		p.log.Info("STEP 1 — Point %s at CloudFront:", domain)
-		p.log.Info("  CNAME  @  →  %s", cfDomain)
-		p.log.Info("  CNAME  www  →  %s", cfDomain)
-		p.log.Info("────")
-	}
-	p.log.Info("STEP 2 — SSL Validation CNAMEs:")
-	for _, dvo := range cert.DomainValidationOptions {
-		if dvo.ResourceRecord != nil {
-			p.log.Info("  CNAME  %s", *dvo.ResourceRecord.Name)
-			p.log.Info("  →      %s", *dvo.ResourceRecord.Value)
-			p.log.Info("  ───")
-		}
-	}
-	p.log.Info("✅ Full instructions saved to: dns.txt")
-	p.log.Info("Once done, run 'nextdeploy ship' again to complete setup.")
-	p.log.Info("════════════════════════════════════════════")
+	p.log.Info("════════════ ACTION REQUIRED: DNS SETUP ════════════")
+	p.log.Info("SSL Validation and CloudFront setup required.")
+	wd, _ := os.Getwd()
+	p.log.Info("Detailed Guide Generated: %s/dns.md", wd)
+	p.log.Info("Open this file to see exact CNAME records for your provider.")
+	p.log.Info("═════════════════════════════════════════════════════")
 }
 
 func (p *AWSProvider) writeDNSFileCloudFrontOnly(domain, cfDomain string) {
-	dnsFile, err := os.Create("dns.txt")
+	dnsFile, err := os.Create("dns.md")
 	if err != nil {
 		return
 	}
 	defer dnsFile.Close()
-	sep := "════════════════════════════════════════════════════════════\n"
-	fmt.Fprintf(dnsFile, sep)
-	fmt.Fprintf(dnsFile, "  NextDeploy — DNS Setup for: %s\n", domain)
-	fmt.Fprintf(dnsFile, "  Generated: %s\n", time.Now().Format(time.RFC1123))
-	fmt.Fprintf(dnsFile, sep)
-	fmt.Fprintf(dnsFile, "\nSSL certificate is ISSUED ✅ — just point your domain at CloudFront:\n\n")
-	fmt.Fprintf(dnsFile, "  TYPE:   CNAME  (or ALIAS on Cloudflare)\n")
-	fmt.Fprintf(dnsFile, "  NAME:   @  (root domain)\n")
-	fmt.Fprintf(dnsFile, "  VALUE:  %s\n\n", cfDomain)
-	fmt.Fprintf(dnsFile, "  TYPE:   CNAME\n")
-	fmt.Fprintf(dnsFile, "  NAME:   www\n")
-	fmt.Fprintf(dnsFile, "  VALUE:  %s\n\n", cfDomain)
-	fmt.Fprintf(dnsFile, "Then run: nextdeploy ship\n")
-	fmt.Fprintf(dnsFile, sep)
+	fmt.Fprintf(dnsFile, "# 🌐 NextDeploy DNS Setup Guide\n\n")
+	fmt.Fprintf(dnsFile, "SSL status: **Issued ✅**\n\n")
+	fmt.Fprintf(dnsFile, "Just point your domain to CloudFront to go live:\n\n")
+	fmt.Fprintf(dnsFile, mdTableHeader)
+	fmt.Fprintf(dnsFile, mdTableSep)
+	fmt.Fprintf(dnsFile, "| **CNAME** | `@` (or `%s`) | `%s` |\n", domain, cfDomain)
+	fmt.Fprintf(dnsFile, "| **CNAME** | `www` | `%s` |\n\n", cfDomain)
+
+	fmt.Fprintf(dnsFile, "After adding these, run `nextdeploy ship` to finish.\n")
 
 	p.log.Info("════ ACTION REQUIRED: POINT DOMAIN AT CLOUDFRONT ════")
 	p.log.Info("SSL cert is ready! Now add these DNS records:")
 	p.log.Info("  CNAME  @    →  %s", cfDomain)
 	p.log.Info("  CNAME  www  →  %s", cfDomain)
-	p.log.Info("Then run: nextdeploy ship")
-	p.log.Info("Instructions saved to: dns.txt")
+	p.log.Info("Detailed Guide: dns.md")
 	p.log.Info("════════════════════════════════════════════")
 }
 
