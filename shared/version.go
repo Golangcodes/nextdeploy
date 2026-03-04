@@ -1,3 +1,3 @@
 package shared
 
-const Version = "v0.1.77"
+const Version = "v0.1.80"
