@@ -14,6 +14,7 @@ import (
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/caddy"
 	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/Golangcodes/nextdeploy/shared/git"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 
 	"github.com/spf13/cobra"
@@ -34,35 +35,39 @@ var shipCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// --- PRE-DEPLOY VALIDATIONS ---
+		if git.IsDirty() {
+			log.Warn("⚠️  Git directory is dirty (uncommitted changes).")
+			log.Warn("   It is recommended to commit your changes before shipping for better deployment provenance.")
+		}
+
+		// Load metadata for both targets to use in branching/previews
 		var meta nextcore.NextCorePayload
 		metadataBytes, err := os.ReadFile(".nextdeploy/metadata.json")
 		if err == nil {
-			if err := json.Unmarshal(metadataBytes, &meta); err == nil {
-				domain := meta.Domain
-				if domain == "" {
-					domain = cfg.App.Domain
-					meta.Domain = domain // Ensure domain is populated for serverless provider
-				}
-				if domain == "" {
-					log.Warn("  Caddy Configuration Plan: no domain configured in nextdeploy.yml — plan preview skipped")
-				} else {
-					caddyPlan := caddy.GenerateCaddyfile(meta.AppName, domain, string(meta.OutputMode), meta.Config.Port, "/opt/nextdeploy/apps/"+meta.AppName+"/current", meta.DetectedFeatures, meta.DistDir, meta.ExportDir)
-					log.Info("  Caddy Configuration Plan:")
-					lines := strings.Split(caddyPlan, "\n")
-					for _, line := range lines {
-						if strings.TrimSpace(line) != "" {
-							log.Info("  %s", line)
-						}
-					}
-				}
-			}
+			_ = json.Unmarshal(metadataBytes, &meta)
 		}
 
+		// --- BRANCH BY TARGET TYPE ---
 		if cfg.TargetType == "serverless" {
-			log.Info("Deployment Target: SERVERLESS (No VPS or Daemon required)")
+			log.Info("Deployment Target: SERVERLESS (AWS Lambda + S3 + CloudFront)")
 			if cfg.Serverless == nil {
 				log.Error("TargetType is 'serverless' but 'serverless' config block is missing.")
 				os.Exit(1)
+			}
+
+			// Validate Serverless specific constraints (e.g., ISR vs CDN check)
+			if meta.DetectedFeatures != nil {
+				isrRoutes := meta.RouteInfo.ISRRoutes
+				if len(isrRoutes) > 0 && !cfg.App.CDNEnabled {
+					log.Warn("⚠️  ISR routes detected but CDN (CloudFront) is not explicitly enabled in config.")
+					log.Warn("   Revalidation will not work correctly without a CDN layer.")
+				}
+
+				// Secret Validation against Feature Detection
+				if meta.DetectedFeatures.HasStripe && os.Getenv("STRIPE_SECRET_KEY") == "" {
+					log.Warn("⚠️  Stripe detected in build but STRIPE_SECRET_KEY is not set in environment.")
+				}
 			}
 
 			if err := serverless.Deploy(context.Background(), cfg, &meta); err != nil {
@@ -72,7 +77,26 @@ var shipCmd = &cobra.Command{
 			return
 		}
 
-		log.Info("Deployment Target: VPS (Daemon execution)")
+		// Default to VPS logic
+		log.Info("Deployment Target: VPS (Traditional Server)")
+
+		// Show Caddy Configuration Plan only for VPS
+		if meta.AppName != "" {
+			domain := meta.Domain
+			if domain == "" {
+				domain = cfg.App.Domain
+			}
+			if domain != "" {
+				caddyPlan := caddy.GenerateCaddyfile(meta.AppName, domain, string(meta.OutputMode), meta.Config.Port, "/opt/nextdeploy/apps/"+meta.AppName+"/current", meta.DetectedFeatures, meta.DistDir, meta.ExportDir)
+				log.Info("  Caddy Configuration Plan Preview:")
+				lines := strings.Split(caddyPlan, "\n")
+				for _, line := range lines {
+					if strings.TrimSpace(line) != "" {
+						log.Info("  %s", line)
+					}
+				}
+			}
+		}
 
 		srv, err := server.New(server.WithConfig(), server.WithSSH())
 		if err != nil {
@@ -104,8 +128,6 @@ var shipCmd = &cobra.Command{
 		}
 
 		remotePath := fmt.Sprintf("/opt/nextdeploy/uploads/nextdeploy_%s_%d.tar.gz", cfg.App.Name, time.Now().Unix())
-		log.Info("Remote path for artifact: %s", remotePath)
-
 		log.Info("Uploading %s to %s on %s...", tarballName, remotePath, deploymentServer)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
@@ -125,7 +147,7 @@ var shipCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		log.Info("Ship successful! Deployment instructions have been successfully relayed to the daemon.")
+		log.Info("Ship successful! Deployment instructions relayed to the daemon.")
 	},
 }
 

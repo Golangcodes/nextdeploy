@@ -140,6 +140,13 @@ var buildCmd = &cobra.Command{
 		log.Info("Dist directory: %s", payload.DistDir)
 		log.Info("Export directory: %s", payload.ExportDir)
 
+		// --- PRE-BUILD VALIDATIONS ---
+		if payload.DetectedFeatures.HasServerActions && payload.OutputMode == nextcore.OutputModeExport {
+			log.Error("✗ Server Actions detected, but OutputMode is 'export'. Server Actions require a runtime.")
+			log.Error("  Please change your Next.js config or target to a runtime-enabled mode.")
+			os.Exit(1)
+		}
+
 		releaseDir := ""
 		switch payload.OutputMode {
 		case nextcore.OutputModeStandalone:
@@ -185,6 +192,17 @@ var buildCmd = &cobra.Command{
 		}
 
 		log.Info("Build complete! Artifact: %s", tarballName)
+
+		// --- POST-BUILD VALIDATIONS ---
+		if payload.Config.TargetType == "serverless" {
+			info, err := os.Stat(tarballName)
+			if err == nil {
+				sizeMB := float64(info.Size()) / (1024 * 1024)
+				if sizeMB > 200 {
+					log.Warn("⚠️  Bundle size is %.2fMB — approaching Lambda's 250MB limit.", sizeMB)
+				}
+			}
+		}
 	},
 }
 
