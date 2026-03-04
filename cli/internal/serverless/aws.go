@@ -333,7 +333,12 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 		if err != nil {
 			return fmt.Errorf("failed to update Lambda code: %w", err)
 		}
-		p.log.Info("Lambda code updated successfully.")
+		p.log.Info("Lambda code updated successfully. Waiting for update to stabilize...")
+
+		// Wait for the function to be active and last update to be successful
+		if err := p.waitForLambdaStable(ctx, client, functionName); err != nil {
+			p.log.Warn("Timed out waiting for Lambda stability: %v", err)
+		}
 	}
 
 	// Update Lambda config to inject secrets securely
@@ -355,6 +360,11 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 func (p *AWSProvider) InvalidateCache(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
 	// 1. Prioritize configured CloudFront ID
 	distId := appCfg.Serverless.CloudFrontId
+
+	// Explicitly ignore placeholder
+	if distId == "E1234567890ABC" {
+		distId = ""
+	}
 	if distId == "" {
 		// 2. Fallback to discovering the managed distribution
 		bucketName := p.getS3BucketName(appCfg)
@@ -594,7 +604,7 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 				TargetOriginId:        aws.String(lambdaOriginId),
 				ViewerProtocolPolicy:  cfTypes.ViewerProtocolPolicyRedirectToHttps,
 				CachePolicyId:         aws.String("4135ea2d-6df8-44a3-9df3-4b5a84be39ad"), // Managed-CachingDisabled (Lambda usually manages its own caching or needs fresh responses)
-				OriginRequestPolicyId: aws.String("b689b0a8-53d0-40a8-b0e6-26427e4ed894"), // Managed-AllViewerExceptHostHeader (Pass everything to Lambda)
+				OriginRequestPolicyId: aws.String("216adef6-5c7d-47e4-b989-5492810d03b2"), // Managed-AllViewer
 				AllowedMethods: &cfTypes.AllowedMethods{
 					Quantity: aws.Int32(7),
 					Items: []cfTypes.Method{
@@ -814,6 +824,31 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 	}
 
 	return fmt.Errorf("failed to check Lambda function status: %w", err)
+}
+
+func (p *AWSProvider) waitForLambdaStable(ctx context.Context, client *lambda.Client, functionName string) error {
+	maxRetries := 20
+	for i := 0; i < maxRetries; i++ {
+		output, err := client.GetFunction(ctx, &lambda.GetFunctionInput{
+			FunctionName: aws.String(functionName),
+		})
+		if err != nil {
+			return err
+		}
+
+		status := output.Configuration.LastUpdateStatus
+		p.log.Info("Lambda update status: %s", status)
+
+		if status == lambdaTypes.LastUpdateStatusSuccessful {
+			return nil
+		}
+		if status == lambdaTypes.LastUpdateStatusFailed {
+			return fmt.Errorf("lambda update failed: %s", *output.Configuration.LastUpdateStatusReason)
+		}
+
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("timed out waiting for lambda stability")
 }
 
 func (p *AWSProvider) getS3BucketName(appCfg *cfgTypes.NextDeployConfig) string {
