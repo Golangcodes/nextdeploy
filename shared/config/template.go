@@ -99,7 +99,7 @@ serverless:
   region: us-east-1
   profile: "default"           # AWS CLI profile name
   cloudfront_id: "" # [OPTIONAL] If provided, NextDeploy will trigger an invalidation after deploy
-  iam_role: "arn:aws:iam::ACCOUNT_ID:role/role-name" # [REQUIRED for first deploy] IAM Role ARN for Lambda
+  # iam_role: "arn:aws:iam::ACCOUNT_ID:role/nextdeploy-serverless-role" # [OPTIONAL] Created automatically if not provided
   # handler: "server.handler" # [OPTIONAL] Lambda handler (defaults to server.handler)
   # runtime: "nodejs20.x"    # [OPTIONAL] Lambda runtime (defaults to nodejs20.x)
   # memory_size: 1024        # [OPTIONAL] Memory in MB (defaults to 1024)

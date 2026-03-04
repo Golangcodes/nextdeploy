@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.11
 	github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager v0.1.7
 	github.com/aws/aws-sdk-go-v2/service/cloudfront v1.60.1
+	github.com/aws/aws-sdk-go-v2/service/iam v1.53.4
 	github.com/aws/aws-sdk-go-v2/service/lambda v1.88.1
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.3
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.2

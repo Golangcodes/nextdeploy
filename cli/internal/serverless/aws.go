@@ -16,6 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
 	cfTypes "github.com/aws/aws-sdk-go-v2/service/cloudfront/types"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdaTypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -352,6 +354,73 @@ func (p *AWSProvider) InvalidateCache(ctx context.Context, appCfg *cfgTypes.Next
 	return nil
 }
 
+func (p *AWSProvider) ensureExecutionRoleExists(ctx context.Context) (string, error) {
+	client := iam.NewFromConfig(p.cfg)
+	roleName := "nextdeploy-serverless-role"
+
+	p.log.Info("Checking for IAM execution role: %s...", roleName)
+	getOutput, err := client.GetRole(ctx, &iam.GetRoleInput{
+		RoleName: aws.String(roleName),
+	})
+
+	if err == nil {
+		p.log.Info("IAM execution role found: %s", *getOutput.Role.Arn)
+		return *getOutput.Role.Arn, nil
+	}
+
+	var noSuchEntity *types.NoSuchEntityException
+	if !errors.As(err, &noSuchEntity) {
+		return "", fmt.Errorf("failed to check for IAM role: %w", err)
+	}
+
+	p.log.Info("IAM role %s not found, creating one...", roleName)
+
+	trustPolicy := map[string]interface{}{
+		"Version": "2012-10-17",
+		"Statement": []map[string]interface{}{
+			{
+				"Effect": "Allow",
+				"Principal": map[string]interface{}{
+					"Service": "lambda.amazonaws.com",
+				},
+				"Action": "sts:AssumeRole",
+			},
+		},
+	}
+	policyJSON, _ := json.Marshal(trustPolicy)
+
+	createOutput, err := client.CreateRole(ctx, &iam.CreateRoleInput{
+		RoleName:                 aws.String(roleName),
+		AssumeRolePolicyDocument: aws.String(string(policyJSON)),
+		Description:              aws.String("Managed by NextDeploy for Serverless Lambda execution"),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create IAM role: %w", err)
+	}
+
+	p.log.Info("Attaching managed policies to role %s...", roleName)
+	managedPolicies := []string{
+		"arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+		"arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess",
+		"arn:aws:iam::aws:policy/SecretsManagerReadWrite",
+	}
+
+	for _, policyArn := range managedPolicies {
+		_, err = client.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{
+			RoleName:  aws.String(roleName),
+			PolicyArn: aws.String(policyArn),
+		})
+		if err != nil {
+			p.log.Warn("Failed to attach policy %s: %v", policyArn, err)
+		}
+	}
+
+	p.log.Info("IAM role created successfully: %s", *createOutput.Role.Arn)
+	// Give AWS a moment to propagate the new role
+	time.Sleep(5 * time.Second)
+	return *createOutput.Role.Arn, nil
+}
+
 func (p *AWSProvider) ensureBucketExists(ctx context.Context, client *s3.Client, bucketName, region string) error {
 	_, err := client.HeadBucket(ctx, &s3.HeadBucketInput{
 		Bucket: aws.String(bucketName),
@@ -419,15 +488,23 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 			timeout = sCfg.Timeout
 		}
 
-		// Auto-replace ACCOUNT_ID placeholder if present
-		roleArn := sCfg.IAMRole
-		if strings.Contains(roleArn, "ACCOUNT_ID") && p.accountID != "" {
-			roleArn = strings.ReplaceAll(roleArn, "ACCOUNT_ID", p.accountID)
-			p.log.Info("Automatically replaced ACCOUNT_ID placeholder in IAM Role ARN.")
-		}
-
-		if strings.Contains(roleArn, "role-name") {
-			return fmt.Errorf("invalid IAM Role ARN: please replace 'role-name' in nextdeploy.yml with an actual IAM role name from your AWS account")
+		// Determine IAM Role (Manual vs Auto-Provisioned)
+		var roleArn string
+		if sCfg.IAMRole != "" && !strings.Contains(sCfg.IAMRole, "role-name") {
+			roleArn = sCfg.IAMRole
+			// Auto-replace ACCOUNT_ID placeholder if present
+			if strings.Contains(roleArn, "ACCOUNT_ID") && p.accountID != "" {
+				roleArn = strings.ReplaceAll(roleArn, "ACCOUNT_ID", p.accountID)
+				p.log.Info("Automatically replaced ACCOUNT_ID placeholder in IAM Role ARN.")
+			}
+		} else {
+			// Auto-provision or discover the dedicated NextDeploy role
+			p.log.Info("No valid IAM Role provided, attempting to use/create managed 'nextdeploy-serverless-role'...")
+			var err error
+			roleArn, err = p.ensureExecutionRoleExists(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to ensure IAM execution role exists: %w", err)
+			}
 		}
 
 		p.log.Info("Lambda function %s does not exist, creating with role %s (Handler: %s, Runtime: %s)...", name, roleArn, handler, runtime)

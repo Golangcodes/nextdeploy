@@ -151,14 +151,11 @@ func PromptServerlessConfig(reader *bufio.Reader, cfg *NextDeployConfig) error {
 
 	cfg.Serverless.Profile = profile
 
-	fmt.Println("\n[SECURITY] NextDeploy requires an IAM Role to create your Lambda function.")
-	fmt.Println("This role only needs basic Lambda execution permissions.")
-	fmt.Print("IAM Role ARN (e.g. arn:aws:iam::...:role/name): ")
-	role, err := ReadRequiredInput(reader)
-	if err != nil {
-		return err
-	}
-	cfg.Serverless.IAMRole = role
+	fmt.Println("\n[SECURITY] NextDeploy requires an IAM Role to execute your Lambda function.")
+	fmt.Println("If you leave this blank, NextDeploy will automatically create a managed role for you.")
+	fmt.Print("IAM Role ARN [Optional] (press Enter to auto-provision): ")
+	role, _ := reader.ReadString('\n')
+	cfg.Serverless.IAMRole = strings.TrimSpace(role)
 
 	fmt.Println("\n✨ NextDeploy will automatically generate globally unique S3 bucket and Lambda names.")
 
