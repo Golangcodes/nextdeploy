@@ -18,6 +18,11 @@ import (
 // and reject placeholder values from config (e.g. "E1234567890ABC", "YOUR_DIST_ID").
 var cfDistributionIDPattern = regexp.MustCompile(`^E[A-Z0-9]{10,14}$`)
 
+// isPlaceholderDistributionID checks if the provided ID is the default placeholder.
+func isPlaceholderDistributionID(id string) bool {
+	return id == "E1234567890ABC" || !cfDistributionIDPattern.MatchString(id)
+}
+
 func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sCfg *cfgTypes.ServerlessConfig, bucketName, functionUrl string) (string, error) {
 	client := cloudfront.NewFromConfig(p.cfg)
 	callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
@@ -103,9 +108,19 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 								distConfig.Origins.Items[i].OriginAccessControlId = aws.String(lambdaOacId)
 								needsUpdate = true
 							}
-							if origin.CustomOriginConfig != nil {
-								p.log.Info("Removing CustomOriginConfig from Lambda origin to support OAC.")
-								distConfig.Origins.Items[i].CustomOriginConfig = nil
+							if origin.CustomOriginConfig == nil {
+								p.log.Info("Adding missing CustomOriginConfig to Lambda origin to satisfy CloudFront validation.")
+								distConfig.Origins.Items[i].CustomOriginConfig = &cfTypes.CustomOriginConfig{
+									HTTPPort:             aws.Int32(80),
+									HTTPSPort:            aws.Int32(443),
+									OriginProtocolPolicy: cfTypes.OriginProtocolPolicyHttpsOnly,
+									OriginSslProtocols: &cfTypes.OriginSslProtocols{
+										Quantity: aws.Int32(1),
+										Items:    []cfTypes.SslProtocol{cfTypes.SslProtocolTLSv12},
+									},
+									OriginReadTimeout:      aws.Int32(30),
+									OriginKeepaliveTimeout: aws.Int32(5),
+								}
 								needsUpdate = true
 							}
 							break
@@ -117,6 +132,24 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 						if distConfig.DefaultCacheBehavior.OriginRequestPolicyId == nil || *distConfig.DefaultCacheBehavior.OriginRequestPolicyId != allViewerPolicyId {
 							p.log.Info("Updating CloudFront cache behavior to use Managed-AllViewerExceptHostHeader for OAC compatibility...")
 							distConfig.DefaultCacheBehavior.OriginRequestPolicyId = aws.String(allViewerPolicyId)
+							needsUpdate = true
+						}
+
+						// For POST/PUT payloads to work with OAC, we also must ensure AllowedMethods allows all
+						if distConfig.DefaultCacheBehavior.AllowedMethods != nil && distConfig.DefaultCacheBehavior.AllowedMethods.Quantity != nil && *distConfig.DefaultCacheBehavior.AllowedMethods.Quantity < 7 {
+							p.log.Info("Expanding AllowedMethods on default cache behavior to support POST/PUT/DELETE for Lambda OAC...")
+							distConfig.DefaultCacheBehavior.AllowedMethods = &cfTypes.AllowedMethods{
+								Quantity: aws.Int32(7),
+								Items: []cfTypes.Method{
+									cfTypes.MethodGet,
+									cfTypes.MethodHead,
+									cfTypes.MethodOptions,
+									cfTypes.MethodPut,
+									cfTypes.MethodPatch,
+									cfTypes.MethodPost,
+									cfTypes.MethodDelete,
+								},
+							}
 							needsUpdate = true
 						}
 					}
@@ -294,7 +327,7 @@ func (p *AWSProvider) waitForCloudFrontDeployed(ctx context.Context, client *clo
 func (p *AWSProvider) InvalidateCache(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
 	// 1. Prioritize configured CloudFront ID.
 	distId := appCfg.Serverless.CloudFrontId
-	if !cfDistributionIDPattern.MatchString(distId) {
+	if isPlaceholderDistributionID(distId) {
 		distId = ""
 	}
 
