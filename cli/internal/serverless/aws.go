@@ -33,6 +33,90 @@ import (
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
+const bridgeJS = `const http = require('http');
+const path = require('path');
+const { spawn } = require('child_process');
+
+let serverReady = false;
+let serverPort = 3000;
+
+// Path to the actual Next.js server.js
+const serverPath = path.join(__dirname, 'server.js');
+
+const waitForServer = async () => {
+    for (let i = 0; i < 50; i++) {
+        try {
+            await new Promise((resolve, reject) => {
+                const req = http.get({
+                    hostname: '127.0.0.1',
+                    port: serverPort,
+                    path: '/',
+                    timeout: 500,
+                }, (res) => resolve(true));
+                req.on('error', reject);
+                req.end();
+            });
+            console.log('Next.js server is ready');
+            return true;
+        } catch (e) {
+            await new Promise(r => setTimeout(r, 100));
+        }
+    }
+    throw new Error('Server timed out waiting for localhost:' + serverPort);
+};
+
+// Start the server in the background
+console.log('Starting Next.js server: node ' + serverPath);
+const serverProcess = spawn('node', [serverPath], {
+    env: { ...process.env, PORT: serverPort, HOSTNAME: '127.0.0.1', NODE_ENV: 'production' },
+    stdio: 'inherit'
+});
+
+exports.handler = async (event) => {
+    if (!serverReady) {
+        await waitForServer();
+        serverReady = true;
+    }
+
+    return new Promise((resolve, reject) => {
+        // Handle both API Gateway v1 and v2 formats
+        const method = (event.requestContext && event.requestContext.http) ? event.requestContext.http.method : event.httpMethod;
+        const rawPath = event.rawPath || event.path || '/';
+        const queryString = event.rawQueryString || '';
+        
+        const options = {
+            hostname: '127.0.0.1',
+            port: serverPort,
+            path: rawPath + (queryString ? '?' + queryString : ''),
+            method: method,
+            headers: event.headers || {},
+        };
+
+        const req = http.request(options, (res) => {
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(chunk));
+            res.on('end', () => {
+                const body = Buffer.concat(chunks);
+                resolve({
+                    statusCode: res.statusCode,
+                    headers: res.headers,
+                    body: body.toString('base64'),
+                    isBase64Encoded: true
+                });
+            });
+        });
+
+        if (event.body) {
+            req.write(event.isBase64Encoded ? Buffer.from(event.body, 'base64') : event.body);
+        }
+        req.on('error', (err) => {
+            console.error('Proxy error:', err);
+            reject(err);
+        });
+        req.end();
+    });
+};`
+
 type AWSProvider struct {
 	log       *shared.Logger
 	cfg       aws.Config
@@ -290,14 +374,23 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 	if _, err := os.Stat(standaloneDir); os.IsNotExist(err) {
 		// Fallback: Check if we have a flat structure (server.js at root)
 		if _, err := os.Stat(filepath.Join(tmpDir, "server.js")); err == nil {
-			p.log.Info("Standalone directory not found, but server.js exists at root. Using flat structure.")
+			p.log.Info("Standalone directory structure recognized (flat).")
 			standaloneDir = tmpDir
 		} else {
 			return fmt.Errorf("standalone directory not found in tarball, and no server.js found at root. Is OutputModeStandalone enabled?")
 		}
+	} else {
+		p.log.Info("Standalone directory structure recognized (nested).")
 	}
 
-	// 2. Zip the standalone folder for Lambda
+	// 2. Inject Lambda Bridge (Required for Next.js standalone -> Lambda Handler mapping)
+	bridgePath := filepath.Join(standaloneDir, "bridge.js")
+	p.log.Info("Injecting Lambda bridge adapter...")
+	if err := os.WriteFile(bridgePath, []byte(bridgeJS), 0644); err != nil {
+		return fmt.Errorf("failed to inject bridge.js: %w", err)
+	}
+
+	// 3. Zip the standalone folder for Lambda
 	zipPath := filepath.Join(tmpDir, "lambda.zip")
 	if err := shared.CreateZip(standaloneDir, zipPath); err != nil {
 		return fmt.Errorf("failed to create zip package: %w", err)
@@ -308,13 +401,13 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 		return fmt.Errorf("failed to read zip package: %w", err)
 	}
 
-	// 3. Ensure Lambda function exists (provision if missing)
+	// 4. Ensure Lambda function exists (provision if missing)
 	err = p.ensureLambdaFunctionExists(ctx, client, functionName, appCfg.Serverless, zipContents)
 	if err != nil {
 		return err
 	}
 
-	// 4. Ensure Lambda Function URL exists
+	// 5. Ensure Lambda Function URL exists
 	functionUrl, err := p.ensureLambdaFunctionURLExists(ctx, client, functionName)
 	if err != nil {
 		p.log.Warn("Failed to ensure Lambda Function URL (distribution might fail): %v", err)
@@ -651,48 +744,66 @@ func (p *AWSProvider) ensureExecutionRoleExists(ctx context.Context) (string, er
 func (p *AWSProvider) ensureLambdaFunctionURLExists(ctx context.Context, client *lambda.Client, functionName string) (string, error) {
 	p.log.Info("Ensuring Lambda Function URL exists for %s...", functionName)
 
+	var functionUrl string
 	// 1. Check if it already exists
 	getOutput, err := client.GetFunctionUrlConfig(ctx, &lambda.GetFunctionUrlConfigInput{
 		FunctionName: aws.String(functionName),
 	})
 
 	if err == nil {
-		p.log.Info("Lambda Function URL found: %s", *getOutput.FunctionUrl)
-		return *getOutput.FunctionUrl, nil
-	}
-
-	var notFound *lambdaTypes.ResourceNotFoundException
-	if !errors.As(err, &notFound) {
-		return "", fmt.Errorf("failed to check for Function URL: %w", err)
-	}
-
-	// 2. Create it
-	p.log.Info("Creating new Function URL for %s...", functionName)
-	createOutput, err := client.CreateFunctionUrlConfig(ctx, &lambda.CreateFunctionUrlConfigInput{
-		FunctionName: aws.String(functionName),
-		AuthType:     lambdaTypes.FunctionUrlAuthTypeNone,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create Function URL: %w", err)
-	}
-
-	// 3. Add permission for public (NONE) access
-	_, err = client.AddPermission(ctx, &lambda.AddPermissionInput{
-		FunctionName:        aws.String(functionName),
-		StatementId:         aws.String("AllowPublicFunctionUrl"),
-		Action:              aws.String("lambda:InvokeFunctionUrl"),
-		Principal:           aws.String("*"),
-		FunctionUrlAuthType: lambdaTypes.FunctionUrlAuthTypeNone,
-	})
-	if err != nil {
-		// Ignore if permission already exists
-		if !strings.Contains(err.Error(), "already exists") {
-			p.log.Warn("Failed to add public permission to Function URL: %v", err)
+		functionUrl = *getOutput.FunctionUrl
+		p.log.Info("Lambda Function URL found: %s", functionUrl)
+	} else {
+		var notFound *lambdaTypes.ResourceNotFoundException
+		if !errors.As(err, &notFound) {
+			return "", fmt.Errorf("failed to check for Function URL: %w", err)
 		}
+
+		// 2. Create it
+		p.log.Info("Creating new Function URL for %s...", functionName)
+		createOutput, err := client.CreateFunctionUrlConfig(ctx, &lambda.CreateFunctionUrlConfigInput{
+			FunctionName: aws.String(functionName),
+			AuthType:     lambdaTypes.FunctionUrlAuthTypeNone,
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to create Function URL: %w", err)
+		}
+		functionUrl = *createOutput.FunctionUrl
 	}
 
-	p.log.Info("Lambda Function URL created: %s", *createOutput.FunctionUrl)
-	return *createOutput.FunctionUrl, nil
+	// 3. Add permission for public (NONE) access - Always try this with retries
+	p.log.Info("Applying public access permission to Function URL...")
+	maxRetries := 5
+	for i := 0; i < maxRetries; i++ {
+		_, err = client.AddPermission(ctx, &lambda.AddPermissionInput{
+			FunctionName:        aws.String(functionName),
+			StatementId:         aws.String("AllowPublicFunctionUrl"),
+			Action:              aws.String("lambda:InvokeFunctionUrl"),
+			Principal:           aws.String("*"),
+			FunctionUrlAuthType: lambdaTypes.FunctionUrlAuthTypeNone,
+		})
+		if err == nil {
+			p.log.Info("Public access permission applied successfully.")
+			break
+		}
+
+		if strings.Contains(err.Error(), "already exists") {
+			p.log.Info("Public access permission already exists.")
+			break
+		}
+
+		var conflict *lambdaTypes.ResourceConflictException
+		if (errors.As(err, &conflict) || strings.Contains(err.Error(), "InProgress")) && i < maxRetries-1 {
+			p.log.Warn("Lambda is busy, retrying permission application (%d/%d)...", i+1, maxRetries)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		p.log.Warn("Failed to add public permission to Function URL: %v", err)
+		break
+	}
+
+	return functionUrl, nil
 }
 
 func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sCfg *cfgTypes.ServerlessConfig, bucketName, functionUrl string) (string, error) {
@@ -1026,7 +1137,7 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 	var notFound *lambdaTypes.ResourceNotFoundException
 	if errors.As(err, &notFound) {
 		// Use configured values or sensible defaults
-		handler := "server.handler"
+		handler := "bridge.handler"
 		if sCfg.Handler != "" {
 			handler = sCfg.Handler
 		}
