@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/Golangcodes/nextdeploy/cli/internal/server"
+	"github.com/Golangcodes/nextdeploy/cli/internal/serverless"
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/spf13/cobra"
@@ -24,6 +25,22 @@ var rollbackCmd = &cobra.Command{
 			log.Error("Failed to load config: %v", err)
 			os.Exit(1)
 		}
+
+		if cfg.TargetType == "serverless" {
+			log.Info("Deployment Target: SERVERLESS (No VPS or Daemon required)")
+			if cfg.Serverless == nil {
+				log.Error("TargetType is 'serverless' but 'serverless' config block is missing.")
+				os.Exit(1)
+			}
+
+			if err := serverless.Rollback(context.Background(), cfg); err != nil {
+				log.Error("Serverless rollback failed: %v", err)
+				os.Exit(1)
+			}
+			return
+		}
+
+		log.Info("Deployment Target: VPS (Daemon execution)")
 
 		srv, err := server.New(server.WithConfig(), server.WithSSH())
 		if err != nil {

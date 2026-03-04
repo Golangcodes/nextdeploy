@@ -72,6 +72,32 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	return nil
 }
 
+// Rollback orchestrates the serverless rollback process.
+func Rollback(ctx context.Context, cfg *config.NextDeployConfig) error {
+	log := shared.PackageLogger("serverless", "☁️  SERVERLESS")
+
+	// ── 1. Resolve provider ──────────────────────────────────────────────────
+	var p Provider
+	switch cfg.Serverless.Provider {
+	case "aws":
+		p = NewAWSProvider()
+	default:
+		return fmt.Errorf("unsupported serverless provider: %s (supported: aws)", cfg.Serverless.Provider)
+	}
+
+	if err := p.Initialize(ctx, cfg); err != nil {
+		return fmt.Errorf("provider initialization failed: %w", err)
+	}
+
+	// ── 2. Trigger Rollback ──────────────────────────────────────────────────
+	if err := p.Rollback(ctx, cfg); err != nil {
+		return fmt.Errorf("serverless rollback failed: %w", err)
+	}
+
+	log.Info("✅ Serverless rollback complete!")
+	return nil
+}
+
 // discoverArtifact returns the path to the build tarball.
 // It searches the standard locations in order of preference:
 //  1. .nextdeploy/app.tar.gz  (local build dir)

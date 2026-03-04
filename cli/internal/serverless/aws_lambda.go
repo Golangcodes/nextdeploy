@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +31,13 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 		p.log.Info("Export Mode detected. Skipping Lambda deployment (static only).")
 		// Update CloudFront for static only
 		bucketName := p.getS3BucketName(appCfg)
-		_, err := p.ensureCloudFrontDistributionExists(ctx, appCfg.Serverless, bucketName, "")
+		// Determine domain
+		domain := meta.Domain
+		if domain == "" {
+			domain = appCfg.App.Domain
+		}
+
+		_, err := p.ensureCloudFrontDistributionExists(ctx, appCfg.Serverless, bucketName, "", domain)
 		if err != nil {
 			p.log.Warn("Failed to ensure CloudFront Distribution for static site: %v", err)
 		}
@@ -97,7 +105,14 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 
 	// 6. Ensure CloudFront Distribution exists
 	bucketName := p.getS3BucketName(appCfg)
-	distributionId, err := p.ensureCloudFrontDistributionExists(ctx, appCfg.Serverless, bucketName, functionUrl)
+	// Determine domain
+	domain := meta.Domain
+	if domain == "" {
+		domain = appCfg.App.Domain
+	}
+
+	p.log.Info("Ensuring CloudFront distribution exists for Lambda origin (Domain: %s)...", domain)
+	distributionId, err := p.ensureCloudFrontDistributionExists(ctx, appCfg.Serverless, bucketName, functionUrl, domain)
 	if err != nil {
 		p.log.Warn("Failed to ensure CloudFront Distribution: %v", err)
 	} else {
@@ -172,6 +187,96 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 		p.log.Warn("Timed out waiting for Lambda stability after config update: %v", err)
 	}
 
+	// Publish a numbered version for rollback support
+	pubOutput, err := client.PublishVersion(ctx, &lambda.PublishVersionInput{
+		FunctionName: aws.String(functionName),
+		Description:  aws.String(fmt.Sprintf("nextdeploy deploy %s", time.Now().Format(time.RFC3339))),
+	})
+	if err != nil {
+		p.log.Warn("Failed to publish Lambda version (rollback may not work): %v", err)
+	} else {
+		p.log.Info("Published Lambda version %s for rollback support.", *pubOutput.Version)
+	}
+
+	return nil
+}
+
+// Rollback reverts the Lambda function to the previous published version.
+func (p *AWSProvider) Rollback(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
+	client := lambda.NewFromConfig(p.cfg)
+	functionName := p.getLambdaFunctionName(appCfg)
+
+	p.log.Info("Rolling back Lambda function %s...", functionName)
+
+	// List all published versions (excluding $LATEST)
+	versionsOutput, err := client.ListVersionsByFunction(ctx, &lambda.ListVersionsByFunctionInput{
+		FunctionName: aws.String(functionName),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list Lambda versions: %w", err)
+	}
+
+	// Filter out $LATEST and collect version numbers
+	var publishedVersions []string
+	for _, v := range versionsOutput.Versions {
+		if v.Version != nil && *v.Version != "$LATEST" {
+			publishedVersions = append(publishedVersions, *v.Version)
+		}
+	}
+
+	if len(publishedVersions) < 2 {
+		return fmt.Errorf("not enough published versions to rollback (found %d, need at least 2)", len(publishedVersions))
+	}
+
+	// The previous version is the second-to-last
+	previousVersion := publishedVersions[len(publishedVersions)-2]
+	p.log.Info("Rolling back from version %s to version %s...", publishedVersions[len(publishedVersions)-1], previousVersion)
+
+	// Get the previous version's code location
+	prevFunc, err := client.GetFunction(ctx, &lambda.GetFunctionInput{
+		FunctionName: aws.String(functionName),
+		Qualifier:    aws.String(previousVersion),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get previous version %s: %w", previousVersion, err)
+	}
+
+	if prevFunc.Code == nil || prevFunc.Code.Location == nil {
+		return fmt.Errorf("previous version %s has no code location", previousVersion)
+	}
+
+	// Download the previous version's code and re-upload it as the new $LATEST
+	p.log.Info("Downloading previous version's code...")
+	resp, err := p.downloadURL(*prevFunc.Code.Location)
+	if err != nil {
+		return fmt.Errorf("failed to download previous version code: %w", err)
+	}
+
+	_, err = client.UpdateFunctionCode(ctx, &lambda.UpdateFunctionCodeInput{
+		FunctionName: aws.String(functionName),
+		ZipFile:      resp,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update Lambda code for rollback: %w", err)
+	}
+
+	p.log.Info("Lambda code rolled back. Waiting for stabilization...")
+	if err := p.waitForLambdaStable(ctx, client, functionName); err != nil {
+		p.log.Warn("Timed out waiting for Lambda stability after rollback: %v", err)
+	}
+
+	// Publish the rollback as a new version
+	_, _ = client.PublishVersion(ctx, &lambda.PublishVersionInput{
+		FunctionName: aws.String(functionName),
+		Description:  aws.String(fmt.Sprintf("nextdeploy rollback to v%s at %s", previousVersion, time.Now().Format(time.RFC3339))),
+	})
+
+	// Invalidate CloudFront cache
+	if err := p.InvalidateCache(ctx, appCfg); err != nil {
+		p.log.Warn("Cache invalidation after rollback failed (non-fatal): %v", err)
+	}
+
+	p.log.Info("✅ Rollback complete! Lambda is now running the previous version.")
 	return nil
 }
 
@@ -417,4 +522,25 @@ func (p *AWSProvider) ensureLambdaFunctionURLExists(ctx context.Context, client 
 	}
 
 	return functionUrl, nil
+}
+
+// downloadURL fetches the content from a URL and returns the bytes.
+// Used to download Lambda code from a presigned S3 URL during rollback.
+func (p *AWSProvider) downloadURL(url string) ([]byte, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP GET failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	return data, nil
 }

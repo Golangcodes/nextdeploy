@@ -24,6 +24,8 @@ github.com/aws/aws-sdk-go-v2/internal/ini v1.8.5 h1:clHU5fm//kWS1C2HgtgWxfQbFbx4
 github.com/aws/aws-sdk-go-v2/internal/ini v1.8.5/go.mod h1:O3h0IK87yXci+kg6flUKzJnWeziQUKciKrLjcatSNcY=
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.19 h1:3Y4oma5TiV7tT9wa8zRcdoXwZkGz9Q/wxbEUK7cMuAM=
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.19/go.mod h1:V1K+TeJVD5JOk3D9e5tsX2KUdL7BlB+FV6cBhdobN8c=
+github.com/aws/aws-sdk-go-v2/service/acm v1.37.21 h1:AUceKJhgt+FOwImMUPbOHKLpe5O9a8N/RtC+tLQ+sxc=
+github.com/aws/aws-sdk-go-v2/service/acm v1.37.21/go.mod h1:kkbySLpdZk0UNdU23rBaef7IfuSRy0/jEM84BGCcvKM=
 github.com/aws/aws-sdk-go-v2/service/cloudfront v1.60.1 h1:fwkGr0AyYMq/oxzBrNWVLcmSgSWVyGtFAanNs+ECRes=
 github.com/aws/aws-sdk-go-v2/service/cloudfront v1.60.1/go.mod h1:PAegJVxp+CkgKZBZVEaTWBN2bHwH24FLl5sIIHYuzOU=
 github.com/aws/aws-sdk-go-v2/service/iam v1.53.4 h1:FUWGS7m97SYL0bk9Kb+Q4bVpcSrKOHNiIbEXIRFTRW4=

@@ -334,9 +334,6 @@ func (p *AWSProvider) updateS3BucketPolicyForOAC(ctx context.Context, bucketName
 	return nil
 }
 
-// detectContentType returns the correct MIME content-type for a file path.
-// Uses a hardcoded map for common web extensions first, then falls back
-// to Go's standard mime package, and finally to application/octet-stream.
 func detectContentType(path string) string {
 	webMimeTypes := map[string]string{
 		".css":   "text/css",

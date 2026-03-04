@@ -23,7 +23,7 @@ func isPlaceholderDistributionID(id string) bool {
 	return id == "E1234567890ABC" || !cfDistributionIDPattern.MatchString(id)
 }
 
-func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sCfg *cfgTypes.ServerlessConfig, bucketName, functionUrl string) (string, error) {
+func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sCfg *cfgTypes.ServerlessConfig, bucketName, functionUrl, domain string) (string, error) {
 	client := cloudfront.NewFromConfig(p.cfg)
 	callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
 
@@ -41,6 +41,15 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 		lambdaOacId, err = p.ensureLambdaOACExists(ctx, client)
 		if err != nil {
 			return "", fmt.Errorf("failed to ensure Lambda OAC exists: %w", err)
+		}
+	}
+
+	// Handle custom domain cert
+	var certARN string
+	if domain != "" {
+		certARN, err = p.ensureACMCertificateExists(ctx, domain)
+		if err != nil {
+			p.log.Warn("Failed to ensure ACM certificate for domain %s: %v", domain, err)
 		}
 	}
 
@@ -69,239 +78,273 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 		return "", fmt.Errorf("failed to list distributions: %w", err)
 	}
 
+	var existingDistID string
 	if listOutput.DistributionList != nil {
 		for _, dist := range listOutput.DistributionList.Items {
 			if dist.Comment != nil && *dist.Comment == callerRef {
-				distID := *dist.Id
-				p.log.Info("Existing CloudFront distribution found: %s (%s). Verifying config...", distID, *dist.DomainName)
-
-				getConfig, err := client.GetDistributionConfig(ctx, &cloudfront.GetDistributionConfigInput{
-					Id: aws.String(distID),
-				})
-				if err != nil {
-					return "", fmt.Errorf("failed to get distribution config: %w", err)
-				}
-
-				needsUpdate := false
-				distConfig := getConfig.DistributionConfig
-
-				// Ensure it's enabled
-				if distConfig.Enabled != nil && !*distConfig.Enabled {
-					p.log.Info("Distribution is disabled, re-enabling...")
-					distConfig.Enabled = aws.Bool(true)
-					needsUpdate = true
-				}
-
-				if distConfig.Origins != nil && needsLambdaOrigin {
-					lambdaHost := strings.TrimPrefix(functionUrl, "https://")
-					lambdaHost = strings.TrimSuffix(lambdaHost, "/")
-
-					for i, origin := range distConfig.Origins.Items {
-						if origin.Id != nil && *origin.Id == "LambdaCompute" {
-							if origin.DomainName != nil && *origin.DomainName != lambdaHost {
-								p.log.Info("Lambda origin URL changed, updating distribution: %s -> %s", *origin.DomainName, lambdaHost)
-								distConfig.Origins.Items[i].DomainName = aws.String(lambdaHost)
-								needsUpdate = true
-							}
-							if origin.OriginAccessControlId == nil || *origin.OriginAccessControlId != lambdaOacId {
-								p.log.Info("Lambda origin OAC changed, updating distribution.")
-								distConfig.Origins.Items[i].OriginAccessControlId = aws.String(lambdaOacId)
-								needsUpdate = true
-							}
-							if origin.CustomOriginConfig == nil {
-								p.log.Info("Adding missing CustomOriginConfig to Lambda origin to satisfy CloudFront validation.")
-								distConfig.Origins.Items[i].CustomOriginConfig = &cfTypes.CustomOriginConfig{
-									HTTPPort:             aws.Int32(80),
-									HTTPSPort:            aws.Int32(443),
-									OriginProtocolPolicy: cfTypes.OriginProtocolPolicyHttpsOnly,
-									OriginSslProtocols: &cfTypes.OriginSslProtocols{
-										Quantity: aws.Int32(1),
-										Items:    []cfTypes.SslProtocol{cfTypes.SslProtocolTLSv12},
-									},
-									OriginReadTimeout:      aws.Int32(30),
-									OriginKeepaliveTimeout: aws.Int32(5),
-								}
-								needsUpdate = true
-							}
-							break
-						}
-					}
-
-					// Ensure the Origin Request Policy doesn't forward the Host header (breaks OAC SigV4)
-					if distConfig.DefaultCacheBehavior != nil {
-						if distConfig.DefaultCacheBehavior.OriginRequestPolicyId == nil || *distConfig.DefaultCacheBehavior.OriginRequestPolicyId != allViewerPolicyId {
-							p.log.Info("Updating CloudFront cache behavior to use Managed-AllViewerExceptHostHeader for OAC compatibility...")
-							distConfig.DefaultCacheBehavior.OriginRequestPolicyId = aws.String(allViewerPolicyId)
-							needsUpdate = true
-						}
-
-						// For POST/PUT payloads to work with OAC, we also must ensure AllowedMethods allows all
-						if distConfig.DefaultCacheBehavior.AllowedMethods != nil && distConfig.DefaultCacheBehavior.AllowedMethods.Quantity != nil && *distConfig.DefaultCacheBehavior.AllowedMethods.Quantity < 7 {
-							p.log.Info("Expanding AllowedMethods on default cache behavior to support POST/PUT/DELETE for Lambda OAC...")
-							distConfig.DefaultCacheBehavior.AllowedMethods = &cfTypes.AllowedMethods{
-								Quantity: aws.Int32(7),
-								Items: []cfTypes.Method{
-									cfTypes.MethodGet,
-									cfTypes.MethodHead,
-									cfTypes.MethodOptions,
-									cfTypes.MethodPut,
-									cfTypes.MethodPatch,
-									cfTypes.MethodPost,
-									cfTypes.MethodDelete,
-								},
-							}
-							needsUpdate = true
-						}
-					}
-				}
-
-				if needsUpdate {
-					_, err = client.UpdateDistribution(ctx, &cloudfront.UpdateDistributionInput{
-						Id:                 aws.String(distID),
-						IfMatch:            getConfig.ETag,
-						DistributionConfig: distConfig,
-					})
-					if err != nil {
-						return "", fmt.Errorf("failed to update CloudFront distribution: %w", err)
-					}
-					p.log.Info("CloudFront distribution configuration updated successfully.")
-				} else {
-					p.log.Info("CloudFront configuration is already up to date.")
-				}
-
-				return distID, nil
+				existingDistID = *dist.Id
+				break
 			}
 		}
 	}
 
+	if existingDistID != "" {
+		p.log.Info("Existing CloudFront distribution found: %s. Verifying config...", existingDistID)
+
+		getConfig, err := client.GetDistributionConfig(ctx, &cloudfront.GetDistributionConfigInput{
+			Id: aws.String(existingDistID),
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to get distribution config: %w", err)
+		}
+
+		distConfig := getConfig.DistributionConfig
+		needsUpdate := p.applyDistributionConfig(distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl)
+
+		if needsUpdate {
+			p.log.Info("CloudFront configuration update required, applying changes...")
+			_, err = client.UpdateDistribution(ctx, &cloudfront.UpdateDistributionInput{
+				Id:                 aws.String(existingDistID),
+				IfMatch:            getConfig.ETag,
+				DistributionConfig: distConfig,
+			})
+			if err != nil {
+				return "", fmt.Errorf("failed to update CloudFront distribution: %w", err)
+			}
+			p.log.Info("CloudFront distribution configuration updated successfully.")
+		} else {
+			p.log.Info("CloudFront configuration is already up to date.")
+		}
+
+		return existingDistID, nil
+	}
+
 	p.log.Info("CloudFront distribution not found, creating one (this may take a few minutes to be fully active)...")
 
-	s3OriginId := "S3Assets"
-	lambdaOriginId := "LambdaCompute"
+	distConfig := &cfTypes.DistributionConfig{}
+	p.applyDistributionConfig(distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl)
 
-	origins := []cfTypes.Origin{
-		{
-			Id:         aws.String(s3OriginId),
-			DomainName: aws.String(fmt.Sprintf("%s.s3.%s.amazonaws.com", bucketName, p.cfg.Region)),
-			S3OriginConfig: &cfTypes.S3OriginConfig{
-				OriginAccessIdentity: aws.String(""), // Using OAC instead
-			},
-			OriginAccessControlId: aws.String(oacId),
-		},
-	}
-
-	if needsLambdaOrigin {
-		// Strip https:// and trailing slash from function URL for CloudFront origin host
-		lambdaHost := strings.TrimPrefix(functionUrl, "https://")
-		lambdaHost = strings.TrimSuffix(lambdaHost, "/")
-
-		origins = append(origins, cfTypes.Origin{
-			Id:         aws.String(lambdaOriginId),
-			DomainName: aws.String(lambdaHost),
-			CustomOriginConfig: &cfTypes.CustomOriginConfig{
-				HTTPPort:             aws.Int32(80),
-				HTTPSPort:            aws.Int32(443),
-				OriginProtocolPolicy: cfTypes.OriginProtocolPolicyHttpsOnly,
-				OriginSslProtocols: &cfTypes.OriginSslProtocols{
-					Quantity: aws.Int32(1),
-					Items:    []cfTypes.SslProtocol{cfTypes.SslProtocolTLSv12},
-				},
-				OriginReadTimeout:      aws.Int32(30),
-				OriginKeepaliveTimeout: aws.Int32(5),
-			},
-			OriginAccessControlId: aws.String(lambdaOacId),
-		})
-	}
-
-	var defaultOriginRequestPolicy *string
-	if needsLambdaOrigin {
-		defaultOriginRequestPolicy = aws.String(allViewerPolicyId)
-	}
-
-	createInput := &cloudfront.CreateDistributionInput{
-		DistributionConfig: &cfTypes.DistributionConfig{
-			CallerReference: aws.String(callerRef),
-			Comment:         aws.String(callerRef),
-			Enabled:         aws.Bool(true),
-			Origins: &cfTypes.Origins{
-				Quantity: aws.Int32(int32(len(origins))),
-				Items:    origins,
-			},
-			DefaultCacheBehavior: &cfTypes.DefaultCacheBehavior{
-				TargetOriginId: aws.String(func() string {
-					if needsLambdaOrigin {
-						return lambdaOriginId
-					}
-					return s3OriginId
-				}()),
-				ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
-				CachePolicyId: aws.String(func() string {
-					if needsLambdaOrigin {
-						return cachingDisabledId
-					}
-					return cachingOptimizedId
-				}()),
-				OriginRequestPolicyId: defaultOriginRequestPolicy,
-				AllowedMethods: &cfTypes.AllowedMethods{
-					Quantity: aws.Int32(func() int32 {
-						if needsLambdaOrigin {
-							return 7
-						}
-						return 2
-					}()),
-					Items: func() []cfTypes.Method {
-						if needsLambdaOrigin {
-							return []cfTypes.Method{
-								cfTypes.MethodGet,
-								cfTypes.MethodHead,
-								cfTypes.MethodOptions,
-								cfTypes.MethodPut,
-								cfTypes.MethodPatch,
-								cfTypes.MethodPost,
-								cfTypes.MethodDelete,
-							}
-						}
-						return []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead}
-					}(),
-				},
-			},
-			CacheBehaviors: &cfTypes.CacheBehaviors{
-				Quantity: aws.Int32(func() int32 {
-					if needsLambdaOrigin {
-						return 2
-					}
-					return 0
-				}()),
-				Items: func() []cfTypes.CacheBehavior {
-					if needsLambdaOrigin {
-						return []cfTypes.CacheBehavior{
-							{
-								PathPattern:          aws.String("/_next/*"),
-								TargetOriginId:       aws.String(s3OriginId),
-								ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
-								CachePolicyId:        aws.String(cachingOptimizedId),
-							},
-							{
-								PathPattern:          aws.String("/assets/*"),
-								TargetOriginId:       aws.String(s3OriginId),
-								ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
-								CachePolicyId:        aws.String(cachingOptimizedId),
-							},
-						}
-					}
-					return nil
-				}(),
-			},
-		},
-	}
-
-	createOutput, err := client.CreateDistribution(ctx, createInput)
+	createOutput, err := client.CreateDistribution(ctx, &cloudfront.CreateDistributionInput{
+		DistributionConfig: distConfig,
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create CloudFront distribution: %w", err)
 	}
 
 	p.log.Info("CloudFront distribution created: %s (%s)", *createOutput.Distribution.Id, *createOutput.Distribution.DomainName)
 	return *createOutput.Distribution.Id, nil
+}
+
+// applyDistributionConfig centralizes the logic for both creating and updating a distribution.
+// It returns true if any changes were made (for updates).
+func (p *AWSProvider) applyDistributionConfig(dc *cfTypes.DistributionConfig, callerRef, domain, certARN, s3OacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl string) bool {
+	changed := false
+
+	if dc.CallerReference == nil || *dc.CallerReference == "" {
+		dc.CallerReference = aws.String(callerRef)
+		changed = true
+	}
+	if dc.Comment == nil || *dc.Comment != callerRef {
+		dc.Comment = aws.String(callerRef)
+		changed = true
+	}
+	if dc.Enabled == nil || !*dc.Enabled {
+		dc.Enabled = aws.Bool(true)
+		changed = true
+	}
+
+	// 1. Handle Domain Aliases
+	if domain != "" {
+		found := false
+		if dc.Aliases != nil {
+			for _, alias := range dc.Aliases.Items {
+				if alias == domain {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			if dc.Aliases == nil {
+				dc.Aliases = &cfTypes.Aliases{Items: []string{}, Quantity: aws.Int32(0)}
+			}
+			dc.Aliases.Items = append(dc.Aliases.Items, domain)
+			dc.Aliases.Quantity = aws.Int32(int32(len(dc.Aliases.Items)))
+			changed = true
+		}
+
+		// 2. Handle Viewer Certificate
+		if certARN != "" && p.isCertificateIssued(context.Background(), certARN) {
+			if dc.ViewerCertificate == nil || dc.ViewerCertificate.ACMCertificateArn == nil || *dc.ViewerCertificate.ACMCertificateArn != certARN {
+				dc.ViewerCertificate = &cfTypes.ViewerCertificate{
+					ACMCertificateArn:            aws.String(certARN),
+					SSLSupportMethod:             cfTypes.SSLSupportMethodSniOnly,
+					MinimumProtocolVersion:       cfTypes.MinimumProtocolVersionTLSv122021,
+					CloudFrontDefaultCertificate: aws.Bool(false),
+				}
+				changed = true
+			}
+		}
+	} else if dc.ViewerCertificate == nil {
+		dc.ViewerCertificate = &cfTypes.ViewerCertificate{
+			CloudFrontDefaultCertificate: aws.Bool(true),
+		}
+		changed = true
+	}
+
+	// 3. Handle Origins
+	s3OriginId := "S3Assets"
+	lambdaOriginId := "LambdaCompute"
+	s3Domain := fmt.Sprintf("%s.s3.%s.amazonaws.com", bucketName, p.cfg.Region)
+
+	var lambdaHost string
+	if functionUrl != "" {
+		lambdaHost = strings.TrimPrefix(functionUrl, "https://")
+		lambdaHost = strings.TrimSuffix(lambdaHost, "/")
+	}
+
+	expectedOrigins := []cfTypes.Origin{
+		{
+			Id:                    aws.String(s3OriginId),
+			DomainName:            aws.String(s3Domain),
+			OriginAccessControlId: aws.String(s3OacId),
+			S3OriginConfig: &cfTypes.S3OriginConfig{
+				OriginAccessIdentity: aws.String(""),
+			},
+		},
+	}
+	if lambdaHost != "" {
+		expectedOrigins = append(expectedOrigins, cfTypes.Origin{
+			Id:                    aws.String(lambdaOriginId),
+			DomainName:            aws.String(lambdaHost),
+			OriginAccessControlId: aws.String(lambdaOacId),
+			CustomOriginConfig: &cfTypes.CustomOriginConfig{
+				HTTPPort:               aws.Int32(80),
+				HTTPSPort:              aws.Int32(443),
+				OriginProtocolPolicy:   cfTypes.OriginProtocolPolicyHttpsOnly,
+				OriginSslProtocols:     &cfTypes.OriginSslProtocols{Quantity: aws.Int32(1), Items: []cfTypes.SslProtocol{cfTypes.SslProtocolTLSv12}},
+				OriginReadTimeout:      aws.Int32(30),
+				OriginKeepaliveTimeout: aws.Int32(5),
+			},
+		})
+	}
+
+	if dc.Origins == nil || int(aws.ToInt32(dc.Origins.Quantity)) != len(expectedOrigins) {
+		dc.Origins = &cfTypes.Origins{
+			Quantity: aws.Int32(int32(len(expectedOrigins))),
+			Items:    expectedOrigins,
+		}
+		changed = true
+	} else {
+		// Verify each origin host/OAC
+		for i := range dc.Origins.Items {
+			origin := &dc.Origins.Items[i]
+			for _, expected := range expectedOrigins {
+				if *origin.Id == *expected.Id {
+					if *origin.DomainName != *expected.DomainName {
+						origin.DomainName = expected.DomainName
+						changed = true
+					}
+					if aws.ToString(origin.OriginAccessControlId) != aws.ToString(expected.OriginAccessControlId) {
+						origin.OriginAccessControlId = expected.OriginAccessControlId
+						changed = true
+					}
+					// Ensure CustomOriginConfig for Lambda if missing
+					if *origin.Id == lambdaOriginId && origin.CustomOriginConfig == nil {
+						origin.CustomOriginConfig = expected.CustomOriginConfig
+						changed = true
+					}
+				}
+			}
+		}
+	}
+
+	// 4. Handle Default Cache Behavior
+	targetOrigin := s3OriginId
+	if lambdaHost != "" {
+		targetOrigin = lambdaOriginId
+	}
+	cachePolicy := cachingOptimizedId
+	if lambdaHost != "" {
+		cachePolicy = cachingDisabledId
+	}
+
+	var orpId *string
+	if lambdaHost != "" {
+		orpId = aws.String(allViewerPolicyId)
+	}
+
+	allowedMethods := &cfTypes.AllowedMethods{
+		Quantity: aws.Int32(2),
+		Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+	}
+	if lambdaHost != "" {
+		allowedMethods = &cfTypes.AllowedMethods{
+			Quantity: aws.Int32(7),
+			Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead, cfTypes.MethodOptions, cfTypes.MethodPut, cfTypes.MethodPatch, cfTypes.MethodPost, cfTypes.MethodDelete},
+		}
+	}
+
+	if dc.DefaultCacheBehavior == nil {
+		dc.DefaultCacheBehavior = &cfTypes.DefaultCacheBehavior{
+			TargetOriginId:        aws.String(targetOrigin),
+			ViewerProtocolPolicy:  cfTypes.ViewerProtocolPolicyRedirectToHttps,
+			CachePolicyId:         aws.String(cachePolicy),
+			OriginRequestPolicyId: orpId,
+			AllowedMethods:        allowedMethods,
+		}
+		changed = true
+	} else {
+		dcb := dc.DefaultCacheBehavior
+		if *dcb.TargetOriginId != targetOrigin {
+			dcb.TargetOriginId = aws.String(targetOrigin)
+			changed = true
+		}
+		if *dcb.CachePolicyId != cachePolicy {
+			dcb.CachePolicyId = aws.String(cachePolicy)
+			changed = true
+		}
+		if aws.ToString(dcb.OriginRequestPolicyId) != aws.ToString(orpId) {
+			dcb.OriginRequestPolicyId = orpId
+			changed = true
+		}
+		if dcb.AllowedMethods == nil || *dcb.AllowedMethods.Quantity != *allowedMethods.Quantity {
+			dcb.AllowedMethods = allowedMethods
+			changed = true
+		}
+	}
+
+	// 5. Handle Cache Behaviors (for static assets when Lambda is active)
+	if lambdaHost != "" {
+		expectedBehaviors := []cfTypes.CacheBehavior{
+			{
+				PathPattern:          aws.String("/_next/*"),
+				TargetOriginId:       aws.String(s3OriginId),
+				ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
+				CachePolicyId:        aws.String(cachingOptimizedId),
+			},
+			{
+				PathPattern:          aws.String("/assets/*"),
+				TargetOriginId:       aws.String(s3OriginId),
+				ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
+				CachePolicyId:        aws.String(cachingOptimizedId),
+			},
+		}
+		if dc.CacheBehaviors == nil || int(aws.ToInt32(dc.CacheBehaviors.Quantity)) != len(expectedBehaviors) {
+			dc.CacheBehaviors = &cfTypes.CacheBehaviors{
+				Quantity: aws.Int32(int32(len(expectedBehaviors))),
+				Items:    expectedBehaviors,
+			}
+			changed = true
+		}
+	} else {
+		if dc.CacheBehaviors != nil && aws.ToInt32(dc.CacheBehaviors.Quantity) > 0 {
+			dc.CacheBehaviors = &cfTypes.CacheBehaviors{Quantity: aws.Int32(0), Items: []cfTypes.CacheBehavior{}}
+			changed = true
+		}
+	}
+
+	return changed
 }
 
 // waitForCloudFrontDeployed polls until a distribution reaches the Deployed
