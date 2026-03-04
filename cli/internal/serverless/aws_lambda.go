@@ -382,15 +382,20 @@ func (p *AWSProvider) ensureLambdaFunctionURLExists(ctx context.Context, client 
 	for _, perm := range permissions {
 		maxRetries := 5
 		for i := 0; i < maxRetries; i++ {
-			_, err = client.AddPermission(ctx, &lambda.AddPermissionInput{
-				FunctionName:        aws.String(functionName),
-				StatementId:         aws.String(perm.StatementId),
-				Action:              aws.String(perm.Action),
-				Principal:           aws.String("cloudfront.amazonaws.com"),
-				FunctionUrlAuthType: lambdaTypes.FunctionUrlAuthTypeAwsIam,
-				SourceAccount:       aws.String(accountId),
-				SourceArn:           aws.String(fmt.Sprintf("arn:aws:cloudfront::%s:distribution/*", accountId)),
-			})
+			input := &lambda.AddPermissionInput{
+				FunctionName:  aws.String(functionName),
+				StatementId:   aws.String(perm.StatementId),
+				Action:        aws.String(perm.Action),
+				Principal:     aws.String("cloudfront.amazonaws.com"),
+				SourceAccount: aws.String(accountId),
+				SourceArn:     aws.String(fmt.Sprintf("arn:aws:cloudfront::%s:distribution/*", accountId)),
+			}
+
+			if perm.Action == "lambda:InvokeFunctionUrl" {
+				input.FunctionUrlAuthType = lambdaTypes.FunctionUrlAuthTypeAwsIam
+			}
+
+			_, err = client.AddPermission(ctx, input)
 			if err == nil {
 				p.log.Info("CloudFront OAC access permission '%s' applied successfully.", perm.Action)
 				break
