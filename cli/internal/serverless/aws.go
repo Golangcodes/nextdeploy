@@ -709,8 +709,60 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 	if listOutput.DistributionList != nil {
 		for _, dist := range listOutput.DistributionList.Items {
 			if dist.Comment != nil && *dist.Comment == callerRef {
-				p.log.Info("Existing CloudFront distribution found: %s", *dist.DomainName)
-				return *dist.Id, nil
+				distID := *dist.Id
+				p.log.Info("Existing CloudFront distribution found: %s (%s). Verifying config...", distID, *dist.DomainName)
+
+				// 1. Get full config and ETag
+				getConfig, err := client.GetDistributionConfig(ctx, &cloudfront.GetDistributionConfigInput{
+					Id: aws.String(distID),
+				})
+				if err != nil {
+					return "", fmt.Errorf("failed to get distribution config: %w", err)
+				}
+
+				// 2. Check and update if needed
+				needsUpdate := false
+				config := getConfig.DistributionConfig
+
+				// Ensure it's enabled
+				if config.Enabled != nil && !*config.Enabled {
+					p.log.Info("Distribution is disabled, re-enabling...")
+					config.Enabled = aws.Bool(true)
+					needsUpdate = true
+				}
+
+				// Ensure Lambda origin is correct
+				lambdaHost := strings.TrimPrefix(functionUrl, "https://")
+				lambdaHost = strings.TrimSuffix(lambdaHost, "/")
+
+				if config.Origins != nil {
+					for i, origin := range config.Origins.Items {
+						if origin.Id != nil && *origin.Id == "LambdaCompute" {
+							if origin.DomainName != nil && *origin.DomainName != lambdaHost {
+								p.log.Info("Lambda origin URL changed, updating distribution: %s -> %s", *origin.DomainName, lambdaHost)
+								config.Origins.Items[i].DomainName = aws.String(lambdaHost)
+								needsUpdate = true
+							}
+							break
+						}
+					}
+				}
+
+				if needsUpdate {
+					_, err = client.UpdateDistribution(ctx, &cloudfront.UpdateDistributionInput{
+						Id:                 aws.String(distID),
+						IfMatch:            getConfig.ETag,
+						DistributionConfig: config,
+					})
+					if err != nil {
+						return "", fmt.Errorf("failed to update CloudFront distribution: %w", err)
+					}
+					p.log.Info("CloudFront distribution configuration updated successfully.")
+				} else {
+					p.log.Info("CloudFront configuration is already up to date.")
+				}
+
+				return distID, nil
 			}
 		}
 	}
