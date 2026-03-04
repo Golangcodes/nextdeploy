@@ -17,7 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
-	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/internal/packaging"
 	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
@@ -60,7 +60,7 @@ func (p *AWSProvider) ensureBucketExists(ctx context.Context, client *s3.Client,
 	return nil
 }
 
-func (p *AWSProvider) DeployStatic(ctx context.Context, tarballPath string, appCfg *cfgTypes.NextDeployConfig, meta *nextcore.NextCorePayload) error {
+func (p *AWSProvider) DeployStatic(ctx context.Context, pkg *packaging.PackageResult, appCfg *cfgTypes.NextDeployConfig, meta *nextcore.NextCorePayload) error {
 	bucketName := p.getS3BucketName(appCfg)
 	p.log.Info("Syncing static assets to S3 Bucket (%s)...", bucketName)
 
@@ -78,101 +78,24 @@ func (p *AWSProvider) DeployStatic(ctx context.Context, tarballPath string, appC
 
 	uploader := transfermanager.New(client)
 
-	// We need to unpack the tarball first to access static files
-	tmpDir, err := os.MkdirTemp("", "nd-serverless-deploy-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	if err := shared.ExtractTarGz(tarballPath, tmpDir); err != nil {
-		return fmt.Errorf("failed to extract tarball: %w", err)
-	}
-
-	distDir := meta.DistDir
-	if distDir == "" {
-		distDir = ".next"
-	}
-
-	// Directories to upload to S3
-	var uploadDirs []struct {
-		Src  string
-		Dest string
-	}
-
-	if meta.OutputMode == nextcore.OutputModeExport {
-		exportDir := meta.ExportDir
-		if exportDir == "" {
-			exportDir = "out"
-		}
-		p.log.Info("Detected Export Mode. Syncing %s to bucket root...", exportDir)
-		uploadDirs = append(uploadDirs, struct {
-			Src  string
-			Dest string
-		}{Src: filepath.Join(tmpDir, exportDir), Dest: ""})
-	} else {
-		uploadDirs = []struct {
-			Src  string
-			Dest string
-		}{
-			{Src: filepath.Join(tmpDir, "public"), Dest: ""},
-			{Src: filepath.Join(tmpDir, distDir, "static"), Dest: "_next/static"},
-		}
-	}
-
-	for _, dir := range uploadDirs {
-		if _, err := os.Stat(dir.Src); os.IsNotExist(err) {
+	for _, asset := range pkg.S3Assets {
+		file, err := os.Open(asset.LocalPath)
+		if err != nil {
+			p.log.Warn("Failed to open local asset %s: %v", asset.LocalPath, err)
 			continue
 		}
+		defer file.Close()
 
-		err = filepath.Walk(dir.Src, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() {
-				return nil
-			}
-
-			relPath, err := filepath.Rel(dir.Src, path)
-			if err != nil {
-				return err
-			}
-
-			s3Key := filepath.Join(dir.Dest, relPath)
-			// Normalize path for S3
-			s3Key = filepath.ToSlash(s3Key)
-
-			file, err := os.Open(path)
-			if err != nil {
-				return fmt.Errorf("failed to open file %s: %w", path, err)
-			}
-			defer file.Close()
-
-			contentType := detectContentType(path)
-
-			// Add basic Cache-Control
-			cacheControl := "public, max-age=31536000, immutable"
-			if dir.Dest == "" { // e.g. public directory (favicon, etc) shouldn't be cached forever usually
-				cacheControl = "public, max-age=3600"
-			}
-
-			_, err = uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
-				Bucket:       aws.String(bucketName),
-				Key:          aws.String(s3Key),
-				Body:         file,
-				ContentType:  aws.String(contentType),
-				CacheControl: aws.String(cacheControl),
-			})
-
-			if err != nil {
-				return fmt.Errorf("failed to upload %s to S3: %w", s3Key, err)
-			}
-
-			return nil
+		_, err = uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
+			Bucket:       aws.String(bucketName),
+			Key:          aws.String(filepath.ToSlash(asset.S3Key)),
+			Body:         file,
+			ContentType:  aws.String(asset.ContentType),
+			CacheControl: aws.String(asset.CacheControl),
 		})
 
 		if err != nil {
-			return fmt.Errorf("failed walking directory %s: %w", dir.Src, err)
+			p.log.Warn("Failed to upload %s to S3: %v", asset.S3Key, err)
 		}
 	}
 

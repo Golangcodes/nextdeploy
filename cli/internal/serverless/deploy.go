@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Golangcodes/nextdeploy/internal/packaging"
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
@@ -44,12 +45,28 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 		return fmt.Errorf("provider initialization failed: %w", err)
 	}
 
-	// ── 2. Discover artifact ─────────────────────────────────────────────────
-	tarballPath, err := discoverArtifact()
+	// ── 2. Run Packaging ───────────────────────────────────────────────────
+	projectDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("no build artifact found — run `nextdeploy build` first: %w", err)
+		return fmt.Errorf("failed to get project root: %w", err)
 	}
-	log.Info("Using build artifact: %s", tarballPath)
+
+	packager, err := packaging.NewPackager(projectDir, meta)
+	if err != nil {
+		return fmt.Errorf("failed to initialize packager: %w", err)
+	}
+	defer packager.Cleanup()
+
+	log.Info("Splitting assets for optimized Serverless deployment...")
+	pkgResult, err := packager.Package()
+	if err != nil {
+		return fmt.Errorf("packaging failed: %w", err)
+	}
+
+	if pkgResult.SizeWarning != "" {
+		log.Warn(pkgResult.SizeWarning)
+	}
+	log.Info("Package split: %dMB Lambda zip, %d S3 assets", pkgResult.LambdaZipSize/(1024*1024), len(pkgResult.S3Assets))
 
 	// ── 3. Push secrets ──────────────────────────────────────────────────────
 	appSecrets, err := loadLocalSecrets(cfg)
@@ -64,12 +81,12 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	}
 
 	// ── 4. Deploy static assets ──────────────────────────────────────────────
-	if err := p.DeployStatic(ctx, tarballPath, cfg, meta); err != nil {
+	if err := p.DeployStatic(ctx, pkgResult, cfg, meta); err != nil {
 		return fmt.Errorf("failed to deploy static assets: %w", err)
 	}
 
 	// ── 5. Deploy compute layer ──────────────────────────────────────────────
-	if err := p.DeployCompute(ctx, tarballPath, cfg, meta); err != nil {
+	if err := p.DeployCompute(ctx, pkgResult, cfg, meta); err != nil {
 		return fmt.Errorf("failed to deploy compute layer: %w", err)
 	}
 
@@ -121,29 +138,6 @@ func Rollback(ctx context.Context, cfg *config.NextDeployConfig) error {
 
 	log.Info("✅ Serverless rollback complete!")
 	return nil
-}
-
-// discoverArtifact returns the path to the build tarball.
-// It searches the standard locations in order of preference:
-//  1. .nextdeploy/app.tar.gz  (local build dir)
-//  2. app.tar.gz              (cwd fallback)
-func discoverArtifact() (string, error) {
-	candidates := []string{
-		filepath.Join(".nextdeploy", "app.tar.gz"),
-		"app.tar.gz",
-	}
-
-	for _, cand := range candidates {
-		if _, err := os.Stat(cand); err == nil {
-			abs, err := filepath.Abs(cand)
-			if err != nil {
-				return cand, nil
-			}
-			return abs, nil
-		}
-	}
-
-	return "", fmt.Errorf("artifact not found in %v", candidates)
 }
 
 // loadLocalSecrets reads plaintext/encrypted secrets from the local SecretManager

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,7 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 
-	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/internal/packaging"
 	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
@@ -27,7 +26,7 @@ func (p *AWSProvider) getLambdaFunctionName(appCfg *cfgTypes.NextDeployConfig) s
 	return strings.ToLower(fmt.Sprintf("%s-%s", appCfg.App.Name, appCfg.App.Environment))
 }
 
-func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, appCfg *cfgTypes.NextDeployConfig, meta *nextcore.NextCorePayload) error {
+func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageResult, appCfg *cfgTypes.NextDeployConfig, meta *nextcore.NextCorePayload) error {
 	if meta.OutputMode == nextcore.OutputModeExport {
 		p.log.Info("Export Mode detected. Skipping Lambda deployment (static only).")
 		// Update CloudFront for static only
@@ -50,46 +49,11 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 	client := lambda.NewFromConfig(p.cfg)
 	functionName := p.getLambdaFunctionName(appCfg)
 
-	// 1. Extract tarball
-	tmpDir, err := os.MkdirTemp("", "nd-lambda-deploy-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	if err := shared.ExtractTarGz(tarballPath, tmpDir); err != nil {
-		return fmt.Errorf("failed to extract tarball: %w", err)
-	}
-
-	standaloneDir := filepath.Join(tmpDir, "standalone")
-	if _, err := os.Stat(standaloneDir); os.IsNotExist(err) {
-		// Fallback: Check if we have a flat structure (server.js at root)
-		if _, err := os.Stat(filepath.Join(tmpDir, "server.js")); err == nil {
-			p.log.Info("Standalone directory structure recognized (flat).")
-			standaloneDir = tmpDir
-		} else {
-			return fmt.Errorf("standalone directory not found in tarball, and no server.js found at root. Is OutputModeStandalone enabled?")
-		}
-	} else {
-		p.log.Info("Standalone directory structure recognized (nested).")
-	}
-
-	// 2. Inject Lambda Bridge
-	bridgePath := filepath.Join(standaloneDir, "bridge.js")
-	p.log.Info("Injecting Lambda bridge adapter...")
-	if err := os.WriteFile(bridgePath, []byte(bridgeJS), 0644); err != nil {
-		return fmt.Errorf("failed to inject bridge.js: %w", err)
-	}
-
-	// 3. Zip the standalone folder for Lambda
-	zipPath := filepath.Join(tmpDir, "lambda.zip")
-	if err := shared.CreateZip(standaloneDir, zipPath); err != nil {
-		return fmt.Errorf("failed to create zip package: %w", err)
-	}
-
+	// Use pre-built zip from packager
+	zipPath := pkg.LambdaZipPath
 	zipContents, err := os.ReadFile(zipPath)
 	if err != nil {
-		return fmt.Errorf("failed to read zip package: %w", err)
+		return fmt.Errorf("failed to read lambda zip package: %w", err)
 	}
 
 	// 3a. Save zip to S3 for rollback history (non-fatal)
