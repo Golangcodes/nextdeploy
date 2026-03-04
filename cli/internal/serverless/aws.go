@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -183,7 +184,7 @@ func (p *AWSProvider) DeployStatic(ctx context.Context, tarballPath string, appC
 			}
 
 			_, err = uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
-				Bucket:       aws.String(appCfg.Serverless.S3Bucket),
+				Bucket:       aws.String(bucketName),
 				Key:          aws.String(s3Key),
 				Body:         file,
 				ContentType:  aws.String(contentType),
@@ -449,21 +450,16 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 }
 
 func (p *AWSProvider) getS3BucketName(appCfg *cfgTypes.NextDeployConfig) string {
-	if appCfg.Serverless.S3Bucket != "" {
-		return appCfg.Serverless.S3Bucket
-	}
-	// Dynamic name: nextdeploy-<app>-<env>-assets-<accountid/hash>
+	// Dynamic name: nextdeploy-<app>-<env>-assets-<accountid>
+	// Guaranteed to be globally unique due to AccountID
 	name := fmt.Sprintf("nextdeploy-%s-%s-assets", appCfg.App.Name, appCfg.App.Environment)
 	if p.accountID != "" {
 		name = fmt.Sprintf("%s-%s", name, p.accountID)
 	}
-	return name
+	return strings.ToLower(name)
 }
 
 func (p *AWSProvider) getLambdaFunctionName(appCfg *cfgTypes.NextDeployConfig) string {
-	if appCfg.Serverless.LambdaFunctionName != "" {
-		return appCfg.Serverless.LambdaFunctionName
-	}
-	// Dynamic name: <app>-<env> (safe and standard)
-	return fmt.Sprintf("%s-%s", appCfg.App.Name, appCfg.App.Environment)
+	// Dynamic name: <app>-<env> (Standard and clean)
+	return strings.ToLower(fmt.Sprintf("%s-%s", appCfg.App.Name, appCfg.App.Environment))
 }

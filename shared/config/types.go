@@ -35,17 +35,15 @@ type SafeConfig struct {
 }
 
 type ServerlessConfig struct {
-	Provider           string `yaml:"provider"` // e.g., "aws"
-	Region             string `yaml:"region"`
-	S3Bucket           string `yaml:"s3_bucket,omitempty"`
-	CloudFrontId       string `yaml:"cloudfront_id,omitempty"`
-	LambdaFunctionName string `yaml:"lambda_function_name,omitempty"` // defaults to app name
-	IAMRole            string `yaml:"iam_role,omitempty"`             // IAM Role ARN for Lambda
-	Handler            string `yaml:"handler,omitempty"`              // Lambda handler (defaults to server.handler)
-	Runtime            string `yaml:"runtime,omitempty"`              // Lambda runtime (defaults to nodejs20.x)
-	MemorySize         int32  `yaml:"memory_size,omitempty"`          // Lambda memory size in MB (defaults to 1024)
-	Timeout            int32  `yaml:"timeout,omitempty"`              // Lambda timeout in seconds (defaults to 30)
-	Profile            string `yaml:"profile,omitempty"`              // AWS CLI profile name
+	Provider     string `yaml:"provider"` // e.g., "aws"
+	Region       string `yaml:"region"`
+	CloudFrontId string `yaml:"cloudfront_id,omitempty"`
+	IAMRole      string `yaml:"iam_role,omitempty"`    // IAM Role ARN for Lambda
+	Handler      string `yaml:"handler,omitempty"`     // Lambda handler (defaults to server.handler)
+	Runtime      string `yaml:"runtime,omitempty"`     // Lambda runtime (defaults to nodejs20.x)
+	MemorySize   int32  `yaml:"memory_size,omitempty"` // Lambda memory size in MB (defaults to 1024)
+	Timeout      int32  `yaml:"timeout,omitempty"`     // Lambda timeout in seconds (defaults to 30)
+	Profile      string `yaml:"profile,omitempty"`     // AWS CLI profile name
 }
 
 type WebServer struct {
