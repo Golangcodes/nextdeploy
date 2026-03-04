@@ -165,7 +165,7 @@ func selfUpdateBinary(current, binaryBase, dest string, restartSvc bool) error {
 	// #nosec G703
 	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
 	client := &http.Client{} // no Timeout — context handles it
