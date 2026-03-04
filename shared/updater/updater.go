@@ -24,7 +24,7 @@ type Release struct {
 }
 
 func LatestRelease() (Release, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		return Release{}, err
