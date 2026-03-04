@@ -453,14 +453,20 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 		}
 	}
 
-	// Update Lambda config to inject secrets securely
+	// Update Lambda config to inject secrets securely and enforce the bridge handler
 	secretArn := fmt.Sprintf("nextdeploy/apps/%s/production", appCfg.App.Name)
 
-	p.log.Info("Updating Lambda configuration...")
+	handler := "bridge.handler"
+	if appCfg.Serverless != nil && appCfg.Serverless.Handler != "" {
+		handler = appCfg.Serverless.Handler
+	}
+
+	p.log.Info("Updating Lambda configuration (Handler: %s)...", handler)
 	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {
 		_, err := client.UpdateFunctionConfiguration(ctx, &lambda.UpdateFunctionConfigurationInput{
 			FunctionName: aws.String(functionName),
+			Handler:      aws.String(handler),
 			Environment: &lambdaTypes.Environment{
 				Variables: map[string]string{
 					"ND_SECRETS_ARN": secretArn,
@@ -774,10 +780,11 @@ func (p *AWSProvider) ensureLambdaFunctionURLExists(ctx context.Context, client 
 	// 3. Add permission for public (NONE) access - Always try this with retries
 	p.log.Info("Applying public access permission to Function URL...")
 	maxRetries := 5
+	statementId := fmt.Sprintf("AllowPublicFunctionUrl-%d", time.Now().UnixNano()/1e6)
 	for i := 0; i < maxRetries; i++ {
 		_, err = client.AddPermission(ctx, &lambda.AddPermissionInput{
 			FunctionName:        aws.String(functionName),
-			StatementId:         aws.String("AllowPublicFunctionUrl"),
+			StatementId:         aws.String(statementId),
 			Action:              aws.String("lambda:InvokeFunctionUrl"),
 			Principal:           aws.String("*"),
 			FunctionUrlAuthType: lambdaTypes.FunctionUrlAuthTypeNone,
