@@ -276,6 +276,12 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 		return fmt.Errorf("failed to read zip package: %w", err)
 	}
 
+	// 3. Ensure Lambda function exists (provision if missing)
+	err = p.ensureLambdaFunctionExists(ctx, client, functionName, appCfg.Serverless.IAMRole, zipContents)
+	if err != nil {
+		return err
+	}
+
 	if len(zipContents) > 0 {
 		_, err := client.UpdateFunctionCode(ctx, &lambda.UpdateFunctionCodeInput{
 			FunctionName: aws.String(functionName),
@@ -365,4 +371,48 @@ func (p *AWSProvider) ensureBucketExists(ctx context.Context, client *s3.Client,
 
 	p.log.Info("S3 Bucket %s created successfully.", bucketName)
 	return nil
+}
+
+func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *lambda.Client, name string, role string, zipContents []byte) error {
+	_, err := client.GetFunction(ctx, &lambda.GetFunctionInput{
+		FunctionName: aws.String(name),
+	})
+	if err == nil {
+		return nil // Exists
+	}
+
+	var notFound *lambdaTypes.ResourceNotFoundException
+	if errors.As(err, &notFound) {
+		if role == "" {
+			return fmt.Errorf("lambda function %s not found and no IAM Role ARN provided (iam_role in nextdeploy.yml). Please provide an IAM role to auto-provision the function", name)
+		}
+
+		p.log.Info("Lambda function %s does not exist, creating with role %s...", name, role)
+		_, err := client.CreateFunction(ctx, &lambda.CreateFunctionInput{
+			Code: &lambdaTypes.FunctionCode{
+				ZipFile: zipContents,
+			},
+			FunctionName: aws.String(name),
+			Role:         aws.String(role),
+			Handler:      aws.String("server.handler"), // Default for common Next.js Lambda adapters
+			Runtime:      lambdaTypes.RuntimeNodejs20x,
+			Environment: &lambdaTypes.Environment{
+				Variables: map[string]string{
+					"NODE_ENV": "production",
+				},
+			},
+			Timeout:    aws.Int32(30),
+			MemorySize: aws.Int32(1024), // Recommended for Next.js
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create Lambda function: %w", err)
+		}
+		p.log.Info("Lambda function %s created successfully.", name)
+
+		// Wait a few seconds for IAM role propagation if just created (though we assume it exists)
+		time.Sleep(2 * time.Second)
+		return nil
+	}
+
+	return fmt.Errorf("failed to check Lambda function status: %w", err)
 }

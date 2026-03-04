@@ -101,6 +101,7 @@ serverless:
   s3_bucket: "example-app-assets" # S3 bucket for static files (public/ and _next/static/)
   cloudfront_id: "E1234567890ABC" # [OPTIONAL] If provided, NextDeploy will trigger an invalidation after deploy
   lambda_function_name: "example-app-prod" # [OPTIONAL] Defaults to app name if not provided
+  iam_role: "arn:aws:iam::123456789012:role/nextdeploy-lambda-role" # [REQUIRED for first deploy] IAM Role ARN
 
 # -----
 # WEBHOOKS AFTER DEPLOYMENT

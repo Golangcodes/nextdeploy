@@ -40,6 +40,7 @@ type ServerlessConfig struct {
 	S3Bucket           string `yaml:"s3_bucket,omitempty"`
 	CloudFrontId       string `yaml:"cloudfront_id,omitempty"`
 	LambdaFunctionName string `yaml:"lambda_function_name,omitempty"` // defaults to app name
+	IAMRole            string `yaml:"iam_role,omitempty"`             // IAM Role ARN for Lambda
 	Profile            string `yaml:"profile,omitempty"`              // AWS CLI profile name
 }
 
