@@ -91,6 +91,14 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 		return fmt.Errorf("failed to read zip package: %w", err)
 	}
 
+	// 3a. Save zip to S3 for rollback history (non-fatal)
+	bucketForHistory := p.getS3BucketName(appCfg)
+	if s3ZipKey, saveErr := p.saveLambdaZipToS3(ctx, bucketForHistory, functionName, zipContents); saveErr != nil {
+		p.log.Warn("Could not save deployment zip to S3 history (rollback may not work): %v", saveErr)
+	} else {
+		p.log.Info("Deployment zip saved for rollback: %s", s3ZipKey)
+	}
+
 	// 4. Ensure Lambda function exists (provision if missing).
 	functionJustCreated, err := p.ensureLambdaFunctionExists(ctx, client, functionName, appCfg.Serverless, zipContents)
 	if err != nil {
@@ -158,6 +166,9 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 	}
 
 	p.log.Info("Updating Lambda configuration (Handler: %s)...", handler)
+	region := p.cfg.Region
+	secretsExtensionLayer := fmt.Sprintf("arn:aws:lambda:%s:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:11", region)
+
 	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {
 		_, err := client.UpdateFunctionConfiguration(ctx, &lambda.UpdateFunctionConfigurationInput{
@@ -166,8 +177,10 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 			Environment: &lambdaTypes.Environment{
 				Variables: map[string]string{
 					"ND_SECRET_NAME": secretName,
+					"NODE_ENV":       "production",
 				},
 			},
+			Layers: []string{secretsExtensionLayer},
 		})
 		if err == nil {
 			break
@@ -201,66 +214,40 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 	return nil
 }
 
-// Rollback reverts the Lambda function to the previous published version.
+// Rollback reverts the Lambda function to the previous deployed zip using the S3 deployment history.
+// This is instant — no HTTP download required.
 func (p *AWSProvider) Rollback(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
 	client := lambda.NewFromConfig(p.cfg)
 	functionName := p.getLambdaFunctionName(appCfg)
+	bucketName := p.getS3BucketName(appCfg)
 
 	p.log.Info("Rolling back Lambda function %s...", functionName)
 
-	// List all published versions (excluding $LATEST)
-	versionsOutput, err := client.ListVersionsByFunction(ctx, &lambda.ListVersionsByFunctionInput{
-		FunctionName: aws.String(functionName),
-	})
+	// Fetch deployment history from S3 manifest
+	history, err := p.getLambdaDeploymentHistory(ctx, bucketName, functionName)
 	if err != nil {
-		return fmt.Errorf("failed to list Lambda versions: %w", err)
+		return fmt.Errorf("rollback failed: %w", err)
 	}
 
-	// Filter out $LATEST and collect version numbers
-	var publishedVersions []string
-	for _, v := range versionsOutput.Versions {
-		if v.Version != nil && *v.Version != "$LATEST" {
-			publishedVersions = append(publishedVersions, *v.Version)
-		}
+	if len(history) < 2 {
+		return fmt.Errorf("not enough deployment history to rollback (found %d, need at least 2). Ship your app at least once more first", len(history))
 	}
 
-	if len(publishedVersions) < 2 {
-		return fmt.Errorf("not enough published versions to rollback (found %d, need at least 2)", len(publishedVersions))
-	}
+	// Current = last, previous = second-to-last
+	previousKey := history[len(history)-2]
+	p.log.Info("Rolling back to previous deployment: %s", previousKey)
 
-	// The previous version is the second-to-last
-	previousVersion := publishedVersions[len(publishedVersions)-2]
-	p.log.Info("Rolling back from version %s to version %s...", publishedVersions[len(publishedVersions)-1], previousVersion)
-
-	// Get the previous version's code location
-	prevFunc, err := client.GetFunction(ctx, &lambda.GetFunctionInput{
-		FunctionName: aws.String(functionName),
-		Qualifier:    aws.String(previousVersion),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get previous version %s: %w", previousVersion, err)
-	}
-
-	if prevFunc.Code == nil || prevFunc.Code.Location == nil {
-		return fmt.Errorf("previous version %s has no code location", previousVersion)
-	}
-
-	// Download the previous version's code and re-upload it as the new $LATEST
-	p.log.Info("Downloading previous version's code...")
-	resp, err := p.downloadURL(*prevFunc.Code.Location)
-	if err != nil {
-		return fmt.Errorf("failed to download previous version code: %w", err)
-	}
-
+	// Update Lambda code directly from S3 — no download needed
 	_, err = client.UpdateFunctionCode(ctx, &lambda.UpdateFunctionCodeInput{
 		FunctionName: aws.String(functionName),
-		ZipFile:      resp,
+		S3Bucket:     aws.String(bucketName),
+		S3Key:        aws.String(previousKey),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to update Lambda code for rollback: %w", err)
+		return fmt.Errorf("failed to restore Lambda code from S3: %w", err)
 	}
 
-	p.log.Info("Lambda code rolled back. Waiting for stabilization...")
+	p.log.Info("Lambda code restored. Waiting for stabilization...")
 	if err := p.waitForLambdaStable(ctx, client, functionName); err != nil {
 		p.log.Warn("Timed out waiting for Lambda stability after rollback: %v", err)
 	}
@@ -268,7 +255,7 @@ func (p *AWSProvider) Rollback(ctx context.Context, appCfg *cfgTypes.NextDeployC
 	// Publish the rollback as a new version
 	_, _ = client.PublishVersion(ctx, &lambda.PublishVersionInput{
 		FunctionName: aws.String(functionName),
-		Description:  aws.String(fmt.Sprintf("nextdeploy rollback to v%s at %s", previousVersion, time.Now().Format(time.RFC3339))),
+		Description:  aws.String(fmt.Sprintf("nextdeploy rollback at %s", time.Now().Format(time.RFC3339))),
 	})
 
 	// Invalidate CloudFront cache
@@ -276,7 +263,7 @@ func (p *AWSProvider) Rollback(ctx context.Context, appCfg *cfgTypes.NextDeployC
 		p.log.Warn("Cache invalidation after rollback failed (non-fatal): %v", err)
 	}
 
-	p.log.Info("✅ Rollback complete! Lambda is now running the previous version.")
+	p.log.Info("✅ Rollback complete! Lambda is running the previous deployment.")
 	return nil
 }
 
@@ -332,6 +319,11 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 
 	p.log.Info("Lambda function %s does not exist, creating with role %s (Handler: %s, Runtime: %s)...", name, roleArn, handler, runtime)
 
+	// Managed Layer for Secrets Extension (Node.js 20 compatible)
+	// arn:aws:lambda:<region>:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:11
+	region := p.cfg.Region
+	secretsExtensionLayer := fmt.Sprintf("arn:aws:lambda:%s:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:11", region)
+
 	createInput := &lambda.CreateFunctionInput{
 		Code: &lambdaTypes.FunctionCode{
 			ZipFile: zipContents,
@@ -342,11 +334,13 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 		Runtime:      runtime,
 		Environment: &lambdaTypes.Environment{
 			Variables: map[string]string{
-				"NODE_ENV": "production",
+				"NODE_ENV":       "production",
+				"ND_SECRET_NAME": fmt.Sprintf("nextdeploy/apps/%s/production", strings.Split(name, "-")[0]), // Extract app name
 			},
 		},
 		Timeout:    aws.Int32(timeout),
 		MemorySize: aws.Int32(memory),
+		Layers:     []string{secretsExtensionLayer},
 	}
 
 	maxRetries := 10

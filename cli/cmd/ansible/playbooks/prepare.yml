@@ -776,18 +776,24 @@
     # ────────────────────────────────────────────────────────────────────────────
 
     - name: "Phase 4 | Create app directory tree"
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
-        owner: nextdeploy
-        group: nextdeploy
-        mode: "0750"
       become: true
       loop:
         - "{{ app_root }}"
         - "{{ app_dir }}"
         - "{{ app_root }}/uploads"
         - "{{ app_root }}/tmp"
+      vars:
+        directory_modes:
+          "{{ app_root }}": "0755"
+          "{{ app_dir }}": "0755"
+          "{{ app_root }}/uploads": "0770"
+          "{{ app_root }}/tmp": "0770"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: nextdeploy
+        group: nextdeploy
+        mode: "{{ directory_modes[item] }}"
 
     # ────────────────────────────────────────────────────────────────────────────
     # PHASE 5 – Fail2Ban & Security Hardening

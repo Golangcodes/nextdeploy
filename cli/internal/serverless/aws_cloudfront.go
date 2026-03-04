@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsConfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/acm"
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
 	cfTypes "github.com/aws/aws-sdk-go-v2/service/cloudfront/types"
 
@@ -46,11 +48,13 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 
 	// Handle custom domain cert
 	var certARN string
+	certIssued := false
 	if domain != "" {
 		certARN, err = p.ensureACMCertificateExists(ctx, domain)
 		if err != nil {
 			p.log.Warn("Failed to ensure ACM certificate for domain %s: %v", domain, err)
 		}
+		certIssued = certARN != "" && p.isCertificateIssued(ctx, certARN)
 	}
 
 	p.log.Info("Discovering CloudFront policy IDs...")
@@ -131,7 +135,22 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 		return "", fmt.Errorf("failed to create CloudFront distribution: %w", err)
 	}
 
-	p.log.Info("CloudFront distribution created: %s (%s)", *createOutput.Distribution.Id, *createOutput.Distribution.DomainName)
+	cfDomain := *createOutput.Distribution.DomainName
+	p.log.Info("CloudFront distribution created: %s (%s)", *createOutput.Distribution.Id, cfDomain)
+
+	// Emit full DNS guide (CloudFront CNAME + ACM validation)
+	if domain != "" && certARN != "" {
+		acmCfg, acmErr := awsConfig.LoadDefaultConfig(ctx, awsConfig.WithRegion("us-east-1"))
+		if acmErr == nil {
+			acmClient := acm.NewFromConfig(acmCfg)
+			if !certIssued {
+				p.printDNSValidationRecordsWithCF(ctx, acmClient, certARN, domain, cfDomain)
+			} else {
+				p.writeDNSFileCloudFrontOnly(domain, cfDomain)
+			}
+		}
+	}
+
 	return *createOutput.Distribution.Id, nil
 }
 

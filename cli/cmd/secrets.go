@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/Golangcodes/nextdeploy/cli/internal/server"
+	"github.com/Golangcodes/nextdeploy/cli/internal/serverless"
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/spf13/cobra"
@@ -63,6 +65,80 @@ func runSecretAction(action string, args []string) {
 	}
 
 	appName := cfg.App.Name
+
+	if cfg.TargetType == "serverless" {
+		runServerlessSecretAction(action, args, appName, cfg, log)
+		return
+	}
+
+	runVPSSecretAction(action, args, appName, log)
+}
+
+func runServerlessSecretAction(action string, args []string, appName string, cfg *config.NextDeployConfig, log *shared.Logger) {
+	p, err := serverless.New("aws")
+	if err != nil {
+		log.Error("Failed to initialize serverless provider: %v", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+	if err := p.Initialize(ctx, cfg); err != nil {
+		log.Error("Failed to initialize provider: %v", err)
+		os.Exit(1)
+	}
+
+	switch action {
+	case "set":
+		for _, arg := range args {
+			parts := strings.SplitN(arg, "=", 2)
+			if len(parts) != 2 {
+				log.Warn("Invalid format for '%s', expected KEY=VALUE", arg)
+				continue
+			}
+			if err := p.SetSecret(ctx, appName, parts[0], parts[1]); err != nil {
+				log.Error("Failed to set secret %s: %v", parts[0], err)
+			} else {
+				log.Success("✅ Secret %s set in AWS Secrets Manager", parts[0])
+			}
+		}
+	case "get":
+		secrets, err := p.GetSecrets(ctx, appName)
+		if err != nil {
+			log.Error("Failed to get secrets: %v", err)
+		} else {
+			if val, ok := secrets[args[0]]; ok {
+				fmt.Printf("%s=%s\n", args[0], val)
+			} else {
+				log.Warn("Secret %s not found", args[0])
+			}
+		}
+	case "list":
+		secrets, err := p.GetSecrets(ctx, appName)
+		if err != nil {
+			log.Error("Failed to list secrets: %v", err)
+		} else {
+			fmt.Printf("Secrets for %s (AWS Secrets Manager):\n", appName)
+			keys := make([]string, 0, len(secrets))
+			for k := range secrets {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				fmt.Println(k)
+			}
+		}
+	case "unset":
+		for _, key := range args {
+			if err := p.UnsetSecret(ctx, appName, key); err != nil {
+				log.Error("Failed to unset secret %s: %v", key, err)
+			} else {
+				log.Success("✅ Secret %s removed from AWS Secrets Manager", key)
+			}
+		}
+	}
+}
+
+func runVPSSecretAction(action string, args []string, appName string, log *shared.Logger) {
 	srv, err := server.New(server.WithConfig(), server.WithSSH())
 	if err != nil {
 		log.Error("Failed to initialize server connection: %v", err)

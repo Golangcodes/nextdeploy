@@ -12,6 +12,16 @@ import (
 	"github.com/Golangcodes/nextdeploy/shared/secrets"
 )
 
+// New returns a new serverless provider based on the provider name.
+func New(providerName string) (Provider, error) {
+	switch providerName {
+	case "aws":
+		return NewAWSProvider(), nil
+	default:
+		return nil, fmt.Errorf("unsupported serverless provider: %s (supported: aws)", providerName)
+	}
+}
+
 // Deploy orchestrates the full serverless deployment pipeline:
 //  1. Discovers the build artifact (app.tar.gz)
 //  2. Fetches local secrets via SecretManager and pushes them to the cloud secret store

@@ -91,6 +91,10 @@ func (p *AWSProvider) findExistingCertificate(ctx context.Context, client *acm.C
 }
 
 func (p *AWSProvider) printDNSValidationRecords(ctx context.Context, client *acm.Client, certARN, domain string) {
+	p.printDNSValidationRecordsWithCF(ctx, client, certARN, domain, "")
+}
+
+func (p *AWSProvider) printDNSValidationRecordsWithCF(ctx context.Context, client *acm.Client, certARN, domain, cfDomain string) {
 	descOutput, err := client.DescribeCertificate(ctx, &acm.DescribeCertificateInput{
 		CertificateArn: aws.String(certARN),
 	})
@@ -100,6 +104,11 @@ func (p *AWSProvider) printDNSValidationRecords(ctx context.Context, client *acm
 	}
 
 	cert := descOutput.Certificate
+	if cert.Status == acmTypes.CertificateStatusIssued && cfDomain != "" {
+		// Cert is valid — just show the CloudFront CNAME
+		p.writeDNSFileCloudFrontOnly(domain, cfDomain)
+		return
+	}
 	if cert.Status == acmTypes.CertificateStatusIssued {
 		p.log.Info("✅ ACM certificate is already validated and issued!")
 		return
@@ -108,48 +117,106 @@ func (p *AWSProvider) printDNSValidationRecords(ctx context.Context, client *acm
 	dnsFile, _ := os.Create("dns.txt")
 	if dnsFile != nil {
 		defer dnsFile.Close()
-		fmt.Fprintf(dnsFile, "=== NextDeploy Domain Validation Instructions ===\n\n")
-		fmt.Fprintf(dnsFile, "Project: %s\n", domain)
-		fmt.Fprintf(dnsFile, "Date: %s\n\n", time.Now().Format(time.RFC1123))
-		fmt.Fprintf(dnsFile, "To enable your custom domain, you MUST add the following CNAME records to your DNS provider (e.g. Cloudflare, Namecheap, GoDaddy):\n\n")
-	}
+		sep := "════════════════════════════════════════════════════════════\n"
+		fmt.Fprintf(dnsFile, sep)
+		fmt.Fprintf(dnsFile, "  NextDeploy — DNS Setup for: %s\n", domain)
+		fmt.Fprintf(dnsFile, "  Generated: %s\n", time.Now().Format(time.RFC1123))
+		fmt.Fprintf(dnsFile, sep)
+		fmt.Fprintf(dnsFile, "\nYou need to add TWO sets of DNS records:\n\n")
 
-	// High visibility banner in CLI
-	p.log.Info("────────────────────────────────────────────────────────────")
-	p.log.Info("� ACTION REQUIRED: DNS VALIDATION NEEDED")
-	p.log.Info("────────────────────────────────────────────────────────────")
-	p.log.Info("To enable your custom domain (%s), you must add these records:", domain)
+		// Step 1: CloudFront CNAME (the most important one)
+		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n")
+		fmt.Fprintf(dnsFile, "  STEP 1 — POINT YOUR DOMAIN AT CLOUDFRONT\n")
+		fmt.Fprintf(dnsFile, "  (This is what makes your site actually load)\n")
+		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n\n")
+		if cfDomain != "" {
+			fmt.Fprintf(dnsFile, "  TYPE:   CNAME  (or ALIAS for root domains on Cloudflare)\n")
+			fmt.Fprintf(dnsFile, "  NAME:   @  (or %s)\n", domain)
+			fmt.Fprintf(dnsFile, "  VALUE:  %s\n\n", cfDomain)
+			fmt.Fprintf(dnsFile, "  TYPE:   CNAME\n")
+			fmt.Fprintf(dnsFile, "  NAME:   www\n")
+			fmt.Fprintf(dnsFile, "  VALUE:  %s\n\n", cfDomain)
+			fmt.Fprintf(dnsFile, "  💡 Cloudflare tip: Use \"CNAME\" with proxy OFF (grey cloud).\n\n")
+		} else {
+			fmt.Fprintf(dnsFile, "  CLOUD FRONT DOMAIN: [Pending — Run 'nextdeploy ship' again]\n")
+			fmt.Fprintf(dnsFile, "  Once your certificate below is validated, CloudFront will be\n")
+			fmt.Fprintf(dnsFile, "  fully provisioned and this value will be updated here.\n\n")
+		}
 
-	for _, dvo := range cert.DomainValidationOptions {
-		if dvo.ResourceRecord != nil {
-			name := *dvo.ResourceRecord.Name
-			value := *dvo.ResourceRecord.Value
-			p.log.Info("  CNAME: %s", name)
-			p.log.Info("  VALUE: %s", value)
-			p.log.Info("  ───")
-			if dnsFile != nil {
-				fmt.Fprintf(dnsFile, "RECORD TYPE: CNAME\n")
-				fmt.Fprintf(dnsFile, "NAME/HOST:   %s\n", name)
-				fmt.Fprintf(dnsFile, "VALUE/TARGET: %s\n", value)
-				fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n")
+		// Step 2: ACM Validation CNAMEs
+		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n")
+		fmt.Fprintf(dnsFile, "  STEP 2 — SSL CERTIFICATE VALIDATION (AWS ACM)\n")
+		fmt.Fprintf(dnsFile, "  (These prove you own the domain so HTTPS works)\n")
+		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n\n")
+
+		for _, dvo := range cert.DomainValidationOptions {
+			if dvo.ResourceRecord != nil {
+				fmt.Fprintf(dnsFile, "  TYPE:   CNAME\n")
+				fmt.Fprintf(dnsFile, "  NAME:   %s\n", *dvo.ResourceRecord.Name)
+				fmt.Fprintf(dnsFile, "  VALUE:  %s\n\n", *dvo.ResourceRecord.Value)
 			}
 		}
+
+		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n")
+		fmt.Fprintf(dnsFile, "  NEXT STEPS\n")
+		fmt.Fprintf(dnsFile, "────────────────────────────────────────────────────────────\n\n")
+		fmt.Fprintf(dnsFile, "  1. Log in to your DNS provider (Cloudflare, GoDaddy, etc.)\n")
+		fmt.Fprintf(dnsFile, "  2. Add ALL records above (both Step 1 and Step 2)\n")
+		fmt.Fprintf(dnsFile, "  3. Wait 2-10 minutes for propagation\n")
+		fmt.Fprintf(dnsFile, "  4. Run: nextdeploy ship\n")
+		fmt.Fprintf(dnsFile, "     NextDeploy will detect the validated cert and finalize\n\n")
+		fmt.Fprintf(dnsFile, sep)
 	}
 
-	if dnsFile != nil {
-		fmt.Fprintf(dnsFile, "\nNEXT STEPS:\n")
-		fmt.Fprintf(dnsFile, "1. Log in to your Domain Registrar (e.g. Cloudflare, GoDaddy, Namecheap).\n")
-		fmt.Fprintf(dnsFile, "2. Navigate to DNS Management / Advanced DNS.\n")
-		fmt.Fprintf(dnsFile, "3. Add the CNAME record(s) shown above.\n")
-		fmt.Fprintf(dnsFile, "4. Wait for AWS to validate (usually 2-10 minutes).\n")
-		fmt.Fprintf(dnsFile, "5. Run 'nextdeploy ship' again to finish the setup.\n\n")
-		fmt.Fprintf(dnsFile, "NextDeploy will automatically detect when the certificate is ready.\n")
+	// High visibility CLI banner
+	p.log.Info("════ ACTION REQUIRED: DNS SETUP NEEDED ════")
+	if cfDomain != "" {
+		p.log.Info("STEP 1 — Point %s at CloudFront:", domain)
+		p.log.Info("  CNAME  @  →  %s", cfDomain)
+		p.log.Info("  CNAME  www  →  %s", cfDomain)
+		p.log.Info("────")
 	}
+	p.log.Info("STEP 2 — SSL Validation CNAMEs:")
+	for _, dvo := range cert.DomainValidationOptions {
+		if dvo.ResourceRecord != nil {
+			p.log.Info("  CNAME  %s", *dvo.ResourceRecord.Name)
+			p.log.Info("  →      %s", *dvo.ResourceRecord.Value)
+			p.log.Info("  ───")
+		}
+	}
+	p.log.Info("✅ Full instructions saved to: dns.txt")
+	p.log.Info("Once done, run 'nextdeploy ship' again to complete setup.")
+	p.log.Info("════════════════════════════════════════════")
+}
 
-	p.log.Info("✅ Instructions saved to high-visibility file: dns.txt")
-	p.log.Info("────────────────────────────────────────────────────────────")
-	p.log.Info("Once DNS propagates, run 'nextdeploy ship' again to complete.")
-	p.log.Info("────────────────────────────────────────────────────────────")
+func (p *AWSProvider) writeDNSFileCloudFrontOnly(domain, cfDomain string) {
+	dnsFile, err := os.Create("dns.txt")
+	if err != nil {
+		return
+	}
+	defer dnsFile.Close()
+	sep := "════════════════════════════════════════════════════════════\n"
+	fmt.Fprintf(dnsFile, sep)
+	fmt.Fprintf(dnsFile, "  NextDeploy — DNS Setup for: %s\n", domain)
+	fmt.Fprintf(dnsFile, "  Generated: %s\n", time.Now().Format(time.RFC1123))
+	fmt.Fprintf(dnsFile, sep)
+	fmt.Fprintf(dnsFile, "\nSSL certificate is ISSUED ✅ — just point your domain at CloudFront:\n\n")
+	fmt.Fprintf(dnsFile, "  TYPE:   CNAME  (or ALIAS on Cloudflare)\n")
+	fmt.Fprintf(dnsFile, "  NAME:   @  (root domain)\n")
+	fmt.Fprintf(dnsFile, "  VALUE:  %s\n\n", cfDomain)
+	fmt.Fprintf(dnsFile, "  TYPE:   CNAME\n")
+	fmt.Fprintf(dnsFile, "  NAME:   www\n")
+	fmt.Fprintf(dnsFile, "  VALUE:  %s\n\n", cfDomain)
+	fmt.Fprintf(dnsFile, "Then run: nextdeploy ship\n")
+	fmt.Fprintf(dnsFile, sep)
+
+	p.log.Info("════ ACTION REQUIRED: POINT DOMAIN AT CLOUDFRONT ════")
+	p.log.Info("SSL cert is ready! Now add these DNS records:")
+	p.log.Info("  CNAME  @    →  %s", cfDomain)
+	p.log.Info("  CNAME  www  →  %s", cfDomain)
+	p.log.Info("Then run: nextdeploy ship")
+	p.log.Info("Instructions saved to: dns.txt")
+	p.log.Info("════════════════════════════════════════════")
 }
 
 func (p *AWSProvider) isCertificateIssued(ctx context.Context, certARN string) bool {

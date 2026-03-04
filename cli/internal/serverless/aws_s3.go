@@ -1,6 +1,7 @@
 package serverless
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
@@ -371,4 +373,92 @@ func detectContentType(path string) string {
 		return ct
 	}
 	return "application/octet-stream"
+}
+
+// deploymentManifest tracks a list of deployed S3 zip keys for a function.
+type deploymentManifest struct {
+	Deployments []string `json:"deployments"`
+}
+
+const manifestMaxHistory = 10
+
+// saveLambdaZipToS3 uploads the lambda zip under a versioned key and appends it
+// to the deployment history manifest. Returns the S3 key of the uploaded zip.
+func (p *AWSProvider) saveLambdaZipToS3(ctx context.Context, bucketName, functionName string, zipContents []byte) (string, error) {
+	client := s3.NewFromConfig(p.cfg)
+
+	timestamp := time.Now().UTC().Format("20060102T150405Z")
+	zipKey := fmt.Sprintf("deployments/%s/%s.zip", functionName, timestamp)
+
+	_, err := client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(bucketName),
+		Key:           aws.String(zipKey),
+		Body:          bytes.NewReader(zipContents),
+		ContentLength: aws.Int64(int64(len(zipContents))),
+		ContentType:   aws.String("application/zip"),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload lambda zip to S3: %w", err)
+	}
+
+	// Update manifest
+	manifestKey := fmt.Sprintf("deployments/%s/history.json", functionName)
+	manifest := &deploymentManifest{}
+
+	// Try to read existing manifest
+	getOut, err := client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(manifestKey),
+	})
+	if err == nil {
+		if jsonErr := json.NewDecoder(getOut.Body).Decode(manifest); jsonErr != nil {
+			manifest = &deploymentManifest{} // reset on parse error
+		}
+		getOut.Body.Close()
+	}
+
+	manifest.Deployments = append(manifest.Deployments, zipKey)
+	// Trim to max history
+	if len(manifest.Deployments) > manifestMaxHistory {
+		manifest.Deployments = manifest.Deployments[len(manifest.Deployments)-manifestMaxHistory:]
+	}
+
+	manifestBytes, _ := json.Marshal(manifest)
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(bucketName),
+		Key:         aws.String(manifestKey),
+		Body:        bytesReader(manifestBytes),
+		ContentType: aws.String("application/json"),
+	})
+	if err != nil {
+		return zipKey, fmt.Errorf("failed to update deployment manifest: %w", err)
+	}
+
+	return zipKey, nil
+}
+
+// getLambdaDeploymentHistory returns the list of S3 zip keys from the manifest.
+func (p *AWSProvider) getLambdaDeploymentHistory(ctx context.Context, bucketName, functionName string) ([]string, error) {
+	client := s3.NewFromConfig(p.cfg)
+	manifestKey := fmt.Sprintf("deployments/%s/history.json", functionName)
+
+	out, err := client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(manifestKey),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("no deployment history found (run nextdeploy ship at least twice first): %w", err)
+	}
+	defer out.Body.Close()
+
+	var manifest deploymentManifest
+	if err := json.NewDecoder(out.Body).Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("failed to parse deployment manifest: %w", err)
+	}
+	return manifest.Deployments, nil
+}
+
+// bytesReader wraps a []byte as an io.Reader for S3 PutObject.
+func bytesReader(b []byte) *strings.Reader {
+	return strings.NewReader(string(b))
 }

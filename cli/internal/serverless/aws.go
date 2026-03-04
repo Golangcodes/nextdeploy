@@ -28,9 +28,48 @@ const { spawn } = require('child_process');
 
 let serverReady = false;
 let serverPort = 3000;
+let cachedSecrets = null;
 
-// Path to the actual Next.js server.js
+// Paths
 const serverPath = path.join(__dirname, 'server.js');
+
+const fetchSecrets = async () => {
+    const secretName = process.env.ND_SECRET_NAME;
+    if (!secretName) return {};
+    
+    // AWS Parameters and Secrets Lambda Extension runs on port 2773
+    const options = {
+        hostname: 'localhost',
+        port: 2773,
+        path: '/secretsmanager/get?secretId=' + encodeURIComponent(secretName),
+        headers: {
+            'X-Aws-Parameters-Secrets-Token': process.env.AWS_SESSION_TOKEN
+        }
+    };
+
+    return new Promise((resolve) => {
+        const req = http.get(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    const secrets = JSON.parse(parsed.SecretString);
+                    console.log('Successfully fetched ' + Object.keys(secrets).length + ' secrets from Secrets Manager');
+                    resolve(secrets);
+                } catch (e) {
+                    console.error('Failed to parse secrets:', e.message);
+                    resolve({});
+                }
+            });
+        });
+        req.on('error', (e) => {
+            console.warn('Secrets extension not reachable, falling back to env vars only:', e.message);
+            resolve({});
+        });
+        req.end();
+    });
+};
 
 const waitForServer = async () => {
     for (let i = 0; i < 50; i++) {
@@ -55,27 +94,40 @@ const waitForServer = async () => {
 };
 
 // Start the server in the background
-console.log('Starting Next.js server: node ' + serverPath);
-const serverProcess = spawn('node', [serverPath], {
-    env: { ...process.env, PORT: serverPort, HOSTNAME: '127.0.0.1', NODE_ENV: 'production' },
-    stdio: 'inherit'
-});
+const startServer = async () => {
+    console.log('Warming up secrets...');
+    cachedSecrets = await fetchSecrets();
+    
+    const env = { 
+        ...process.env, 
+        ...cachedSecrets,
+        PORT: serverPort, 
+        HOSTNAME: '127.0.0.1', 
+        NODE_ENV: 'production' 
+    };
 
-// FIX: Reset serverReady if the child process exits unexpectedly so future
-// invocations re-probe instead of proxying to a dead server.
-serverProcess.on('exit', (code) => {
-    console.error('Next.js server exited with code ' + code + ', resetting ready state.');
-    serverReady = false;
-});
+    console.log('Starting Next.js server: node ' + serverPath);
+    const serverProcess = spawn('node', [serverPath], {
+        env: env,
+        stdio: 'inherit'
+    });
+
+    serverProcess.on('exit', (code) => {
+        console.error('Next.js server exited with code ' + code + ', resetting ready state.');
+        serverReady = false;
+    });
+
+    await waitForServer();
+    serverReady = true;
+};
+
+// Initial start
+const warmup = startServer();
 
 exports.handler = async (event) => {
-    if (!serverReady) {
-        await waitForServer();
-        serverReady = true;
-    }
+    await warmup;
 
     return new Promise((resolve, reject) => {
-        // Handle both API Gateway v1 and v2 formats
         const method = (event.requestContext && event.requestContext.http) ? event.requestContext.http.method : event.httpMethod;
         const rawPath = event.rawPath || event.path || '/';
         const queryString = event.rawQueryString || '';

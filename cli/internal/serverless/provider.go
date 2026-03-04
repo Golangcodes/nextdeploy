@@ -16,9 +16,16 @@ type Provider interface {
 	// DeployStatic uploads static assets (public/, .next/static/) to a CDN/Storage bucket.
 	DeployStatic(ctx context.Context, tarballPath string, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error
 
-	// UpdateSecrets securely injects secrets from the SecretManager into the cloud provider's
-	// secret store (e.g., AWS Secrets Manager, Cloudflare Secrets).
-	// This ensures raw secrets are never packed into the deployment artifact.
+	// GetSecrets retrieves all secrets for the application.
+	GetSecrets(ctx context.Context, appName string) (map[string]string, error)
+
+	// SetSecret sets a single secret for the application.
+	SetSecret(ctx context.Context, appName string, key, value string) error
+
+	// UnsetSecret removes a single secret from the application.
+	UnsetSecret(ctx context.Context, appName string, key string) error
+
+	// UpdateSecrets securely injects/syncs a batch of secrets.
 	UpdateSecrets(ctx context.Context, appName string, secrets map[string]string) error
 
 	// DeployCompute packages the standalone build and updates the compute layer
