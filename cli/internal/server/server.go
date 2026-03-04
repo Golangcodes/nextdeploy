@@ -428,6 +428,18 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	client.mu.Lock()
 	defer client.mu.Unlock()
 
+	// Ensure the remote directory exists before uploading
+	remoteDir := filepath.Dir(remotePath)
+	mkdirSession, err := client.Client.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create SSH session for mkdir: %w", err)
+	}
+	if out, err := mkdirSession.CombinedOutput(fmt.Sprintf("mkdir -p %q", remoteDir)); err != nil {
+		mkdirSession.Close()
+		return fmt.Errorf("failed to create remote directory %s: %w (output: %s)", remoteDir, err, string(out))
+	}
+	mkdirSession.Close()
+
 	// Optimization: Use raw SSH pipe (cat > remotePath) instead of SFTP.
 	// This is significantly faster for single file transfers as it avoids SFTP protocol overhead.
 	session, err := client.Client.NewSession()
@@ -448,6 +460,10 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 		return fmt.Errorf("failed to get stdin pipe: %w", err)
 	}
 
+	// Capture stderr so we can diagnose remote-side failures (e.g. permission denied)
+	var stderrBuf bytes.Buffer
+	session.Stderr = &stderrBuf
+
 	// #nosec G204
 	// Using sh to ensure the path is correctly handled
 	cmd := fmt.Sprintf("cat > %q", remotePath)
@@ -458,7 +474,11 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	// Fast streaming
 	if _, err := io.Copy(stdin, localFile); err != nil {
 		_ = stdin.Close()
-		return fmt.Errorf("failed to stream upload to pipe: %w", err)
+		remoteErr := strings.TrimSpace(stderrBuf.String())
+		if remoteErr != "" {
+			return fmt.Errorf("failed to stream upload to pipe: %w (remote stderr: %s)", err, remoteErr)
+		}
+		return fmt.Errorf("failed to stream upload to pipe: %w (hint: check remote directory permissions for %s)", err, remoteDir)
 	}
 
 	if err := stdin.Close(); err != nil {
@@ -466,6 +486,10 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	}
 
 	if err := session.Wait(); err != nil {
+		remoteErr := strings.TrimSpace(stderrBuf.String())
+		if remoteErr != "" {
+			return fmt.Errorf("upload session failed: %w (remote stderr: %s)", err, remoteErr)
+		}
 		return fmt.Errorf("upload session failed: %w", err)
 	}
 

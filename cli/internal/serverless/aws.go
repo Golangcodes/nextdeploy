@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/acm"
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdaTypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
@@ -391,7 +392,12 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 	// 3. Custom Domain & cert
 	res.CustomDomain = appCfg.App.Domain
 	if res.CustomDomain != "" {
-		res.CertificateARN, _ = p.findExistingCertificate(ctx, nil, res.CustomDomain)
+		// ACM certs for CloudFront must be in us-east-1
+		acmCfg, acmErr := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
+		if acmErr == nil {
+			acmClient := acm.NewFromConfig(acmCfg)
+			res.CertificateARN, _ = p.findExistingCertificate(ctx, acmClient, res.CustomDomain)
+		}
 	}
 
 	return res, nil
