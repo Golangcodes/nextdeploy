@@ -98,9 +98,9 @@ serverless:
   provider: aws
   region: us-east-1
   profile: "default"           # AWS CLI profile name
-  s3_bucket: "your-app-assets" # S3 bucket for static files (public/ and _next/static/)
-  cloudfront_id: "E1234567890ABC" # [OPTIONAL] If provided, NextDeploy will trigger an invalidation after deploy
-  lambda_function_name: "your-app-production" # [OPTIONAL] Defaults to app name if not provided
+  s3_bucket: "" # [OPTIONAL] S3 bucket for static files. Generated as "nextdeploy-<app>-<env>-assets-<accountid>" if empty.
+  cloudfront_id: "" # [OPTIONAL] If provided, NextDeploy will trigger an invalidation after deploy
+  lambda_function_name: "" # [OPTIONAL] Predicted as "<app>-<env>". Created automatically if missing.
   iam_role: "arn:aws:iam::ACCOUNT_ID:role/role-name" # [REQUIRED for first deploy] IAM Role ARN for Lambda
   # handler: "server.handler" # [OPTIONAL] Lambda handler (defaults to server.handler)
   # runtime: "nodejs20.x"    # [OPTIONAL] Lambda runtime (defaults to nodejs20.x)

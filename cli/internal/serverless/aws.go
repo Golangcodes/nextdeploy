@@ -23,6 +23,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	smTypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"github.com/Golangcodes/nextdeploy/shared"
 	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
@@ -30,8 +31,9 @@ import (
 )
 
 type AWSProvider struct {
-	log *shared.Logger
-	cfg aws.Config
+	log       *shared.Logger
+	cfg       aws.Config
+	accountID string
 }
 
 func NewAWSProvider() *AWSProvider {
@@ -84,21 +86,32 @@ func (p *AWSProvider) Initialize(ctx context.Context, appCfg *cfgTypes.NextDeplo
 		return fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
 	p.cfg = cfg
+
+	// Fetch Account ID for unique resource naming
+	stsClient := sts.NewFromConfig(cfg)
+	identity, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		p.log.Warn("Unable to fetch AWS Account ID (some auto-naming may fail): %v", err)
+	} else if identity.Account != nil {
+		p.accountID = *identity.Account
+	}
+
 	return nil
 }
 
 func (p *AWSProvider) DeployStatic(ctx context.Context, tarballPath string, appCfg *cfgTypes.NextDeployConfig, meta *nextcore.NextCorePayload) error {
-	p.log.Info("Syncing static assets to S3 Bucket (%s)...", appCfg.Serverless.S3Bucket)
+	bucketName := p.getS3BucketName(appCfg)
+	p.log.Info("Syncing static assets to S3 Bucket (%s)...", bucketName)
 
-	if appCfg.Serverless.S3Bucket == "" {
-		p.log.Info("S3 Bucket not specified, skipping static sync.")
+	if bucketName == "" {
+		p.log.Info("S3 Bucket not specified and auto-naming failed, skipping static sync.")
 		return nil
 	}
 
 	client := s3.NewFromConfig(p.cfg)
 
 	// Ensure bucket exists before uploading
-	if err := p.ensureBucketExists(ctx, client, appCfg.Serverless.S3Bucket, appCfg.Serverless.Region); err != nil {
+	if err := p.ensureBucketExists(ctx, client, bucketName, appCfg.Serverless.Region); err != nil {
 		return fmt.Errorf("failed to ensure S3 bucket exists: %w", err)
 	}
 
@@ -237,11 +250,8 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 	p.log.Info("Deploying Compute Layer to AWS Lambda for app: %s...", appCfg.App.Name)
 
 	client := lambda.NewFromConfig(p.cfg)
-	// Use explicit LambdaFunctionName if set, otherwise fall back to app name
-	functionName := appCfg.App.Name
-	if appCfg.Serverless.LambdaFunctionName != "" {
-		functionName = appCfg.Serverless.LambdaFunctionName
-	}
+	// Use explicit LambdaFunctionName if set, otherwise generate one
+	functionName := p.getLambdaFunctionName(appCfg)
 
 	// 1. Extract tarball
 	tmpDir, err := os.MkdirTemp("", "nd-lambda-deploy-*")
@@ -436,4 +446,24 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 	}
 
 	return fmt.Errorf("failed to check Lambda function status: %w", err)
+}
+
+func (p *AWSProvider) getS3BucketName(appCfg *cfgTypes.NextDeployConfig) string {
+	if appCfg.Serverless.S3Bucket != "" {
+		return appCfg.Serverless.S3Bucket
+	}
+	// Dynamic name: nextdeploy-<app>-<env>-assets-<accountid/hash>
+	name := fmt.Sprintf("nextdeploy-%s-%s-assets", appCfg.App.Name, appCfg.App.Environment)
+	if p.accountID != "" {
+		name = fmt.Sprintf("%s-%s", name, p.accountID)
+	}
+	return name
+}
+
+func (p *AWSProvider) getLambdaFunctionName(appCfg *cfgTypes.NextDeployConfig) string {
+	if appCfg.Serverless.LambdaFunctionName != "" {
+		return appCfg.Serverless.LambdaFunctionName
+	}
+	// Dynamic name: <app>-<env> (safe and standard)
+	return fmt.Sprintf("%s-%s", appCfg.App.Name, appCfg.App.Environment)
 }

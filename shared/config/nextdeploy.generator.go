@@ -149,6 +149,8 @@ func PromptServerlessConfig(reader *bufio.Reader, cfg *NextDeployConfig) error {
 	}
 	cfg.Serverless.Profile = profile
 
+	cfg.Serverless.Profile = profile
+
 	fmt.Println("\n[SECURITY] NextDeploy requires an IAM Role to create your Lambda function.")
 	fmt.Println("This role only needs basic Lambda execution permissions.")
 	fmt.Print("IAM Role ARN (e.g. arn:aws:iam::...:role/name): ")
@@ -158,12 +160,7 @@ func PromptServerlessConfig(reader *bufio.Reader, cfg *NextDeployConfig) error {
 	}
 	cfg.Serverless.IAMRole = role
 
-	// Mirror to CloudProvider for broader SDK use
-	cfg.CloudProvider = &CloudProviderStruct{
-		Name:    "aws",
-		Region:  region,
-		Profile: profile,
-	}
+	fmt.Println("\n✨ NextDeploy will automatically generate globally unique S3 bucket and Lambda names.")
 
 	return nil
 }
