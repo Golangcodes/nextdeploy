@@ -117,7 +117,7 @@ func (p *AWSProvider) printDNSValidationRecordsWithCF(ctx context.Context, clien
 		return
 	}
 	if cert.Status == acmTypes.CertificateStatusIssued {
-		p.log.Info("✅ ACM certificate is already validated and issued!")
+		p.log.Info("ACM certificate is already validated and issued!")
 		return
 	}
 

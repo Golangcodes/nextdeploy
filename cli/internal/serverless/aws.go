@@ -37,7 +37,7 @@ const serverPath = path.join(__dirname, 'server.js');
 const fetchSecrets = async () => {
     const secretName = process.env.ND_SECRET_NAME;
     if (!secretName) return {};
-    
+
     // AWS Parameters and Secrets Lambda Extension runs on port 2773
     const options = {
         hostname: 'localhost',
@@ -98,13 +98,13 @@ const waitForServer = async () => {
 const startServer = async () => {
     console.log('Warming up secrets...');
     cachedSecrets = await fetchSecrets();
-    
-    const env = { 
-        ...process.env, 
+
+    const env = {
+        ...process.env,
         ...cachedSecrets,
-        PORT: serverPort, 
-        HOSTNAME: '127.0.0.1', 
-        NODE_ENV: 'production' 
+        PORT: serverPort,
+        HOSTNAME: '127.0.0.1',
+        NODE_ENV: 'production'
     };
 
     console.log('Starting Next.js server: node ' + serverPath);
@@ -132,7 +132,7 @@ exports.handler = async (event) => {
         const method = (event.requestContext && event.requestContext.http) ? event.requestContext.http.method : event.httpMethod;
         const rawPath = event.rawPath || event.path || '/';
         const queryString = event.rawQueryString || '';
-        
+
         const options = {
             hostname: '127.0.0.1',
             port: serverPort,
@@ -345,7 +345,7 @@ func (p *AWSProvider) Destroy(ctx context.Context, appCfg *cfgTypes.NextDeployCo
 		}
 	}
 
-	p.log.Info("✅ AWS Serverless resources destruction initiated.")
+	p.log.Info("AWS Serverless resources destruction initiated.")
 	p.log.Info("Note: IAM role 'nextdeploy-serverless-role' was preserved as it may be used by other apps.")
 	return nil
 }

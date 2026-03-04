@@ -25,7 +25,7 @@ func GenerateServerlessGuide(domain string, cfDomain string, records []Validatio
 	}
 	defer f.Close()
 
-	fmt.Fprintf(f, "# 🌐 NextDeploy DNS Setup Guide (Serverless)\n\n")
+	fmt.Fprintf(f, "#  NextDeploy DNS Setup Guide (Serverless)\n\n")
 	fmt.Fprintf(f, "Target Domain: **%s**\n", domain)
 	fmt.Fprintf(f, "Generated: `%s`\n\n", time.Now().Format(time.RFC1123))
 

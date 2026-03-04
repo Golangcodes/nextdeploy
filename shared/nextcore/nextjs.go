@@ -1,4 +1,3 @@
-// NOTE: CROSS COMPILE SAFE
 package nextcore
 
 import (
