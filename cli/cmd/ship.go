@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Golangcodes/nextdeploy/cli/internal/dns"
 	"github.com/Golangcodes/nextdeploy/cli/internal/server"
 	"github.com/Golangcodes/nextdeploy/cli/internal/serverless"
 	"github.com/Golangcodes/nextdeploy/shared"
@@ -86,6 +87,15 @@ var shipCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		log.Info("Deployment server: %s", deploymentServer)
+
+		// Generate DNS guide for VPS
+		if cfg.App.Domain != "" {
+			if err := dns.GenerateVPSGuide(cfg.App.Domain, deploymentServer); err != nil {
+				log.Warn("Failed to generate DNS guide: %v", err)
+			} else {
+				log.Info("  🌐 DNS Guide Generated: dns.md (Point %s to %s)", cfg.App.Domain, deploymentServer)
+			}
+		}
 
 		tarballName := "app.tar.gz"
 		if _, err := os.Stat(tarballName); os.IsNotExist(err) {
