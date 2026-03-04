@@ -30,6 +30,7 @@ func (p *AWSProvider) ensureACMCertificateExists(ctx context.Context, domain str
 	}
 	if certARN != "" {
 		p.log.Info("Existing ACM certificate found for %s: %s", domain, certARN)
+		p.printDNSValidationRecords(ctx, client, certARN, domain)
 		return certARN, nil
 	}
 

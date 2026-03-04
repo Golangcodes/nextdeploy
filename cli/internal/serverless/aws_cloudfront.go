@@ -155,9 +155,6 @@ func (p *AWSProvider) applyDistributionConfig(dc *cfTypes.DistributionConfig, ca
 
 	// 1. Handle Domain Aliases
 	if domain != "" {
-		// 2. Handle Viewer Certificate & Aliases
-		// CRITICAL: We can ONLY add the alias to CloudFront if we have a valid, issued certificate.
-		// Otherwise, CloudFront returns "InvalidViewerCertificate" error.
 		if certARN != "" && p.isCertificateIssued(context.Background(), certARN) {
 			// Ensure Aliases
 			found := false
