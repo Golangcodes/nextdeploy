@@ -14,7 +14,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/gabriel-vasile/mimetype"
 
 	"github.com/Golangcodes/nextdeploy/shared"
 	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
@@ -147,16 +146,7 @@ func (p *AWSProvider) DeployStatic(ctx context.Context, tarballPath string, appC
 			}
 			defer file.Close()
 
-			ext := filepath.Ext(path)
-			contentType := mime.TypeByExtension(ext)
-			if contentType == "" {
-				mtype, err := mimetype.DetectFile(path)
-				if err == nil {
-					contentType = mtype.String()
-				} else {
-					contentType = "application/octet-stream"
-				}
-			}
+			contentType := detectContentType(path)
 
 			// Add basic Cache-Control
 			cacheControl := "public, max-age=31536000, immutable"
@@ -342,4 +332,46 @@ func (p *AWSProvider) updateS3BucketPolicyForOAC(ctx context.Context, bucketName
 
 	p.log.Info("S3 Bucket Policy updated to allow CloudFront OAC access.")
 	return nil
+}
+
+// detectContentType returns the correct MIME content-type for a file path.
+// Uses a hardcoded map for common web extensions first, then falls back
+// to Go's standard mime package, and finally to application/octet-stream.
+func detectContentType(path string) string {
+	webMimeTypes := map[string]string{
+		".css":   "text/css",
+		".js":    "application/javascript",
+		".mjs":   "application/javascript",
+		".json":  "application/json",
+		".html":  "text/html",
+		".htm":   "text/html",
+		".xml":   "application/xml",
+		".svg":   "image/svg+xml",
+		".png":   "image/png",
+		".jpg":   "image/jpeg",
+		".jpeg":  "image/jpeg",
+		".gif":   "image/gif",
+		".webp":  "image/webp",
+		".avif":  "image/avif",
+		".ico":   "image/x-icon",
+		".woff":  "font/woff",
+		".woff2": "font/woff2",
+		".ttf":   "font/ttf",
+		".otf":   "font/otf",
+		".eot":   "application/vnd.ms-fontobject",
+		".map":   "application/json",
+		".txt":   "text/plain",
+		".webm":  "video/webm",
+		".mp4":   "video/mp4",
+		".pdf":   "application/pdf",
+	}
+
+	ext := strings.ToLower(filepath.Ext(path))
+	if ct, ok := webMimeTypes[ext]; ok {
+		return ct
+	}
+	if ct := mime.TypeByExtension(ext); ct != "" {
+		return ct
+	}
+	return "application/octet-stream"
 }
