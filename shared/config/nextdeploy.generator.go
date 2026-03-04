@@ -25,6 +25,20 @@ func PromptForConfig(reader *bufio.Reader) (*NextDeployConfig, error) {
 		return nil, fmt.Errorf("repository configuration error: %w", err)
 	}
 
+	if err := PromptTargetType(reader, cfg); err != nil {
+		return nil, fmt.Errorf("target type configuration error: %w", err)
+	}
+
+	if cfg.TargetType == "serverless" {
+		if err := PromptServerlessConfig(reader, cfg); err != nil {
+			return nil, fmt.Errorf("serverless configuration error: %w", err)
+		}
+	} else {
+		if err := PromptVPSConfig(reader, cfg); err != nil {
+			return nil, fmt.Errorf("vps configuration error: %w", err)
+		}
+	}
+
 	if PromptYesNo(reader, "Configure database?") {
 		dbConfig, err := PromptDatabaseConfig(reader)
 		if err != nil {
@@ -89,6 +103,89 @@ func PromptRepositoryConfig(reader *bufio.Reader, cfg *NextDeployConfig) error {
 		secret, _ := reader.ReadString('\n')
 		cfg.Repository.WebhookSecret = strings.TrimSpace(secret)
 	}
+
+	return nil
+}
+
+func PromptTargetType(reader *bufio.Reader, cfg *NextDeployConfig) error {
+	fmt.Println("\n--- DEPLOYMENT TARGET ---")
+	fmt.Println("Choose where you want to deploy your application:")
+	fmt.Println("1) serverless (AWS Lambda + S3 + CloudFront)")
+	fmt.Println("2) vps (Traditional Linux Server)")
+	fmt.Print("Selection (1/2, default: 1): ")
+
+	selection, _ := reader.ReadString('\n')
+	selection = strings.TrimSpace(selection)
+
+	if selection == "2" || strings.ToLower(selection) == "vps" {
+		cfg.TargetType = "vps"
+	} else {
+		cfg.TargetType = "serverless"
+	}
+	return nil
+}
+
+func PromptServerlessConfig(reader *bufio.Reader, cfg *NextDeployConfig) error {
+	fmt.Println("\n--- SERVERLESS ARCHITECTURE (AWS) ---")
+	fmt.Println("NextDeploy will automatically provision your AWS resources during 'ship':")
+	fmt.Println("✅ S3 Bucket (Assets/Storage)")
+	fmt.Println("✅ AWS Lambda (Compute/Functions)")
+	fmt.Println("✅ Secrets Manager (Encrypted Secrets)")
+
+	cfg.Serverless = &ServerlessConfig{Provider: "aws"}
+
+	fmt.Print("AWS Region (e.g., us-east-1): ")
+	region, err := ReadRequiredInput(reader)
+	if err != nil {
+		return err
+	}
+	cfg.Serverless.Region = region
+
+	fmt.Print("AWS Profile (default: default): ")
+	profile, _ := reader.ReadString('\n')
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		profile = "default"
+	}
+	cfg.Serverless.Profile = profile
+
+	fmt.Println("\n[SECURITY] NextDeploy requires an IAM Role to create your Lambda function.")
+	fmt.Println("This role only needs basic Lambda execution permissions.")
+	fmt.Print("IAM Role ARN (e.g. arn:aws:iam::...:role/name): ")
+	role, err := ReadRequiredInput(reader)
+	if err != nil {
+		return err
+	}
+	cfg.Serverless.IAMRole = role
+
+	// Mirror to CloudProvider for broader SDK use
+	cfg.CloudProvider = &CloudProviderStruct{
+		Name:    "aws",
+		Region:  region,
+		Profile: profile,
+	}
+
+	return nil
+}
+
+func PromptVPSConfig(reader *bufio.Reader, cfg *NextDeployConfig) error {
+	fmt.Println("\n--- VPS CONFIGURATION ---")
+	var server ServerConfig
+
+	fmt.Print("Server name (e.g. prod-01): ")
+	server.Name, _ = ReadRequiredInput(reader)
+
+	fmt.Print("Server Host/IP: ")
+	server.Host, _ = ReadRequiredInput(reader)
+
+	fmt.Print("SSH Username (e.g. ubuntu): ")
+	server.Username, _ = ReadRequiredInput(reader)
+
+	fmt.Print("SSH Key Path (e.g. ~/.ssh/id_rsa): ")
+	server.KeyPath, _ = ReadRequiredInput(reader)
+
+	server.Port = 22
+	cfg.Servers = append(cfg.Servers, server)
 
 	return nil
 }
@@ -195,39 +292,4 @@ func WriteConfig(filename string, cfg *NextDeployConfig) error {
 	}
 	fmt.Printf("Configuration saved to %s\n", filename)
 	return nil
-}
-
-func PromptForConfigs(reader *bufio.Reader) (*NextDeployConfig, error) {
-	cfg := &NextDeployConfig{
-		Version: "1.0",
-		App: AppConfig{
-			Port: 3000,
-		},
-	}
-
-	if err := PromptAppConfig(reader, cfg); err != nil {
-		return nil, fmt.Errorf("app configuration error: %w", err)
-	}
-
-	if err := PromptRepositoryConfig(reader, cfg); err != nil {
-		return nil, fmt.Errorf("repository configuration error: %w", err)
-	}
-
-	if PromptYesNo(reader, "Configure database?") {
-		dbConfig, err := PromptDatabaseConfig(reader)
-		if err != nil {
-			return nil, fmt.Errorf("database configuration error: %w", err)
-		}
-		cfg.Database = &dbConfig
-	}
-
-	if PromptYesNo(reader, "Configure monitoring?") {
-		monConfig, err := PromptMonitoringConfig(reader)
-		if err != nil {
-			return nil, fmt.Errorf("monitoring configuration error: %w", err)
-		}
-		cfg.Monitoring = &monConfig
-	}
-
-	return cfg, nil
 }
