@@ -419,13 +419,24 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 			timeout = sCfg.Timeout
 		}
 
-		p.log.Info("Lambda function %s does not exist, creating with role %s (Handler: %s, Runtime: %s)...", name, sCfg.IAMRole, handler, runtime)
+		// Auto-replace ACCOUNT_ID placeholder if present
+		roleArn := sCfg.IAMRole
+		if strings.Contains(roleArn, "ACCOUNT_ID") && p.accountID != "" {
+			roleArn = strings.ReplaceAll(roleArn, "ACCOUNT_ID", p.accountID)
+			p.log.Info("Automatically replaced ACCOUNT_ID placeholder in IAM Role ARN.")
+		}
+
+		if strings.Contains(roleArn, "role-name") {
+			return fmt.Errorf("invalid IAM Role ARN: please replace 'role-name' in nextdeploy.yml with an actual IAM role name from your AWS account")
+		}
+
+		p.log.Info("Lambda function %s does not exist, creating with role %s (Handler: %s, Runtime: %s)...", name, roleArn, handler, runtime)
 		_, err := client.CreateFunction(ctx, &lambda.CreateFunctionInput{
 			Code: &lambdaTypes.FunctionCode{
 				ZipFile: zipContents,
 			},
 			FunctionName: aws.String(name),
-			Role:         aws.String(sCfg.IAMRole),
+			Role:         aws.String(roleArn),
 			Handler:      aws.String(handler),
 			Runtime:      runtime,
 			Environment: &lambdaTypes.Environment{
