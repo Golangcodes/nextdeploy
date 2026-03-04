@@ -295,6 +295,36 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 		return err
 	}
 
+	// 4. Ensure Lambda Function URL exists
+	functionUrl, err := p.ensureLambdaFunctionURLExists(ctx, client, functionName)
+	if err != nil {
+		p.log.Warn("Failed to ensure Lambda Function URL (distribution might fail): %v", err)
+	}
+
+	// 5. Ensure CloudFront Distribution exists
+	bucketName := p.getS3BucketName(appCfg)
+	distributionId, err := p.ensureCloudFrontDistributionExists(ctx, appCfg.Serverless, bucketName, functionUrl)
+	if err != nil {
+		p.log.Warn("Failed to ensure CloudFront Distribution: %v", err)
+	} else {
+		// 6. Update S3 Bucket Policy for OAC
+		if err := p.updateS3BucketPolicyForOAC(ctx, bucketName, distributionId); err != nil {
+			p.log.Warn("Failed to update S3 Bucket Policy for OAC: %v", err)
+		}
+
+		// Get distribution domain name to show the user
+		cfClient := cloudfront.NewFromConfig(p.cfg)
+		dist, _ := cfClient.GetDistribution(ctx, &cloudfront.GetDistributionInput{Id: aws.String(distributionId)})
+		if dist != nil && dist.Distribution != nil {
+			p.log.Info("🚀 Application is accessible at: https://%s", *dist.Distribution.DomainName)
+		}
+
+		// Trigger invalidation for the newly managed distribution
+		if err := p.invalidateCloudFront(ctx, distributionId); err != nil {
+			p.log.Warn("Cache invalidation failed (non-fatal): %v", err)
+		}
+	}
+
 	if len(zipContents) > 0 {
 		_, err := client.UpdateFunctionCode(ctx, &lambda.UpdateFunctionCodeInput{
 			FunctionName: aws.String(functionName),
@@ -303,38 +333,61 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 		if err != nil {
 			return fmt.Errorf("failed to update Lambda code: %w", err)
 		}
+		p.log.Info("Lambda code updated successfully.")
 	}
 
 	// Update Lambda config to inject secrets securely
-	secretArn := fmt.Sprintf("nextdeploy/apps/%s/production", appCfg.App.Name) // In a real scenario, use actual ARN
+	secretArn := fmt.Sprintf("nextdeploy/apps/%s/production", appCfg.App.Name)
 	_, configErr := client.UpdateFunctionConfiguration(ctx, &lambda.UpdateFunctionConfigurationInput{
 		FunctionName: aws.String(functionName),
 		Environment: &lambdaTypes.Environment{
 			Variables: map[string]string{
-				"ND_SECRETS_ARN": secretArn, // App pulls this on startup
+				"ND_SECRETS_ARN": secretArn,
 			},
 		},
 	})
 	if configErr != nil {
-		p.log.Error("Failed to update Lambda configuration (are you sure the function exists?): %v", configErr)
-		// We log error but don't fail completely as the function might need initial IaC provisioning
+		p.log.Error("Failed to update Lambda configuration: %v", configErr)
 	}
-	p.log.Info("Lambda deployment payload simulated successfully.")
 	return nil
 }
 
 func (p *AWSProvider) InvalidateCache(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
-	if appCfg.Serverless.CloudFrontId == "" {
-		p.log.Info("No CloudFront ID provided, skipping cache invalidation.")
+	// 1. Prioritize configured CloudFront ID
+	distId := appCfg.Serverless.CloudFrontId
+	if distId == "" {
+		// 2. Fallback to discovering the managed distribution
+		bucketName := p.getS3BucketName(appCfg)
+		callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
+
+		client := cloudfront.NewFromConfig(p.cfg)
+		listOutput, _ := client.ListDistributions(ctx, &cloudfront.ListDistributionsInput{})
+		if listOutput != nil && listOutput.DistributionList != nil {
+			for _, dist := range listOutput.DistributionList.Items {
+				if dist.Comment != nil && *dist.Comment == callerRef {
+					distId = *dist.Id
+					break
+				}
+			}
+		}
+	}
+
+	if distId == "" {
+		p.log.Info("No CloudFront distribution found to invalidate.")
 		return nil
 	}
-	p.log.Info("Invalidating CloudFront Distribution (%s)...", appCfg.Serverless.CloudFrontId)
+
+	return p.invalidateCloudFront(ctx, distId)
+}
+
+func (p *AWSProvider) invalidateCloudFront(ctx context.Context, distributionId string) error {
+	p.log.Info("Invalidating CloudFront Distribution (%s)...", distributionId)
 
 	client := cloudfront.NewFromConfig(p.cfg)
 	callerRef := fmt.Sprintf("nextdeploy-%d", time.Now().UnixNano())
 
 	_, err := client.CreateInvalidation(ctx, &cloudfront.CreateInvalidationInput{
-		DistributionId: aws.String(appCfg.Serverless.CloudFrontId),
+		DistributionId: aws.String(distributionId),
 		InvalidationBatch: &cfTypes.InvalidationBatch{
 			CallerReference: aws.String(callerRef),
 			Paths: &cfTypes.Paths{
@@ -350,7 +403,7 @@ func (p *AWSProvider) InvalidateCache(ctx context.Context, appCfg *cfgTypes.Next
 		return fmt.Errorf("failed to create invalidation: %w", err)
 	}
 
-	p.log.Info("CloudFront invalidation triggered.")
+	p.log.Info("CloudFront invalidation triggered successfully.")
 	return nil
 }
 
@@ -419,6 +472,236 @@ func (p *AWSProvider) ensureExecutionRoleExists(ctx context.Context) (string, er
 	// Give AWS a moment to propagate the new role
 	time.Sleep(5 * time.Second)
 	return *createOutput.Role.Arn, nil
+}
+
+func (p *AWSProvider) ensureLambdaFunctionURLExists(ctx context.Context, client *lambda.Client, functionName string) (string, error) {
+	p.log.Info("Ensuring Lambda Function URL exists for %s...", functionName)
+
+	// 1. Check if it already exists
+	getOutput, err := client.GetFunctionUrlConfig(ctx, &lambda.GetFunctionUrlConfigInput{
+		FunctionName: aws.String(functionName),
+	})
+
+	if err == nil {
+		p.log.Info("Lambda Function URL found: %s", *getOutput.FunctionUrl)
+		return *getOutput.FunctionUrl, nil
+	}
+
+	var notFound *lambdaTypes.ResourceNotFoundException
+	if !errors.As(err, &notFound) {
+		return "", fmt.Errorf("failed to check for Function URL: %w", err)
+	}
+
+	// 2. Create it
+	p.log.Info("Creating new Function URL for %s...", functionName)
+	createOutput, err := client.CreateFunctionUrlConfig(ctx, &lambda.CreateFunctionUrlConfigInput{
+		FunctionName: aws.String(functionName),
+		AuthType:     lambdaTypes.FunctionUrlAuthTypeNone,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create Function URL: %w", err)
+	}
+
+	// 3. Add permission for public (NONE) access
+	_, err = client.AddPermission(ctx, &lambda.AddPermissionInput{
+		FunctionName:        aws.String(functionName),
+		StatementId:         aws.String("AllowPublicFunctionUrl"),
+		Action:              aws.String("lambda:InvokeFunctionUrl"),
+		Principal:           aws.String("*"),
+		FunctionUrlAuthType: lambdaTypes.FunctionUrlAuthTypeNone,
+	})
+	if err != nil {
+		// Ignore if permission already exists
+		if !strings.Contains(err.Error(), "already exists") {
+			p.log.Warn("Failed to add public permission to Function URL: %v", err)
+		}
+	}
+
+	p.log.Info("Lambda Function URL created: %s", *createOutput.FunctionUrl)
+	return *createOutput.FunctionUrl, nil
+}
+
+func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sCfg *cfgTypes.ServerlessConfig, bucketName, functionUrl string) (string, error) {
+	client := cloudfront.NewFromConfig(p.cfg)
+	// CloudFront is globally unique for its caller reference, but we want one per app environment
+	callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
+
+	p.log.Info("Checking for existing CloudFront distribution...")
+	listOutput, err := client.ListDistributions(ctx, &cloudfront.ListDistributionsInput{})
+	if err != nil {
+		return "", fmt.Errorf("failed to list distributions: %w", err)
+	}
+
+	if listOutput.DistributionList != nil {
+		for _, dist := range listOutput.DistributionList.Items {
+			if dist.Comment != nil && *dist.Comment == callerRef {
+				p.log.Info("Existing CloudFront distribution found: %s", *dist.DomainName)
+				return *dist.Id, nil
+			}
+		}
+	}
+
+	p.log.Info("CloudFront distribution not found, creating one (this may take a few minutes to be fully active)...")
+
+	// 1. Ensure Origin Access Control (OAC) for S3
+	oacId, err := p.ensureS3OACExists(ctx, client)
+	if err != nil {
+		return "", fmt.Errorf("failed to ensure S3 OAC exists: %w", err)
+	}
+
+	// 2. Define Origins
+	s3OriginId := "S3Assets"
+	lambdaOriginId := "LambdaCompute"
+
+	// Strip https:// and trailing slash from function URL for CloudFront origin host
+	lambdaHost := strings.TrimPrefix(functionUrl, "https://")
+	lambdaHost = strings.TrimSuffix(lambdaHost, "/")
+
+	createInput := &cloudfront.CreateDistributionInput{
+		DistributionConfig: &cfTypes.DistributionConfig{
+			CallerReference: aws.String(callerRef),
+			Comment:         aws.String(callerRef),
+			Enabled:         aws.Bool(true),
+			Origins: &cfTypes.Origins{
+				Quantity: aws.Int32(2),
+				Items: []cfTypes.Origin{
+					{
+						Id:         aws.String(s3OriginId),
+						DomainName: aws.String(fmt.Sprintf("%s.s3.%s.amazonaws.com", bucketName, p.cfg.Region)),
+						S3OriginConfig: &cfTypes.S3OriginConfig{
+							OriginAccessIdentity: aws.String(""), // Using OAC instead
+						},
+						OriginAccessControlId: aws.String(oacId),
+					},
+					{
+						Id:         aws.String(lambdaOriginId),
+						DomainName: aws.String(lambdaHost),
+						CustomOriginConfig: &cfTypes.CustomOriginConfig{
+							HTTPPort:             aws.Int32(80),
+							HTTPSPort:            aws.Int32(443),
+							OriginProtocolPolicy: cfTypes.OriginProtocolPolicyHttpsOnly,
+							OriginSslProtocols: &cfTypes.OriginSslProtocols{
+								Quantity: aws.Int32(1),
+								Items: []cfTypes.SslProtocol{
+									cfTypes.SslProtocolTLSv12,
+								},
+							},
+						},
+					},
+				},
+			},
+			DefaultCacheBehavior: &cfTypes.DefaultCacheBehavior{
+				TargetOriginId:        aws.String(lambdaOriginId),
+				ViewerProtocolPolicy:  cfTypes.ViewerProtocolPolicyRedirectToHttps,
+				CachePolicyId:         aws.String("4135ea2d-6df8-44a3-9df3-4b5a84be39ad"), // Managed-CachingDisabled (Lambda usually manages its own caching or needs fresh responses)
+				OriginRequestPolicyId: aws.String("b689b0a8-53d0-40a8-b0e6-26427e4ed894"), // Managed-AllViewerExceptHostHeader (Pass everything to Lambda)
+				AllowedMethods: &cfTypes.AllowedMethods{
+					Quantity: aws.Int32(7),
+					Items: []cfTypes.Method{
+						cfTypes.MethodGet,
+						cfTypes.MethodHead,
+						cfTypes.MethodOptions,
+						cfTypes.MethodPut,
+						cfTypes.MethodPatch,
+						cfTypes.MethodPost,
+						cfTypes.MethodDelete,
+					},
+				},
+			},
+			CacheBehaviors: &cfTypes.CacheBehaviors{
+				Quantity: aws.Int32(2),
+				Items: []cfTypes.CacheBehavior{
+					{
+						PathPattern:          aws.String("/_next/*"),
+						TargetOriginId:       aws.String(s3OriginId),
+						ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
+						CachePolicyId:        aws.String("658327ea-f89d-4fab-a63d-7e88639e58f6"), // Managed-CachingOptimized
+					},
+					{
+						PathPattern:          aws.String("/assets/*"),
+						TargetOriginId:       aws.String(s3OriginId),
+						ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
+						CachePolicyId:        aws.String("658327ea-f89d-4fab-a63d-7e88639e58f6"), // Managed-CachingOptimized
+					},
+				},
+			},
+		},
+	}
+
+	createOutput, err := client.CreateDistribution(ctx, createInput)
+	if err != nil {
+		return "", fmt.Errorf("failed to create CloudFront distribution: %w", err)
+	}
+
+	p.log.Info("CloudFront distribution created: %s (%s)", *createOutput.Distribution.Id, *createOutput.Distribution.DomainName)
+	return *createOutput.Distribution.Id, nil
+}
+
+func (p *AWSProvider) ensureS3OACExists(ctx context.Context, client *cloudfront.Client) (string, error) {
+	name := "nextdeploy-s3-oac"
+	listOutput, err := client.ListOriginAccessControls(ctx, &cloudfront.ListOriginAccessControlsInput{})
+	if err != nil {
+		return "", err
+	}
+
+	if listOutput.OriginAccessControlList != nil {
+		for _, oac := range listOutput.OriginAccessControlList.Items {
+			if oac.Name != nil && *oac.Name == name {
+				return *oac.Id, nil
+			}
+		}
+	}
+
+	createOutput, err := client.CreateOriginAccessControl(ctx, &cloudfront.CreateOriginAccessControlInput{
+		OriginAccessControlConfig: &cfTypes.OriginAccessControlConfig{
+			Name:                          aws.String(name),
+			OriginAccessControlOriginType: cfTypes.OriginAccessControlOriginTypesS3,
+			SigningBehavior:               cfTypes.OriginAccessControlSigningBehaviorsAlways,
+			SigningProtocol:               cfTypes.OriginAccessControlSigningProtocolsSigv4,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return *createOutput.OriginAccessControl.Id, nil
+}
+
+func (p *AWSProvider) updateS3BucketPolicyForOAC(ctx context.Context, bucketName, distributionId string) error {
+	client := s3.NewFromConfig(p.cfg)
+
+	policy := map[string]interface{}{
+		"Version": "2012-10-17",
+		"Statement": []map[string]interface{}{
+			{
+				"Sid":    "AllowCloudFrontServicePrincipal",
+				"Effect": "Allow",
+				"Principal": map[string]interface{}{
+					"Service": "cloudfront.amazonaws.com",
+				},
+				"Action":   "s3:GetObject",
+				"Resource": fmt.Sprintf("arn:aws:s3:::%s/*", bucketName),
+				"Condition": map[string]interface{}{
+					"StringEquals": map[string]interface{}{
+						"AWS:SourceArn": fmt.Sprintf("arn:aws:cloudfront::%s:distribution/%s", p.accountID, distributionId),
+					},
+				},
+			},
+		},
+	}
+
+	policyJSON, _ := json.Marshal(policy)
+
+	_, err := client.PutBucketPolicy(ctx, &s3.PutBucketPolicyInput{
+		Bucket: aws.String(bucketName),
+		Policy: aws.String(string(policyJSON)),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update S3 bucket policy for OAC: %w", err)
+	}
+
+	p.log.Info("S3 Bucket Policy updated to allow CloudFront OAC access.")
+	return nil
 }
 
 func (p *AWSProvider) ensureBucketExists(ctx context.Context, client *s3.Client, bucketName, region string) error {
