@@ -559,7 +559,30 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 		return "", fmt.Errorf("failed to ensure S3 OAC exists: %w", err)
 	}
 
-	// 2. Define Origins
+	// 2. Discover Policy IDs dynamically (they are not universal across all accounts/regions)
+	p.log.Info("Discovering CloudFront policy IDs...")
+	cachingOptimizedId, err := p.getManagedCachePolicyID(ctx, client, "Managed-CachingOptimized")
+	if err != nil {
+		p.log.Warn("Failed to find Managed-CachingOptimized, using default: %v", err)
+		cachingOptimizedId = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+	}
+
+	cachingDisabledId, err := p.getManagedCachePolicyID(ctx, client, "Managed-CachingDisabled")
+	if err != nil {
+		p.log.Warn("Failed to find Managed-CachingDisabled, using default: %v", err)
+		cachingDisabledId = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+	}
+
+	allViewerPolicyId, err := p.getManagedOriginRequestPolicyID(ctx, client, "Managed-AllViewer")
+	if err != nil {
+		p.log.Warn("Failed to find Managed-AllViewer origin request policy, trying Managed-AllViewerExceptHostHeader...")
+		allViewerPolicyId, err = p.getManagedOriginRequestPolicyID(ctx, client, "Managed-AllViewerExceptHostHeader")
+		if err != nil {
+			return "", fmt.Errorf("failed to discover any valid origin request policy: %w", err)
+		}
+	}
+
+	// 3. Define Origins
 	s3OriginId := "S3Assets"
 	lambdaOriginId := "LambdaCompute"
 
@@ -603,8 +626,8 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 			DefaultCacheBehavior: &cfTypes.DefaultCacheBehavior{
 				TargetOriginId:        aws.String(lambdaOriginId),
 				ViewerProtocolPolicy:  cfTypes.ViewerProtocolPolicyRedirectToHttps,
-				CachePolicyId:         aws.String("4135ea2d-6df8-44a3-9df3-4b5a84be39ad"), // Managed-CachingDisabled (Lambda usually manages its own caching or needs fresh responses)
-				OriginRequestPolicyId: aws.String("216adef6-5c7d-47e4-b989-5492810d03b2"), // Managed-AllViewer
+				CachePolicyId:         aws.String(cachingDisabledId),
+				OriginRequestPolicyId: aws.String(allViewerPolicyId),
 				AllowedMethods: &cfTypes.AllowedMethods{
 					Quantity: aws.Int32(7),
 					Items: []cfTypes.Method{
@@ -625,13 +648,13 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 						PathPattern:          aws.String("/_next/*"),
 						TargetOriginId:       aws.String(s3OriginId),
 						ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
-						CachePolicyId:        aws.String("658327ea-f89d-4fab-a63d-7e88639e58f6"), // Managed-CachingOptimized
+						CachePolicyId:        aws.String(cachingOptimizedId),
 					},
 					{
 						PathPattern:          aws.String("/assets/*"),
 						TargetOriginId:       aws.String(s3OriginId),
 						ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
-						CachePolicyId:        aws.String("658327ea-f89d-4fab-a63d-7e88639e58f6"), // Managed-CachingOptimized
+						CachePolicyId:        aws.String(cachingOptimizedId),
 					},
 				},
 			},
@@ -645,6 +668,36 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 
 	p.log.Info("CloudFront distribution created: %s (%s)", *createOutput.Distribution.Id, *createOutput.Distribution.DomainName)
 	return *createOutput.Distribution.Id, nil
+}
+
+func (p *AWSProvider) getManagedCachePolicyID(ctx context.Context, client *cloudfront.Client, name string) (string, error) {
+	list, err := client.ListCachePolicies(ctx, &cloudfront.ListCachePoliciesInput{})
+	if err != nil {
+		return "", err
+	}
+	if list.CachePolicyList != nil {
+		for _, item := range list.CachePolicyList.Items {
+			if item.CachePolicy != nil && item.CachePolicy.CachePolicyConfig != nil && *item.CachePolicy.CachePolicyConfig.Name == name {
+				return *item.CachePolicy.Id, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("managed cache policy %s not found", name)
+}
+
+func (p *AWSProvider) getManagedOriginRequestPolicyID(ctx context.Context, client *cloudfront.Client, name string) (string, error) {
+	list, err := client.ListOriginRequestPolicies(ctx, &cloudfront.ListOriginRequestPoliciesInput{})
+	if err != nil {
+		return "", err
+	}
+	if list.OriginRequestPolicyList != nil {
+		for _, item := range list.OriginRequestPolicyList.Items {
+			if item.OriginRequestPolicy != nil && item.OriginRequestPolicy.OriginRequestPolicyConfig != nil && *item.OriginRequestPolicy.OriginRequestPolicyConfig.Name == name {
+				return *item.OriginRequestPolicy.Id, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("managed origin request policy %s not found", name)
 }
 
 func (p *AWSProvider) ensureS3OACExists(ctx context.Context, client *cloudfront.Client) (string, error) {
