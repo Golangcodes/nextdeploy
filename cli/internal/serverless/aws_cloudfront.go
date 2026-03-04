@@ -330,7 +330,22 @@ func (p *AWSProvider) applyDistributionConfig(dc *cfTypes.DistributionConfig, ca
 				CachePolicyId:        aws.String(cachingOptimizedId),
 			},
 		}
+		updateBehaviors := false
 		if dc.CacheBehaviors == nil || int(aws.ToInt32(dc.CacheBehaviors.Quantity)) != len(expectedBehaviors) {
+			updateBehaviors = true
+		} else {
+			for i, eb := range expectedBehaviors {
+				ab := dc.CacheBehaviors.Items[i]
+				if aws.ToString(ab.PathPattern) != aws.ToString(eb.PathPattern) ||
+					aws.ToString(ab.TargetOriginId) != aws.ToString(eb.TargetOriginId) ||
+					aws.ToString(ab.CachePolicyId) != aws.ToString(eb.CachePolicyId) {
+					updateBehaviors = true
+					break
+				}
+			}
+		}
+
+		if updateBehaviors {
 			dc.CacheBehaviors = &cfTypes.CacheBehaviors{
 				Quantity: aws.Int32(int32(len(expectedBehaviors))),
 				Items:    expectedBehaviors,

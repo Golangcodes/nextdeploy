@@ -40,6 +40,7 @@ var shipCmd = &cobra.Command{
 				domain := meta.Domain
 				if domain == "" {
 					domain = cfg.App.Domain
+					meta.Domain = domain // Ensure domain is populated for serverless provider
 				}
 				if domain == "" {
 					log.Warn("  Caddy Configuration Plan: no domain configured in nextdeploy.yml — plan preview skipped")
