@@ -44,73 +44,82 @@ var destroyCmd = &cobra.Command{
 			appName = meta.AppName
 		}
 
-		if cfg.TargetType == "serverless" {
-			log.Info("Targeting SERVERLESS for destruction of app: %s", appName)
+		destroyedAny := false
+
+		if cfg.TargetType == "serverless" || cfg.Serverless != nil {
+			log.Info("Targeting SERVERLESS for destruction...")
 
 			if cfg.Serverless == nil {
 				log.Error("TargetType is 'serverless' but 'serverless' config block is missing.")
-				os.Exit(1)
+				// Do not exit, continue to check for VPS cleanup
+			} else {
+				// Initialize provider
+				var p serverless.Provider
+				switch cfg.Serverless.Provider {
+				case "aws":
+					p = serverless.NewAWSProvider()
+				default:
+					log.Error("Unsupported serverless provider: %s", cfg.Serverless.Provider)
+					// Do not exit, continue to check for VPS cleanup
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+
+				if err := p.Initialize(ctx, cfg); err != nil {
+					log.Error("Failed to initialize serverless provider: %v", err)
+				} else {
+					if err := p.Destroy(ctx, cfg); err != nil {
+						log.Error("Serverless destruction failed: %v", err)
+					} else {
+						log.Info("✅ Serverless resources successfully processed for destruction.")
+						destroyedAny = true
+					}
+				}
 			}
-
-			// Initialize provider
-			var p serverless.Provider
-			switch cfg.Serverless.Provider {
-			case "aws":
-				p = serverless.NewAWSProvider()
-			default:
-				log.Error("Unsupported serverless provider: %s", cfg.Serverless.Provider)
-				os.Exit(1)
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-
-			if err := p.Initialize(ctx, cfg); err != nil {
-				log.Error("Failed to initialize serverless provider: %v", err)
-				os.Exit(1)
-			}
-
-			if err := p.Destroy(ctx, cfg); err != nil {
-				log.Error("Serverless destruction failed: %v", err)
-				os.Exit(1)
-			}
-
-			log.Info("✅ Serverless resources successfully processed for destruction.")
-			return
 		}
 
-		log.Info("Targeting VPS for destruction of app: %s", appName)
+		// Always check for VPS cleanup if servers are defined, because user might have switched targets
+		if len(cfg.Servers) > 0 {
+			log.Info("Targeting VPS for destruction of app: %s", appName)
 
-		// 3. Connect to server
-		srv, err := server.New(server.WithConfig(), server.WithSSH())
-		if err != nil {
-			log.Error("Failed to initialize server connection: %v", err)
-			os.Exit(1)
+			// 3. Connect to server
+			srv, err := server.New(server.WithConfig(), server.WithSSH())
+			if err != nil {
+				log.Warn("Failed to initialize server connection (skipping VPS cleanup): %v", err)
+			} else {
+				defer srv.CloseSSHConnection()
+
+				deploymentServer, err := srv.GetDeploymentServer()
+				if err != nil {
+					log.Warn("Failed to get deployment server: %v", err)
+				} else {
+					log.Info("Connecting to %s...", deploymentServer)
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					defer cancel()
+
+					// 4. Remove files
+					remoteAppDir := fmt.Sprintf("/opt/nextdeploy/apps/%s", appName)
+					log.Info("Removing remote directory: %s", remoteAppDir)
+
+					rmCmd := fmt.Sprintf("sudo systemctl stop %s || true && sudo rm -rf %s", appName, remoteAppDir)
+					output, err := srv.ExecuteCommand(ctx, deploymentServer, rmCmd, os.Stdout)
+					if err != nil {
+						log.Error("Failed to delete remote files: %v\nOutput: %s", err, output)
+					} else {
+						log.Info("✅ App files successfully removed from remote server.")
+						destroyedAny = true
+					}
+				}
+			}
 		}
-		defer srv.CloseSSHConnection()
 
-		deploymentServer, err := srv.GetDeploymentServer()
-		if err != nil {
-			log.Error("Failed to get deployment server: %v", err)
-			os.Exit(1)
+		if !destroyedAny {
+			log.Warn("Destruction process finished, but no resources were identified or removed.")
+			log.Info("If you already destroyed everything, this is normal.")
+		} else {
+			log.Info("Note: Manual steps may still be required (DNS updates, Caddyfile entries, etc.) to fully decommission.")
 		}
-
-		log.Info("Connecting to %s...", deploymentServer)
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-
-		// 4. Remove files
-		remoteAppDir := fmt.Sprintf("/opt/nextdeploy/apps/%s", appName)
-		log.Info("Removing remote directory: %s", remoteAppDir)
-
-		rmCmd := fmt.Sprintf("sudo rm -rf %s", remoteAppDir)
-		output, err := srv.ExecuteCommand(ctx, deploymentServer, rmCmd, os.Stdout)
-		if err != nil {
-			log.Error("Failed to delete remote files: %v\nOutput: %s", err, output)
-			os.Exit(1)
-		}
-
-		log.Info("✅ App files successfully removed from remote server.")
 		log.Info("Note: This did not remove the systemd service or Caddy configuration if they were manually created.")
 	},
 }
