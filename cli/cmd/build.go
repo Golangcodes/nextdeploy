@@ -273,8 +273,13 @@ func createTarball(sourceDir, targetTar string, payload *nextcore.NextCorePayloa
 			}
 
 			if shouldExcludeDir(d.Name()) {
-				log.Info("[tarball] Skip dir (excluded): %s", relPath)
-				return filepath.SkipDir
+				// Special case: node_modules MUST be included in standalone mode
+				if d.Name() == "node_modules" && outputMode == nextcore.OutputModeStandalone {
+					log.Info("[tarball] Including standalone node_modules: %s", relPath)
+				} else {
+					log.Info("[tarball] Skip dir (excluded): %s", relPath)
+					return filepath.SkipDir
+				}
 			}
 
 			info, err := d.Info()
