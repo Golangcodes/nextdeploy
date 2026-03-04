@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdaTypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/smithy-go"
 
 	"github.com/Golangcodes/nextdeploy/shared"
 	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
@@ -170,6 +171,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 	secretsExtensionLayer := fmt.Sprintf("arn:aws:lambda:%s:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:11", region)
 
 	maxRetries := 5
+	layersToApply := []string{secretsExtensionLayer}
 	for i := 0; i < maxRetries; i++ {
 		_, err := client.UpdateFunctionConfiguration(ctx, &lambda.UpdateFunctionConfigurationInput{
 			FunctionName: aws.String(functionName),
@@ -180,11 +182,22 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 					"NODE_ENV":       "production",
 				},
 			},
-			Layers: []string{secretsExtensionLayer},
+			Layers: layersToApply,
 		})
 		if err == nil {
 			break
 		}
+
+		// Fallback if they lack permissions to grab the AWS-managed Secrets Extension layer
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException" && strings.Contains(err.Error(), "lambda:GetLayerVersion") && len(layersToApply) > 0 {
+			p.log.Warn("IAM user lacks lambda:GetLayerVersion permissions for the Secrets Extension Layer.")
+			p.log.Warn("Falling back to environment variables only (cloud secrets won't be securely injected at runtime).")
+			layersToApply = nil // remove the layer and retry immediately
+			i--                 // don't count this as a rate-limit retry
+			continue
+		}
+
 		var conflict *lambdaTypes.ResourceConflictException
 		if errors.As(err, &conflict) && i < maxRetries-1 {
 			p.log.Warn("Lambda is busy, retrying configuration update (%d/%d)...", i+1, maxRetries)
@@ -192,7 +205,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 			continue
 		}
 		p.log.Error("Failed to update Lambda configuration: %v", err)
-		break
+		return fmt.Errorf("failed to update Lambda configuration: %w", err)
 	}
 
 	p.log.Info("Waiting for Lambda configuration update to stabilize...")
@@ -350,6 +363,15 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 		if createErr == nil {
 			p.log.Info("Lambda function %s created successfully.", name)
 			return true, nil
+		}
+
+		var apiErr smithy.APIError
+		if errors.As(createErr, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException" && strings.Contains(createErr.Error(), "lambda:GetLayerVersion") && len(createInput.Layers) > 0 {
+			p.log.Warn("IAM user lacks lambda:GetLayerVersion permissions for the Secrets Extension Layer.")
+			p.log.Warn("Falling back to environment variables only (cloud secrets won't be securely injected at runtime).")
+			createInput.Layers = nil // remove the layer and retry immediately
+			i--                      // don't count this as a rate-limit retry
+			continue
 		}
 
 		var invalidParam *lambdaTypes.InvalidParameterValueException
