@@ -32,6 +32,7 @@ type SafeConfig struct {
 	Domain      string `json:"domain"`
 	Port        int    `json:"port"`
 	Environment string `json:"environment"`
+	TargetType  string `json:"target_type"`
 }
 
 type ServerlessConfig struct {

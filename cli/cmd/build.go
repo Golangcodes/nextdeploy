@@ -179,7 +179,7 @@ var buildCmd = &cobra.Command{
 		tarballName := "app.tar.gz"
 		log.Info("Creating tarball: %s", tarballName)
 
-		if err := createTarball(releaseDir, tarballName, &payload, log); err != nil {
+		if err := createTarball(releaseDir, tarballName, payload.Config.TargetType, &payload, log); err != nil {
 			log.Error("Failed to create tarball: %v", err)
 			os.Exit(1)
 		}
@@ -198,7 +198,7 @@ type logger interface {
 	Error(msg string, args ...interface{})
 }
 
-func createTarball(sourceDir, targetTar string, payload *nextcore.NextCorePayload, log logger) error {
+func createTarball(sourceDir, targetTar, targetType string, payload *nextcore.NextCorePayload, log logger) error {
 	outputMode := payload.OutputMode
 	log.Info("[tarball] Starting — source=%s target=%s mode=%s workers=%d",
 		sourceDir, targetTar, outputMode, workerCount)
@@ -273,9 +273,16 @@ func createTarball(sourceDir, targetTar string, payload *nextcore.NextCorePayloa
 			}
 
 			if shouldExcludeDir(d.Name()) {
-				// Special case: node_modules MUST be included in standalone or default mode
-				if d.Name() == "node_modules" && (outputMode == nextcore.OutputModeStandalone || outputMode == nextcore.OutputModeDefault) {
-					log.Info("[tarball] Including node_modules (mode=%s): %s", outputMode, relPath)
+				// Special case: node_modules inclusion logic depends on TargetType
+				if d.Name() == "node_modules" {
+					if targetType == "vps" && (outputMode == nextcore.OutputModeStandalone || outputMode == nextcore.OutputModeDefault) {
+						log.Info("[tarball] VPS: Including node_modules (mode=%s): %s", outputMode, relPath)
+					} else if targetType == "serverless" && outputMode == nextcore.OutputModeStandalone {
+						log.Info("[tarball] Serverless: Including standalone node_modules: %s", relPath)
+					} else {
+						log.Info("[tarball] Skip dir (excluded): %s", relPath)
+						return filepath.SkipDir
+					}
 				} else {
 					log.Info("[tarball] Skip dir (excluded): %s", relPath)
 					return filepath.SkipDir
