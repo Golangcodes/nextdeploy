@@ -16,7 +16,7 @@
 
 - name: NextDeploy – Prepare server
   hosts: target
-  gather_facts: true
+  gather_facts: false
   become: false
 
   vars:
@@ -34,6 +34,14 @@
   # PHASE 1 – System bootstrap & info
   # ────────────────────────────────────────────────────────────────────────────
   tasks:
+    - name: "Phase 1 | Optimize | Targeted fact gathering"
+      ansible.builtin.setup:
+        filter:
+          - ansible_pkg_mgr
+          - ansible_user_id
+          - ansible_distribution
+      become: false
+
     - name: "Phase 1 | Security | Create nextdeploy group"
       ansible.builtin.group:
         name: nextdeploy

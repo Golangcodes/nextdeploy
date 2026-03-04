@@ -41,4 +41,7 @@ type Provider interface {
 
 	// Destroy removes all application resources from the cloud provider.
 	Destroy(ctx context.Context, cfg *config.NextDeployConfig) error
+
+	// GetResourceMap returns a summary of all provisioned cloud resources.
+	GetResourceMap(ctx context.Context, cfg *config.NextDeployConfig) (ServerlessResourceMap, error)
 }

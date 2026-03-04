@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -347,4 +348,51 @@ func (p *AWSProvider) Destroy(ctx context.Context, appCfg *cfgTypes.NextDeployCo
 	p.log.Info("✅ AWS Serverless resources destruction initiated.")
 	p.log.Info("Note: IAM role 'nextdeploy-serverless-role' was preserved as it may be used by other apps.")
 	return nil
+}
+
+func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) (ServerlessResourceMap, error) {
+	functionName := p.getLambdaFunctionName(appCfg)
+	bucketName := p.getS3BucketName(appCfg)
+
+	res := ServerlessResourceMap{
+		AppName:        appCfg.App.Name,
+		Environment:    "production",
+		Region:         p.cfg.Region,
+		S3BucketName:   bucketName,
+		DeploymentTime: time.Now(),
+	}
+
+	// 1. Lambda Info
+	clientLambda := lambda.NewFromConfig(p.cfg)
+	fn, err := clientLambda.GetFunction(ctx, &lambda.GetFunctionInput{FunctionName: aws.String(functionName)})
+	if err == nil && fn.Configuration != nil {
+		res.LambdaARN = *fn.Configuration.FunctionArn
+	}
+
+	fUrl, err := clientLambda.GetFunctionUrlConfig(ctx, &lambda.GetFunctionUrlConfigInput{FunctionName: aws.String(functionName)})
+	if err == nil {
+		res.FunctionURL = *fUrl.FunctionUrl
+	}
+
+	// 2. CloudFront Info
+	clientCF := cloudfront.NewFromConfig(p.cfg)
+	listOutput, _ := clientCF.ListDistributions(ctx, &cloudfront.ListDistributionsInput{})
+	if listOutput != nil && listOutput.DistributionList != nil {
+		callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
+		for _, dist := range listOutput.DistributionList.Items {
+			if dist.Comment != nil && *dist.Comment == callerRef {
+				res.CloudFrontID = *dist.Id
+				res.CloudFrontDomain = *dist.DomainName
+				break
+			}
+		}
+	}
+
+	// 3. Custom Domain & cert
+	res.CustomDomain = appCfg.App.Domain
+	if res.CustomDomain != "" {
+		res.CertificateARN, _ = p.findExistingCertificate(ctx, nil, res.CustomDomain)
+	}
+
+	return res, nil
 }

@@ -79,6 +79,21 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	}
 
 	log.Info("✅ Serverless deployment complete! Application is live.")
+
+	// ── 7. Generate Visual Report ───────────────────────────────────────────
+	resMap, err := p.GetResourceMap(ctx, cfg)
+	if err == nil {
+		reportPath, err := GenerateResourceView(&cfg.App, resMap)
+		if err == nil {
+			log.Success("✨  Visual Deployment Report generated: %s", reportPath)
+			log.Info("    Open this file in your browser to see your provisioned resources.")
+		} else {
+			log.Warn("Failed to generate visual report: %v", err)
+		}
+	} else {
+		log.Warn("Failed to fetch resource map for report: %v", err)
+	}
+
 	return nil
 }
 

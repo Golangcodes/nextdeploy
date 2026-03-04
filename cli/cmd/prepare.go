@@ -268,7 +268,7 @@ func runAnsible(ctx context.Context, inventoryPath, playbookPath string, out io.
 	args := []string{
 		"-i", inventoryPath,
 		playbookPath,
-		"--ssh-extra-args=-o StrictHostKeyChecking=accept-new",
+		"--ssh-extra-args=-o StrictHostKeyChecking=accept-new -o ControlMaster=auto -o ControlPersist=60s",
 	}
 
 	if verbose {
