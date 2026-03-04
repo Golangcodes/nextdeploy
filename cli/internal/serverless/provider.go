@@ -27,4 +27,7 @@ type Provider interface {
 
 	// InvalidateCache clears the CDN cache to ensure fresh assets are served.
 	InvalidateCache(ctx context.Context, cfg *config.NextDeployConfig) error
+
+	// Destroy removes all application resources from the cloud provider.
+	Destroy(ctx context.Context, cfg *config.NextDeployConfig) error
 }

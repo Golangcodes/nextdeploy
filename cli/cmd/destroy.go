@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Golangcodes/nextdeploy/cli/internal/server"
+	"github.com/Golangcodes/nextdeploy/cli/internal/serverless"
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
@@ -44,8 +45,37 @@ var destroyCmd = &cobra.Command{
 		}
 
 		if cfg.TargetType == "serverless" {
-			log.Warn("Target is currently SERVERLESS. 'destroy' command currently only supports VPS cleanup.")
-			log.Info("To delete AWS resources, please use the AWS Console for now.")
+			log.Info("Targeting SERVERLESS for destruction of app: %s", appName)
+
+			if cfg.Serverless == nil {
+				log.Error("TargetType is 'serverless' but 'serverless' config block is missing.")
+				os.Exit(1)
+			}
+
+			// Initialize provider
+			var p serverless.Provider
+			switch cfg.Serverless.Provider {
+			case "aws":
+				p = serverless.NewAWSProvider()
+			default:
+				log.Error("Unsupported serverless provider: %s", cfg.Serverless.Provider)
+				os.Exit(1)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+
+			if err := p.Initialize(ctx, cfg); err != nil {
+				log.Error("Failed to initialize serverless provider: %v", err)
+				os.Exit(1)
+			}
+
+			if err := p.Destroy(ctx, cfg); err != nil {
+				log.Error("Serverless destruction failed: %v", err)
+				os.Exit(1)
+			}
+
+			log.Info("✅ Serverless resources successfully processed for destruction.")
 			return
 		}
 

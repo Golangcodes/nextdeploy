@@ -357,6 +357,137 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, tarballPath string, app
 	return nil
 }
 
+func (p *AWSProvider) Destroy(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
+	p.log.Info("Destroying AWS Serverless resources for app: %s...", appCfg.App.Name)
+
+	functionName := p.getLambdaFunctionName(appCfg)
+	bucketName := p.getS3BucketName(appCfg)
+	secretName := fmt.Sprintf("nextdeploy/apps/%s/production", appCfg.App.Name)
+
+	// 1. CloudFront - Disable managed distribution
+	clientCF := cloudfront.NewFromConfig(p.cfg)
+	listOutput, _ := clientCF.ListDistributions(ctx, &cloudfront.ListDistributionsInput{})
+	if listOutput != nil && listOutput.DistributionList != nil {
+		callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
+		for _, dist := range listOutput.DistributionList.Items {
+			if dist.Comment != nil && *dist.Comment == callerRef {
+				if *dist.Enabled {
+					p.log.Info("Disabling CloudFront Distribution: %s...", *dist.Id)
+					getDist, err := clientCF.GetDistributionConfig(ctx, &cloudfront.GetDistributionConfigInput{Id: dist.Id})
+					if err == nil {
+						getDist.DistributionConfig.Enabled = aws.Bool(false)
+						_, err = clientCF.UpdateDistribution(ctx, &cloudfront.UpdateDistributionInput{
+							Id:                 dist.Id,
+							IfMatch:            getDist.ETag,
+							DistributionConfig: getDist.DistributionConfig,
+						})
+						if err != nil {
+							p.log.Warn("Failed to disable CloudFront distribution (non-fatal): %v", err)
+						} else {
+							p.log.Info("CloudFront distribution %s disabled. It will be marked for eventual deletion.", *dist.Id)
+						}
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// 2. Lambda Function
+	p.log.Info("Deleting Lambda Function: %s...", functionName)
+	clientLambda := lambda.NewFromConfig(p.cfg)
+	_, err := clientLambda.DeleteFunction(ctx, &lambda.DeleteFunctionInput{
+		FunctionName: aws.String(functionName),
+	})
+	if err != nil {
+		var notFound *lambdaTypes.ResourceNotFoundException
+		if errors.As(err, &notFound) {
+			p.log.Info("Lambda function %s not found.", functionName)
+		} else {
+			p.log.Warn("Failed to delete Lambda function: %v", err)
+		}
+	}
+
+	// 3. S3 Bucket (Empty and Delete)
+	p.log.Info("Emptying and deleting S3 Bucket: %s...", bucketName)
+	clientS3 := s3.NewFromConfig(p.cfg)
+	if err := p.emptyS3Bucket(ctx, clientS3, bucketName); err != nil {
+		p.log.Warn("Failed to empty S3 bucket: %v", err)
+	} else {
+		_, err = clientS3.DeleteBucket(ctx, &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			var notFound *s3Types.NoSuchBucket
+			if errors.As(err, &notFound) {
+				p.log.Info("S3 bucket %s not found.", bucketName)
+			} else {
+				p.log.Warn("Failed to delete S3 bucket: %v", err)
+			}
+		}
+	}
+
+	// 4. Secrets Manager
+	p.log.Info("Deleting Secret: %s...", secretName)
+	clientSM := secretsmanager.NewFromConfig(p.cfg)
+	_, err = clientSM.DeleteSecret(ctx, &secretsmanager.DeleteSecretInput{
+		SecretId:                   aws.String(secretName),
+		ForceDeleteWithoutRecovery: aws.Bool(true),
+	})
+	if err != nil {
+		var notFound *smTypes.ResourceNotFoundException
+		if errors.As(err, &notFound) {
+			p.log.Info("Secret %s not found.", secretName)
+		} else {
+			p.log.Warn("Failed to delete secret: %v", err)
+		}
+	}
+
+	p.log.Info("✅ AWS Serverless resources destruction initiated.")
+	p.log.Info("Note: IAM role 'nextdeploy-serverless-role' was preserved as it may be used by other apps.")
+	return nil
+}
+
+func (p *AWSProvider) emptyS3Bucket(ctx context.Context, client *s3.Client, bucketName string) error {
+	listPager := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucketName),
+	})
+
+	for listPager.HasMorePages() {
+		page, err := listPager.NextPage(ctx)
+		if err != nil {
+			var noSuchBucket *s3Types.NoSuchBucket
+			if errors.As(err, &noSuchBucket) {
+				return nil
+			}
+			return err
+		}
+
+		if len(page.Contents) == 0 {
+			continue
+		}
+
+		var objects []s3Types.ObjectIdentifier
+		for _, obj := range page.Contents {
+			objects = append(objects, s3Types.ObjectIdentifier{
+				Key: obj.Key,
+			})
+		}
+
+		_, err = client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucketName),
+			Delete: &s3Types.Delete{
+				Objects: objects,
+			},
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (p *AWSProvider) InvalidateCache(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
 	// 1. Prioritize configured CloudFront ID
 	distId := appCfg.Serverless.CloudFrontId
