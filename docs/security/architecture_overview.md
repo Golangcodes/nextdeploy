@@ -1,10 +1,8 @@
-# Architecture Overview - Secured VPS Deployment
+# Architecture Overview - NextDeploy Secure Orchestration
 
-This document provides an in-depth look at how the `nextdeploy` system is architected to be secure, resilient, and resistant to common "bots and hacks."
+NextDeploy provides a unified deployment interface for both VPS (via `nextdeployd`) and Serverless (via AWS) targets. This document details the security layers and request flows for each target type.
 
-## 1. Request Flow & Logic
-
-### A. Deployment Flow (CLI to Daemon)
+![NextDeploy Full Architecture](file:///home/hersi/Music/workspace/nextdeploy/NextDeploy/docs/security/architecture_diagram_v2.png)
 When you run `nextdeploy ship`, the following sequence occurs:
 1.  **Authentication**: The CLI generates an **HMAC-SHA256 signature** using a shared secret.
 2.  **Transport**: The request is sent via a **Unix Socket** (local) or **mTLS** (remote TCP), ensuring only authorized clients can talk to the daemon.

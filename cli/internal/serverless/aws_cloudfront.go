@@ -77,38 +77,54 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 	}
 
 	p.log.Info("Checking for existing CloudFront distribution...")
-	listOutput, err := client.ListDistributions(ctx, &cloudfront.ListDistributionsInput{})
-	if err != nil {
-		return "", fmt.Errorf("failed to list distributions: %w", err)
-	}
-
 	var existingDistID string
-	if listOutput.DistributionList != nil {
-		// 1st pass: Match by comment (managed by nextdeploy)
-		for _, dist := range listOutput.DistributionList.Items {
-			if dist.Comment != nil && *dist.Comment == callerRef {
-				existingDistID = *dist.Id
-				break
-			}
+	var marker *string
+
+	for {
+		listOutput, err := client.ListDistributions(ctx, &cloudfront.ListDistributionsInput{
+			Marker: marker,
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to list distributions: %w", err)
 		}
 
-		// 2nd pass: Match by domain alias (CNAME) if not found by comment
-		if existingDistID == "" && domain != "" {
+		if listOutput.DistributionList != nil {
+			// 1st pass: Match by comment (managed by nextdeploy)
 			for _, dist := range listOutput.DistributionList.Items {
-				if dist.Aliases != nil {
-					for _, alias := range dist.Aliases.Items {
-						if alias == domain {
-							existingDistID = *dist.Id
-							p.log.Warn("CloudFront distribution found by domain alias (%s) instead of comment. Adopting distribution: %s", domain, existingDistID)
-							break
-						}
-					}
-				}
-				if existingDistID != "" {
+				if dist.Comment != nil && *dist.Comment == callerRef {
+					existingDistID = *dist.Id
 					break
 				}
 			}
+
+			// 2nd pass: Match by domain alias (CNAME) if not found by comment
+			if existingDistID == "" && domain != "" {
+				for _, dist := range listOutput.DistributionList.Items {
+					if dist.Aliases != nil {
+						for _, alias := range dist.Aliases.Items {
+							if alias == domain {
+								existingDistID = *dist.Id
+								p.log.Warn("CloudFront distribution found by domain alias (%s) instead of comment. Adopting distribution: %s", domain, existingDistID)
+								break
+							}
+						}
+					}
+					if existingDistID != "" {
+						break
+					}
+				}
+			}
 		}
+
+		if existingDistID != "" {
+			break
+		}
+
+		// Check if there are more pages
+		if listOutput.DistributionList == nil || listOutput.DistributionList.NextMarker == nil || *listOutput.DistributionList.NextMarker == "" {
+			break
+		}
+		marker = listOutput.DistributionList.NextMarker
 	}
 
 	if existingDistID != "" {
@@ -151,6 +167,11 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 		DistributionConfig: distConfig,
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), "CNAMEAlreadyExists") {
+			return "", fmt.Errorf("CNAME conflict: The domain %s is already associated with another CloudFront distribution. "+
+				"Please ensure this domain is not being used by another project in this or another AWS account. "+
+				"Error: %w", domain, err)
+		}
 		return "", fmt.Errorf("failed to create CloudFront distribution: %w", err)
 	}
 
@@ -443,14 +464,23 @@ func (p *AWSProvider) InvalidateCache(ctx context.Context, appCfg *cfgTypes.Next
 		callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
 
 		client := cloudfront.NewFromConfig(p.cfg)
-		listOutput, _ := client.ListDistributions(ctx, &cloudfront.ListDistributionsInput{})
-		if listOutput != nil && listOutput.DistributionList != nil {
-			for _, dist := range listOutput.DistributionList.Items {
-				if dist.Comment != nil && *dist.Comment == callerRef {
-					distId = *dist.Id
-					break
+		var marker *string
+		for {
+			listOutput, _ := client.ListDistributions(ctx, &cloudfront.ListDistributionsInput{
+				Marker: marker,
+			})
+			if listOutput != nil && listOutput.DistributionList != nil {
+				for _, dist := range listOutput.DistributionList.Items {
+					if dist.Comment != nil && *dist.Comment == callerRef {
+						distId = *dist.Id
+						break
+					}
 				}
 			}
+			if distId != "" || listOutput == nil || listOutput.DistributionList == nil || listOutput.DistributionList.NextMarker == nil || *listOutput.DistributionList.NextMarker == "" {
+				break
+			}
+			marker = listOutput.DistributionList.NextMarker
 		}
 	}
 

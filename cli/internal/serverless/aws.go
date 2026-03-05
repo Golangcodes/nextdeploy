@@ -378,16 +378,25 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 
 	// 2. CloudFront Info
 	clientCF := cloudfront.NewFromConfig(p.cfg)
-	listOutput, _ := clientCF.ListDistributions(ctx, &cloudfront.ListDistributionsInput{})
-	if listOutput != nil && listOutput.DistributionList != nil {
-		callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
-		for _, dist := range listOutput.DistributionList.Items {
-			if dist.Comment != nil && *dist.Comment == callerRef {
-				res.CloudFrontID = *dist.Id
-				res.CloudFrontDomain = *dist.DomainName
-				break
+	callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
+	var marker *string
+	for {
+		listOutput, _ := clientCF.ListDistributions(ctx, &cloudfront.ListDistributionsInput{
+			Marker: marker,
+		})
+		if listOutput != nil && listOutput.DistributionList != nil {
+			for _, dist := range listOutput.DistributionList.Items {
+				if dist.Comment != nil && *dist.Comment == callerRef {
+					res.CloudFrontID = *dist.Id
+					res.CloudFrontDomain = *dist.DomainName
+					break
+				}
 			}
 		}
+		if res.CloudFrontID != "" || listOutput == nil || listOutput.DistributionList == nil || listOutput.DistributionList.NextMarker == nil || *listOutput.DistributionList.NextMarker == "" {
+			break
+		}
+		marker = listOutput.DistributionList.NextMarker
 	}
 
 	// 3. Custom Domain & cert
