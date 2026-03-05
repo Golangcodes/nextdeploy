@@ -92,7 +92,7 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 }`, domainList, commonHeaders, staticDir)
 	}
 
-	nextStaticDir := filepath.Join(appDir, distDir, "static")
+	sharedStaticDir := filepath.Join(filepath.Dir(appDir), "shared_static")
 	return fmt.Sprintf(`%s {%s
 	handle_path /_next/static/* {
 		root * %s
@@ -108,7 +108,7 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 		output file /var/log/caddy/access.log
 		format json
 	}
-}`, domainList, commonHeaders, nextStaticDir, appName)
+}`, domainList, commonHeaders, sharedStaticDir, appName)
 }
 
 func (cm *CaddyManager) GetConfig(ctx context.Context) (*Config, error) {

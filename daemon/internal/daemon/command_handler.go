@@ -408,6 +408,26 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	if err := os.Symlink(ctx.ReleaseDir, tmpSymlink); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to create atomic symlink: %v", err)}
 	}
+
+	// Persistent Static Assets Sync
+	// We sync .next/static to a shared directory so old client sessions don't break when Caddy switches roots
+	sharedStaticDir := filepath.Join(appsDir, ctx.AppName, "shared_static")
+	sourceStaticDir := filepath.Join(ctx.ReleaseDir, ctx.DistDir, "static")
+	if _, err := os.Stat(sourceStaticDir); err == nil {
+		if err := os.MkdirAll(sharedStaticDir, 0755); err == nil {
+			// Use cp -rn to copy only new files, preserving existing ones
+			cpPath := resolveTool("cp")
+			// #nosec G204
+			cmd := exec.Command(cpPath, "-rn", sourceStaticDir+string(filepath.Separator)+".", sharedStaticDir)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				log.Printf("[activate] Warning: failed to sync shared static assets: %v - %s", err, string(out))
+			} else {
+				log.Printf("[activate] Synced static assets to %s", sharedStaticDir)
+				_ = exec.Command(resolveTool("chown"), "-R", "nextdeploy:nextdeploy", sharedStaticDir).Run()
+			}
+		}
+	}
+
 	if err := os.Rename(tmpSymlink, currentSymlink); err != nil {
 		_ = os.Remove(tmpSymlink)
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to rename atomic symlink: %v", err)}
