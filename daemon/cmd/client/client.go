@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Golangcodes/nextdeploy/daemon/internal/client"
+	"github.com/Golangcodes/nextdeploy/daemon/internal/config"
 	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 )
 
@@ -58,12 +60,29 @@ func main() {
 	sendCommandToDaemon(command)
 }
 
+func getClientConfig() client.ClientConfig {
+	defaultConfig := "/etc/nextdeployd/config.json"
+	if os.Geteuid() != 0 {
+		home, _ := os.UserHomeDir()
+		defaultConfig = filepath.Join(home, ".nextdeploy", "config.json")
+	}
+	cfg, _ := config.LoadConfig(defaultConfig)
+
+	return client.ClientConfig{
+		Address:  socketPath,
+		Secret:   cfg.SecuritySecret,
+		CertFile: cfg.TLSCertFile,
+		KeyFile:  cfg.TLSKeyFile,
+		CAFile:   cfg.TLSCAFile,
+	}
+}
+
 func isDaemonRunning() bool {
 	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
 		return false
 	}
 
-	conn, err := client.SendCommand(socketPath, types.Command{
+	conn, err := client.SendCommand(getClientConfig(), types.Command{
 		Type: "status",
 		Args: map[string]interface{}{},
 	})
@@ -165,7 +184,7 @@ func sendCommandToDaemon(command string) {
 		Args: args,
 	}
 
-	response, err := client.SendCommand(socketPath, cmd)
+	response, err := client.SendCommand(getClientConfig(), cmd)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		if strings.Contains(err.Error(), "connect") {

@@ -84,10 +84,29 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 
 	var existingDistID string
 	if listOutput.DistributionList != nil {
+		// 1st pass: Match by comment (managed by nextdeploy)
 		for _, dist := range listOutput.DistributionList.Items {
 			if dist.Comment != nil && *dist.Comment == callerRef {
 				existingDistID = *dist.Id
 				break
+			}
+		}
+
+		// 2nd pass: Match by domain alias (CNAME) if not found by comment
+		if existingDistID == "" && domain != "" {
+			for _, dist := range listOutput.DistributionList.Items {
+				if dist.Aliases != nil {
+					for _, alias := range dist.Aliases.Items {
+						if alias == domain {
+							existingDistID = *dist.Id
+							p.log.Warn("CloudFront distribution found by domain alias (%s) instead of comment. Adopting distribution: %s", domain, existingDistID)
+							break
+						}
+					}
+				}
+				if existingDistID != "" {
+					break
+				}
 			}
 		}
 	}

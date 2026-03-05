@@ -19,23 +19,47 @@ import (
 )
 
 const (
-	baseDir    = "/opt/nextdeploy"
-	appsDir    = "/opt/nextdeploy/apps"
-	uploadsDir = "/opt/nextdeploy/uploads"
-	workTmpDir = "/opt/nextdeploy/tmp"
+	baseDir       = "/opt/nextdeploy"
+	appsDir       = "/opt/nextdeploy/apps"
+	uploadsDir    = "/opt/nextdeploy/uploads"
+	workTmpDir    = "/opt/nextdeploy/tmp"
+	nextdeployDir = ".nextdeploy"
 )
 
 type CommandHandler struct {
 	config         *types.DaemonConfig
 	caddyManager   *CaddyManager
 	processManager *ProcessManager
+	stateManager   *StateManager
+	auditLogger    *AuditLogger
+	rateLimiter    *RateLimiter
 }
 
 func NewCommandHandler(config *types.DaemonConfig) *CommandHandler {
+	statePath := "/var/lib/nextdeployd/state.json"
+	if os.Geteuid() != 0 {
+		home, _ := os.UserHomeDir()
+		statePath = filepath.Join(home, ".nextdeploy", "state.json")
+	}
+
+	auditPath := filepath.Join(config.LogDir, "audit.log")
+
+	rate := config.RateLimitRate
+	if rate == 0 {
+		rate = 10 // default 10 requests per second
+	}
+	burst := config.RateLimitBurst
+	if burst == 0 {
+		burst = 20
+	}
+
 	return &CommandHandler{
 		config:         config,
 		caddyManager:   NewCaddyManager(),
 		processManager: NewProcessManager(),
+		stateManager:   NewStateManager(statePath),
+		auditLogger:    NewAuditLogger(auditPath),
+		rateLimiter:    NewRateLimiter(rate, burst),
 	}
 }
 
@@ -57,30 +81,62 @@ func (ch *CommandHandler) ValidateCommand(cmd types.Command) error {
 	return nil
 }
 
-func (ch *CommandHandler) HandleCommand(cmd types.Command) types.Response {
+func (ch *CommandHandler) HandleCommand(cmd types.Command, clientIdentity string) types.Response {
+	// 1. Rate Limiting
+	if !ch.rateLimiter.Allow(clientIdentity) {
+		return types.Response{Success: false, Message: "rate limit exceeded"}
+	}
+
+	// 2. IP Whitelisting (for non-Unix socket identities)
+	if !IsIPAllowed(clientIdentity, ch.config.IPWhitelist) {
+		return types.Response{Success: false, Message: "IP not whitelisted"}
+	}
+
+	// 3. Signature Verification
+	// We marshal the type and args to verify the signature
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": cmd.Type,
+		"args": cmd.Args,
+	})
+	if !VerifySignature(payload, cmd.Signature, ch.config.SecuritySecret) {
+		return types.Response{Success: false, Message: "invalid command signature"}
+	}
+
+	var resp types.Response
 	switch cmd.Type {
 	case "setupCaddy":
-		return ch.setUpCaddy(cmd.Args)
+		resp = ch.setUpCaddy(cmd.Args)
 	case "stopdaemon":
-		return ch.stopDaemon(cmd.Args)
+		resp = ch.stopDaemon(cmd.Args)
 	case "restartDaemon":
-		return ch.restartDaemon(cmd.Args)
+		resp = ch.restartDaemon(cmd.Args)
 	case "ship":
-		return ch.handleShip(cmd.Args)
+		resp = ch.handleShip(cmd.Args)
 	case "rollback":
-		return ch.handleRollback(cmd.Args)
+		resp = ch.handleRollback(cmd.Args)
 	case "secrets":
-		return ch.handleSecrets(cmd.Args)
+		resp = ch.handleSecrets(cmd.Args)
 	case "status":
-		return ch.handleStatus(cmd.Args)
+		resp = ch.handleStatus(cmd.Args)
 	case "logs":
-		return ch.handleLogs(cmd.Args)
+		resp = ch.handleLogs(cmd.Args)
 	default:
-		return types.Response{
+		resp = types.Response{
 			Success: false,
 			Message: fmt.Sprintf("unknown command: %s", cmd.Type),
 		}
 	}
+
+	// 4. Audit Logging
+	ch.auditLogger.Log(AuditEntry{
+		CommandType:    cmd.Type,
+		ClientIdentity: clientIdentity,
+		Result:         fmt.Sprintf("%v", resp.Success),
+		ErrorDetails:   resp.Message,
+		Args:           cmd.Args,
+	})
+
+	return resp
 }
 
 func (ch *CommandHandler) stopDaemon(args map[string]interface{}) types.Response {
@@ -148,7 +204,7 @@ func (ch *CommandHandler) setUpCaddy(args map[string]interface{}) types.Response
 			Message: fmt.Sprintf("failed to resolve home directory: %v", err),
 		}
 	}
-	caddyfilePath := filepath.Join(homeDir, "app", ".nextdeploy", "caddy", "Caddyfile")
+	caddyfilePath := filepath.Join(homeDir, "app", nextdeployDir, "caddy", "Caddyfile")
 
 	log.Printf("Reading Caddyfile from: %s", caddyfilePath)
 	// #nosec G304
@@ -302,15 +358,28 @@ type ReleaseContext struct {
 func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	currentSymlink := filepath.Join(appsDir, ctx.AppName, "current")
 
-	port, closePort, err := findFreePort()
-	if err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("failed to allocate port: %v", err)}
+	// Port selection with persistence
+	port := ch.stateManager.GetPort(ctx.AppName)
+	if port == 0 || !isPortAvailable(port) {
+		p, closePort, err := findFreePort()
+		if err != nil {
+			return types.Response{Success: false, Message: fmt.Sprintf("failed to allocate port: %v", err)}
+		}
+		_ = closePort()
+		port = p
+		ch.stateManager.SetPort(ctx.AppName, port)
+		if err := ch.stateManager.Save(); err != nil {
+			log.Printf("[activate] Warning: failed to save state: %v", err)
+		}
 	}
-	// Close immediately but allows for keeping it open if we wanted to
-	// pass it to the child process (not supported by systemd easily)
-	_ = closePort()
 
 	log.Printf("[activate] Allocated port %d for release %s", port, ctx.ReleaseID)
+
+	// Port file for Caddy or other discovery tools
+	portFilePath := filepath.Join(appsDir, ctx.AppName, "port")
+	if err := os.WriteFile(portFilePath, []byte(fmt.Sprintf("%d", port)), 0644); err != nil {
+		log.Printf("[activate] Warning: failed to write port file to %s: %v", portFilePath, err)
+	}
 
 	serviceName, serviceGenerated, err := ch.processManager.GenerateServiceFile(
 		ctx.AppName, ctx.ReleaseDir, ctx.OutputMode, ctx.DopplerToken, port, ctx.PackageManager, ctx.ReleaseID,
@@ -437,7 +506,7 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 
 func readMetadata(unpackDir string) (*nextcore.NextCorePayload, error) {
 	candidates := []string{
-		filepath.Join(unpackDir, ".nextdeploy", "metadata.json"),
+		filepath.Join(unpackDir, nextdeployDir, "metadata.json"),
 		filepath.Join(unpackDir, "metadata.json"),
 	}
 	for _, path := range candidates {
@@ -453,6 +522,15 @@ func readMetadata(unpackDir string) (*nextcore.NextCorePayload, error) {
 		return &meta, nil
 	}
 	return nil, fmt.Errorf("metadata.json not found in tarball (checked %v)", candidates)
+}
+
+func isPortAvailable(port int) bool {
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
 }
 
 func findFreePort() (int, func() error, error) {

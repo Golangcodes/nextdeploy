@@ -34,6 +34,8 @@ func LoadConfig(filePath string) (*types.DaemonConfig, error) {
 		LogDir:          logDir,
 		LogMaxSize:      10,
 		LogMaxBackups:   5,
+		RateLimitRate:   10,
+		RateLimitBurst:  20,
 	}
 
 	if filePath != "" {

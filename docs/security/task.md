@@ -1,0 +1,24 @@
+# Task: Integrate Improved Process Management (Daemon) for VPS Deployments
+
+- [x] Research current VPS process management <!-- id: 0 -->
+    - [x] List internal server files <!-- id: 1 -->
+    - [x] View `cli/internal/server/server.go` <!-- id: 2 -->
+- [x] Analyze user-provided security requirements <!-- id: 3 -->
+- [x] Create implementation plan for improved VPS process manager <!-- id: 4 -->
+- [x] Implement Security Features in `nextdeployd` <!-- id: 10 -->
+    - [x] Request signing with HMAC <!-- id: 11 -->
+    - [x] Audit logging system <!-- id: 12 -->
+    - [x] Rate limiting & IP whitelisting middleware <!-- id: 13 -->
+    - [x] Support for TLS/mTLS listeners <!-- id: 14 -->
+- [x] Implement advanced Process Management <!-- id: 5 -->
+    - [x] Harden Systemd service (Isolation & Recovery) <!-- id: 6 -->
+    - [x] Port persistence & state management <!-- id: 15 -->
+    - [x] Port file for Caddy dynamic resolution <!-- id: 16 -->
+- [x] Implement security-aware CLI logs <!-- id: 10 -->
+    - [x] Add `--audit` and `--daemon` flags directly to `logs.go` <!-- id: 11 -->
+    - [x] Ensure SSH command works with signed daemon requests <!-- id: 12 -->
+- [x] Implement Coraza WAF integration for Caddy <!-- id: 18 -->
+- [x] Fix Serverless Deployment (CloudFront CNAME & Lambda Layer) <!-- id: 19 -->
+    - [x] Update CloudFront discovery to check aliases <!-- id: 20 -->
+    - [x] Refine Lambda layer fallback and messaging <!-- id: 21 -->
+- [x] Verify logs enhancement and WAF <!-- id: 8 -->

@@ -26,6 +26,8 @@ var logsCmd = &cobra.Command{
 
 		appName := cfg.App.Name
 		routeFilter, _ := cmd.Flags().GetString("route")
+		showAudit, _ := cmd.Flags().GetBool("audit")
+		showDaemon, _ := cmd.Flags().GetBool("daemon")
 
 		log.Info("Streaming logs for %s...", appName)
 
@@ -43,6 +45,27 @@ var logsCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
+
+		if showAudit {
+			log.Info("Streaming audit logs for %s...", appName)
+			journalCmd := "tail -f -n 50 /var/log/nextdeployd/audit.log"
+			_, err = srv.ExecuteCommand(ctx, deploymentServer, "sudo "+journalCmd, os.Stdout)
+			if err != nil {
+				log.Error("Audit log stream interrupted: %v", err)
+			}
+			return
+		}
+
+		if showDaemon {
+			log.Info("Streaming daemon logs for %s...", appName)
+			journalCmd := "tail -f -n 50 /var/log/nextdeployd/nextdeployd.log"
+			_, err = srv.ExecuteCommand(ctx, deploymentServer, "sudo "+journalCmd, os.Stdout)
+			if err != nil {
+				log.Error("Daemon log stream interrupted: %v", err)
+			}
+			return
+		}
+
 		daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd logs --appName=%s", appName)
 		serviceName, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
 		if err != nil {
@@ -88,5 +111,7 @@ var logsCmd = &cobra.Command{
 
 func init() {
 	logsCmd.Flags().String("route", "", "Filter logs by a specific route (e.g. /api/upload)")
+	logsCmd.Flags().Bool("audit", false, "Stream the daemon audit log")
+	logsCmd.Flags().Bool("daemon", false, "Stream the daemon process log")
 	rootCmd.AddCommand(logsCmd)
 }

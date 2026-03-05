@@ -156,7 +156,8 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 		var apiErr smithy.APIError
 		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException" && strings.Contains(err.Error(), "lambda:GetLayerVersion") && len(layersToApply) > 0 {
 			p.log.Warn("IAM user lacks lambda:GetLayerVersion permissions for the Secrets Extension Layer.")
-			p.log.Warn("Falling back to environment variables only (cloud secrets won't be securely injected at runtime).")
+			p.log.Warn("ACTION REQUIRED: To enable secure cloud secrets, add the 'lambda:GetLayerVersion' permission to your IAM policy.")
+			p.log.Warn("Falling back to standard environment variables for secret injection.")
 			layersToApply = nil // remove the layer and retry immediately
 			i--                 // don't count this as a rate-limit retry
 			continue
@@ -332,7 +333,8 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 		var apiErr smithy.APIError
 		if errors.As(createErr, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException" && strings.Contains(createErr.Error(), "lambda:GetLayerVersion") && len(createInput.Layers) > 0 {
 			p.log.Warn("IAM user lacks lambda:GetLayerVersion permissions for the Secrets Extension Layer.")
-			p.log.Warn("Falling back to environment variables only (cloud secrets won't be securely injected at runtime).")
+			p.log.Warn("ACTION REQUIRED: To enable secure cloud secrets, add the 'lambda:GetLayerVersion' permission to your IAM policy.")
+			p.log.Warn("Falling back to standard environment variables for secret injection.")
 			createInput.Layers = nil // remove the layer and retry immediately
 			i--                      // don't count this as a rate-limit retry
 			continue

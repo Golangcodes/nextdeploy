@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	daemoniclient "github.com/Golangcodes/nextdeploy/daemon/internal/client"
+	"github.com/Golangcodes/nextdeploy/daemon/internal/config"
 	"github.com/Golangcodes/nextdeploy/daemon/internal/daemon"
 	daemontypes "github.com/Golangcodes/nextdeploy/daemon/internal/types"
 	"github.com/Golangcodes/nextdeploy/shared"
@@ -102,7 +103,24 @@ func getSocketPath() string {
 
 func sendDaemonCommand(cmd daemontypes.Command) {
 	socketPath := getSocketPath()
-	resp, err := daemoniclient.SendCommand(socketPath, cmd)
+
+	// Load config for security settings
+	defaultConfig := "/etc/nextdeployd/config.json"
+	if os.Geteuid() != 0 {
+		home, _ := os.UserHomeDir()
+		defaultConfig = filepath.Join(home, ".nextdeploy", "config.json")
+	}
+	cfg, _ := config.LoadConfig(defaultConfig)
+
+	clientCfg := daemoniclient.ClientConfig{
+		Address:  socketPath,
+		Secret:   cfg.SecuritySecret,
+		CertFile: cfg.TLSCertFile,
+		KeyFile:  cfg.TLSKeyFile,
+		CAFile:   cfg.TLSCAFile,
+	}
+
+	resp, err := daemoniclient.SendCommand(clientCfg, cmd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error contacting daemon: %v (Is nextdeployd running?)\n", err)
 		os.Exit(1)

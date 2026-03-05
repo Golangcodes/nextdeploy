@@ -49,16 +49,23 @@ Group=nextdeploy
 WorkingDirectory=%s
 ExecStart=%s
 Restart=on-failure
+RestartSec=5s
 Environment=NODE_ENV=production
 Environment=PORT=%d
 EnvironmentFile=-%s/.env.nextdeploy
 
 # Security Sandboxing
-ProtectSystem=full
-ProtectHome=read-only
+ProtectSystem=strict
+ProtectHome=yes
 PrivateTmp=yes
 NoNewPrivileges=yes
-ReadOnlyPaths=/
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
 ReadWritePaths=%s
 
 [Install]

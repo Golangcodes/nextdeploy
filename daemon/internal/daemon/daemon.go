@@ -47,7 +47,7 @@ func NewNextDeployDaemon(configPath string, socketPathOverride string) (*NextDep
 
 	logger := logging.SetupLogger(logConfig)
 	commandHandler := NewCommandHandler(cfg)
-	socketServer := NewSocketServer(cfg.SocketPath, commandHandler)
+	socketServer := NewSocketServer(cfg, commandHandler)
 
 	return &NextDeployDaemon{
 		ctx:            ctx,

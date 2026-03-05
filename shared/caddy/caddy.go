@@ -53,6 +53,17 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 		Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
 		X-Permitted-Cross-Domain-Policies "none"
 		Content-Security-Policy "%s"
+	}
+	coraza_waf {
+		load_owasp_crs
+		directives "
+			SecRuleEngine On
+			SecRequestBodyAccess On
+			SecAuditLog /var/log/caddy/audit.log
+			SecAuditLogType Serial
+			SecDebugLog /var/log/caddy/debug.log
+			SecDebugLogLevel 3
+		"
 	}`, csp)
 
 	sDomain := domain
@@ -90,14 +101,14 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	}
 
 	handle {
-		reverse_proxy localhost:%d
+		reverse_proxy localhost:{file /opt/nextdeploy/apps/%s/port}
 	}
 
 	log {
 		output file /var/log/caddy/access.log
 		format json
 	}
-}`, domainList, commonHeaders, nextStaticDir, port)
+}`, domainList, commonHeaders, nextStaticDir, appName)
 }
 
 func (cm *CaddyManager) GetConfig(ctx context.Context) (*Config, error) {
