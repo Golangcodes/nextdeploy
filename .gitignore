@@ -10,9 +10,7 @@
 # Documentation
 *.md
 !README.md
-!CONTRIBUTING.md
-!PROJECT_MAP.md
-!RESOURCE_MAPPING.md
+!TECH_DOCS.md
 
 # Root-level binaries
 /nextdeploy
