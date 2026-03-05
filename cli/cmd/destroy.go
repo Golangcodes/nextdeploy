@@ -104,18 +104,16 @@ var destroyCmd = &cobra.Command{
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 
-			// 4. Remove files
-			remoteAppDir := fmt.Sprintf("/opt/nextdeploy/apps/%s", appName)
-			log.Info("Removing remote directory: %s", remoteAppDir)
-
-			rmCmd := fmt.Sprintf("sudo systemctl stop %s || true && sudo rm -rf %s", appName, remoteAppDir)
-			output, err := srv.ExecuteCommand(ctx, deploymentServer, rmCmd, os.Stdout)
+			// 4. Trigger daemon to destroy app
+			log.Info("Triggering daemon to destroy app: %s...", appName)
+			destroyCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd destroy --appName=%s --socket-path=/run/nextdeployd/nextdeployd.sock", appName)
+			output, err := srv.ExecuteCommand(ctx, deploymentServer, destroyCmd, os.Stdout)
 			if err != nil {
-				log.Error("Failed to delete remote files: %v\nOutput: %s", err, output)
+				log.Error("Failed to destroy app via daemon: %v\nOutput: %s", err, output)
 				os.Exit(1)
 			}
 
-			log.Info("✅ App files successfully removed from remote server.")
+			log.Info("✅ App resources successfully destroyed by daemon.")
 
 		default:
 			log.Error("Unknown or unsupported target_type: %s", cfg.TargetType)

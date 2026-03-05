@@ -52,6 +52,9 @@ func main() {
 		case "rollback":
 			handleRollbackSubcommand()
 			return
+		case "destroy":
+			handleDestroySubcommand()
+			return
 		}
 	}
 
@@ -226,6 +229,20 @@ func handleRollbackSubcommand() {
 		args["dopplerToken"] = dopplerToken
 	}
 	sendDaemonCommand(daemontypes.Command{Type: "rollback", Args: args})
+}
+
+func handleDestroySubcommand() {
+	appName := ""
+	for _, arg := range os.Args[2:] {
+		if strings.HasPrefix(arg, "--appName=") {
+			appName = strings.TrimPrefix(arg, "--appName=")
+		}
+	}
+	if appName == "" {
+		fmt.Fprintln(os.Stderr, "Error: --appName is required")
+		os.Exit(1)
+	}
+	sendDaemonCommand(daemontypes.Command{Type: "destroy", Args: map[string]interface{}{"appName": appName}})
 }
 
 func daemonize() {

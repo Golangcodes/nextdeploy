@@ -244,63 +244,64 @@ func (p *AWSProvider) Destroy(ctx context.Context, appCfg *cfgTypes.NextDeployCo
 	bucketName := p.getS3BucketName(appCfg)
 	secretName := fmt.Sprintf("nextdeploy/apps/%s/production", appCfg.App.Name)
 
+	// 1. CloudFront Distribution (Paginated discovery by comment or CNAME)
 	clientCF := cloudfront.NewFromConfig(p.cfg)
-	listOutput, _ := clientCF.ListDistributions(ctx, &cloudfront.ListDistributionsInput{})
-	if listOutput != nil && listOutput.DistributionList != nil {
-		callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
-		for _, dist := range listOutput.DistributionList.Items {
-			if dist.Comment != nil && *dist.Comment == callerRef {
-				distId := *dist.Id
-				p.log.Info("Found CloudFront Distribution to destroy: %s", distId)
+	callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
+	domain := appCfg.App.Domain
 
-				getDist, err := clientCF.GetDistributionConfig(ctx, &cloudfront.GetDistributionConfigInput{Id: aws.String(distId)})
-				if err != nil {
-					p.log.Warn("Failed to fetch CloudFront distribution config (non-fatal): %v", err)
-					break
-				}
+	dists, err := p.findManagedDistributions(ctx, clientCF, callerRef, domain)
+	if err != nil {
+		p.log.Warn("Failed to list CloudFront distributions: %v", err)
+	}
 
-				etag := getDist.ETag
+	for _, distId := range dists {
+		p.log.Info("Found CloudFront Distribution to destroy: %s", distId)
 
-				// Disable if still enabled
-				if getDist.DistributionConfig.Enabled != nil && *getDist.DistributionConfig.Enabled {
-					p.log.Info("Disabling CloudFront Distribution: %s...", distId)
-					getDist.DistributionConfig.Enabled = aws.Bool(false)
-					updateOut, err := clientCF.UpdateDistribution(ctx, &cloudfront.UpdateDistributionInput{
-						Id:                 aws.String(distId),
-						IfMatch:            etag,
-						DistributionConfig: getDist.DistributionConfig,
-					})
-					if err != nil {
-						p.log.Warn("Failed to disable CloudFront distribution (non-fatal): %v", err)
-						break
-					}
-					etag = updateOut.ETag
-					p.log.Info("Waiting for CloudFront distribution %s to reach Deployed state before deletion...", distId)
-					if waitErr := p.waitForCloudFrontDeployed(ctx, clientCF, distId); waitErr != nil {
-						p.log.Warn("CloudFront distribution did not reach Deployed state in time, skipping deletion: %v", waitErr)
-						break
-					}
-				}
+		getDist, err := clientCF.GetDistributionConfig(ctx, &cloudfront.GetDistributionConfigInput{Id: aws.String(distId)})
+		if err != nil {
+			p.log.Warn("Failed to fetch CloudFront distribution config (non-fatal): %v", err)
+			break
+		}
 
-				p.log.Info("Deleting CloudFront Distribution: %s...", distId)
-				_, err = clientCF.DeleteDistribution(ctx, &cloudfront.DeleteDistributionInput{
-					Id:      aws.String(distId),
-					IfMatch: etag,
-				})
-				if err != nil {
-					p.log.Warn("Failed to delete CloudFront distribution (non-fatal): %v", err)
-				} else {
-					p.log.Info("CloudFront distribution %s deleted.", distId)
-				}
+		etag := getDist.ETag
+
+		// Disable if still enabled
+		if getDist.DistributionConfig.Enabled != nil && *getDist.DistributionConfig.Enabled {
+			p.log.Info("Disabling CloudFront Distribution: %s...", distId)
+			getDist.DistributionConfig.Enabled = aws.Bool(false)
+			updateOut, err := clientCF.UpdateDistribution(ctx, &cloudfront.UpdateDistributionInput{
+				Id:                 aws.String(distId),
+				IfMatch:            etag,
+				DistributionConfig: getDist.DistributionConfig,
+			})
+			if err != nil {
+				p.log.Warn("Failed to disable CloudFront distribution (non-fatal): %v", err)
 				break
 			}
+			etag = updateOut.ETag
+			p.log.Info("Waiting for CloudFront distribution %s to reach Deployed state before deletion...", distId)
+			if waitErr := p.waitForCloudFrontDeployed(ctx, clientCF, distId); waitErr != nil {
+				p.log.Warn("CloudFront distribution did not reach Deployed state in time, skipping deletion: %v", waitErr)
+				break
+			}
+		}
+
+		p.log.Info("Deleting CloudFront Distribution: %s...", distId)
+		_, err = clientCF.DeleteDistribution(ctx, &cloudfront.DeleteDistributionInput{
+			Id:      aws.String(distId),
+			IfMatch: etag,
+		})
+		if err != nil {
+			p.log.Warn("Failed to delete CloudFront distribution (non-fatal): %v", err)
+		} else {
+			p.log.Info("CloudFront distribution %s deleted.", distId)
 		}
 	}
 
 	// 2. Lambda Function
 	p.log.Info("Deleting Lambda Function: %s...", functionName)
 	clientLambda := lambda.NewFromConfig(p.cfg)
-	_, err := clientLambda.DeleteFunction(ctx, &lambda.DeleteFunctionInput{
+	_, err = clientLambda.DeleteFunction(ctx, &lambda.DeleteFunctionInput{
 		FunctionName: aws.String(functionName),
 	})
 	if err != nil {
@@ -379,24 +380,15 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 	// 2. CloudFront Info
 	clientCF := cloudfront.NewFromConfig(p.cfg)
 	callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
-	var marker *string
-	for {
-		listOutput, _ := clientCF.ListDistributions(ctx, &cloudfront.ListDistributionsInput{
-			Marker: marker,
-		})
-		if listOutput != nil && listOutput.DistributionList != nil {
-			for _, dist := range listOutput.DistributionList.Items {
-				if dist.Comment != nil && *dist.Comment == callerRef {
-					res.CloudFrontID = *dist.Id
-					res.CloudFrontDomain = *dist.DomainName
-					break
-				}
-			}
+	cfDists, _ := p.findManagedDistributions(ctx, clientCF, callerRef, appCfg.App.Domain)
+	if len(cfDists) > 0 {
+		distID := cfDists[0]
+		res.CloudFrontID = distID
+		// Get domain name for report
+		getDist, _ := clientCF.GetDistribution(ctx, &cloudfront.GetDistributionInput{Id: aws.String(distID)})
+		if getDist != nil && getDist.Distribution != nil {
+			res.CloudFrontDomain = *getDist.Distribution.DomainName
 		}
-		if res.CloudFrontID != "" || listOutput == nil || listOutput.DistributionList == nil || listOutput.DistributionList.NextMarker == nil || *listOutput.DistributionList.NextMarker == "" {
-			break
-		}
-		marker = listOutput.DistributionList.NextMarker
 	}
 
 	// 3. Custom Domain & cert
@@ -434,4 +426,50 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 	}
 
 	return res, nil
+}
+
+// findManagedDistributions finds CloudFront distributions by matching comment or domain aliases.
+func (p *AWSProvider) findManagedDistributions(ctx context.Context, client *cloudfront.Client, callerRef, domain string) ([]string, error) {
+	var distIDs []string
+	var marker *string
+
+	for {
+		listOutput, err := client.ListDistributions(ctx, &cloudfront.ListDistributionsInput{
+			Marker: marker,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		if listOutput.DistributionList != nil {
+			for _, dist := range listOutput.DistributionList.Items {
+				matched := false
+				// Match by comment
+				if dist.Comment != nil && *dist.Comment == callerRef {
+					matched = true
+				}
+				// Match by domain alias (CNAME conflict prevention)
+				if !matched && domain != "" && dist.Aliases != nil {
+					for _, alias := range dist.Aliases.Items {
+						if alias == domain {
+							matched = true
+							p.log.Warn("Found distribution %s matching domain alias %s", *dist.Id, domain)
+							break
+						}
+					}
+				}
+
+				if matched {
+					distIDs = append(distIDs, *dist.Id)
+				}
+			}
+		}
+
+		if listOutput.DistributionList == nil || listOutput.DistributionList.NextMarker == nil || *listOutput.DistributionList.NextMarker == "" {
+			break
+		}
+		marker = listOutput.DistributionList.NextMarker
+	}
+
+	return distIDs, nil
 }

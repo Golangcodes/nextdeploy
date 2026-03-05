@@ -72,6 +72,7 @@ var allowedCommands = map[string]struct{}{
 	"secrets":       {},
 	"status":        {},
 	"logs":          {},
+	"destroy":       {},
 }
 
 func (ch *CommandHandler) ValidateCommand(cmd types.Command) error {
@@ -120,6 +121,8 @@ func (ch *CommandHandler) HandleCommand(cmd types.Command, clientIdentity string
 		resp = ch.handleStatus(cmd.Args)
 	case "logs":
 		resp = ch.handleLogs(cmd.Args)
+	case "destroy":
+		resp = ch.handleDestroy(cmd.Args)
 	default:
 		resp = types.Response{
 			Success: false,
@@ -696,4 +699,40 @@ func (ch *CommandHandler) ensureDirPermissions(root string) {
 	if out, err := chmodFileCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod files in %s: %v - %s", root, err, string(out))
 	}
+}
+func (ch *CommandHandler) handleDestroy(args map[string]interface{}) types.Response {
+	appName, ok := StringArg(args, "appName")
+	if !ok {
+		return types.Response{Success: false, Message: "missing 'appName' argument"}
+	}
+
+	log.Printf("[destroy] Destroying app: %s", appName)
+
+	// 1. Stop and remove services
+	services, err := ch.processManager.FindAppServices(appName)
+	if err == nil {
+		for _, s := range services {
+			log.Printf("[destroy] Removing service: %s", s)
+			_ = ch.processManager.RemoveService(s)
+		}
+	}
+
+	// 2. Remove Caddy configuration
+	if err := ch.caddyManager.RemoveConfig(appName); err != nil {
+		log.Printf("[destroy] Warning: failed to remove Caddy config: %v", err)
+	}
+	_ = ch.caddyManager.Reload()
+
+	// 3. Remove application files
+	appDir := filepath.Join(appsDir, appName)
+	if err := os.RemoveAll(appDir); err != nil {
+		log.Printf("[destroy] Warning: failed to remove app directory %s: %v", appDir, err)
+	}
+
+	// 4. Clean up state
+	ch.stateManager.SetPort(appName, 0)
+	_ = ch.stateManager.Save()
+
+	log.Printf("[destroy] App %s successfully destroyed", appName)
+	return types.Response{Success: true, Message: fmt.Sprintf("app %s successfully destroyed", appName)}
 }

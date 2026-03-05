@@ -78,53 +78,13 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 
 	p.log.Info("Checking for existing CloudFront distribution...")
 	var existingDistID string
-	var marker *string
+	dists, err := p.findManagedDistributions(ctx, client, callerRef, domain)
+	if err != nil {
+		return "", fmt.Errorf("failed to discover distributions: %w", err)
+	}
 
-	for {
-		listOutput, err := client.ListDistributions(ctx, &cloudfront.ListDistributionsInput{
-			Marker: marker,
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to list distributions: %w", err)
-		}
-
-		if listOutput.DistributionList != nil {
-			// 1st pass: Match by comment (managed by nextdeploy)
-			for _, dist := range listOutput.DistributionList.Items {
-				if dist.Comment != nil && *dist.Comment == callerRef {
-					existingDistID = *dist.Id
-					break
-				}
-			}
-
-			// 2nd pass: Match by domain alias (CNAME) if not found by comment
-			if existingDistID == "" && domain != "" {
-				for _, dist := range listOutput.DistributionList.Items {
-					if dist.Aliases != nil {
-						for _, alias := range dist.Aliases.Items {
-							if alias == domain {
-								existingDistID = *dist.Id
-								p.log.Warn("CloudFront distribution found by domain alias (%s) instead of comment. Adopting distribution: %s", domain, existingDistID)
-								break
-							}
-						}
-					}
-					if existingDistID != "" {
-						break
-					}
-				}
-			}
-		}
-
-		if existingDistID != "" {
-			break
-		}
-
-		// Check if there are more pages
-		if listOutput.DistributionList == nil || listOutput.DistributionList.NextMarker == nil || *listOutput.DistributionList.NextMarker == "" {
-			break
-		}
-		marker = listOutput.DistributionList.NextMarker
+	if len(dists) > 0 {
+		existingDistID = dists[0]
 	}
 
 	if existingDistID != "" {
