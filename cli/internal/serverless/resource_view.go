@@ -170,6 +170,69 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
             margin-right: 6px;
         }
 
+        .dns-guide {
+            background: linear-gradient(135deg, #1e1b4b 0%%, #312e81 100%%);
+            border: 2px solid var(--accent);
+            border-radius: 16px;
+            padding: 32px;
+            margin-top: 40px;
+            box-shadow: 0 0 30px rgba(79, 70, 229, 0.2);
+        }
+
+        .dns-guide h2 {
+            margin: 0 0 20px 0;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .dns-table {
+            width: 100%%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .dns-table th, .dns-table td {
+            padding: 16px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .dns-table th {
+            background: rgba(255,255,255,0.05);
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+        }
+
+        .dns-table td {
+            font-family: 'JetBrains Mono', monospace;
+            color: #fff;
+        }
+
+        .loud-notice {
+            background: #facc15;
+            color: #000;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%% { transform: scale(1); }
+            50%% { transform: scale(1.02); }
+            100%% { transform: scale(1); }
+        }
+
         a {
             color: var(--accent);
             text-decoration: none;
@@ -206,6 +269,35 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
                     style CS fill:#15171e,stroke:#334155,color:#fff
                     style S fill:#064e3b,stroke:#10b981,color:#fff
             </div>
+        <div class="dns-guide">
+            <div class="loud-notice">
+                <span>⚠️ ACTION REQUIRED: Update your DNS records to go live!</span>
+            </div>
+            <h2>🌐 DNS Configuration Guide</h2>
+            <p style="color: var(--text-muted); margin-bottom: 20px;">Point your domain to your new CloudFront distribution using these settings:</p>
+            
+            <table class="dns-table">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Host / Name</th>
+                        <th>Value / Points To</th>
+                        <th>TTL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>CNAME</td>
+                        <td>%s</td>
+                        <td>%s</td>
+                        <td>Auto / 3600</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 20px;">
+                * If using Route53, it is recommended to use an <strong>A Record (Alias)</strong> pointing to the CloudFront distribution for better performance.
+            </p>
         </div>
 
         <div class="grid">
@@ -291,6 +383,8 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 		resMap.FunctionURL,
 		resMap.S3BucketName,
 		resMap.CertificateARN,
+		displayDomain,
+		resMap.CloudFrontDomain,
 		shared.Version,
 		resMap.DeploymentTime.Format(time.RFC1123),
 	)
