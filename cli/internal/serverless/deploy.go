@@ -95,7 +95,7 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 		log.Error("Cache invalidation failed (non-fatal): %v", err)
 	}
 
-	log.Info("✅ Serverless deployment complete! Application is live.")
+	log.Info("Serverless deployment complete! Application is live.")
 
 	// ── 7. Generate Visual Report ───────────────────────────────────────────
 	resMap, err := p.GetResourceMap(ctx, cfg)
@@ -103,7 +103,7 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 		reportPath, err := GenerateResourceView(&cfg.App, resMap)
 		if err == nil {
 			log.Info("════════════════════════════════════════════════════════════")
-			log.Success("✨  Visual Deployment Report generated: %s", reportPath)
+			log.Success("Visual Deployment Report generated: %s", reportPath)
 			log.Info("    Open this file in your browser to see your provisioned resources.")
 			log.Info("    DNS setup instructions are included in the report and dns.md!")
 			log.Info("════════════════════════════════════════════════════════════")
