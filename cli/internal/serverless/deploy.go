@@ -102,6 +102,7 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	if err == nil {
 		reportPath, err := GenerateResourceView(&cfg.App, resMap)
 		if err == nil {
+			//TODO this should more loud so that the user can find it easily for dns guidance
 			log.Info("════════════════════════════════════════════════════════════")
 			log.Success("Visual Deployment Report generated: %s", reportPath)
 			log.Info("    Open this file in your browser to see your provisioned resources.")

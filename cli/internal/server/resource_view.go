@@ -93,144 +93,150 @@ func GenerateVPSResourceView(appCfg *config.AppConfig, resMap VPSResourceMap) (s
             display: inline-block; padding: 6px 16px; border-radius: 99px;
             font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
             letter-spacing: 0.05em; background: var(--accent-glow); color: #c7d2fe;
-            border: 1px solid var(--accent); margin-top: 15px; backdrop-filter: blur(4px);
         }
 
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; margin-top: 40px; }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 60px 20px;
+        }
+
+        header {
+            margin-bottom: 50px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .brand-group h1 {
+            font-size: 3rem;
+            font-weight: 800;
+            background: linear-gradient(to right, #fff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.04em;
+        }
+
+        .status-badge {
+            padding: 8px 18px;
+            border-radius: 99px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            background: rgba(139, 92, 246, 0.1);
+            color: var(--primary);
+            border: 1px solid var(--primary-glow);
+            box-shadow: 0 0 20px var(--primary-glow);
+        }
+
+        .bento-grid {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            grid-gap: 24px;
+        }
+
         .card {
-            background: var(--card); border: 1px solid var(--border); border-radius: 20px;
-            padding: 24px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative; overflow: hidden; backdrop-filter: blur(10px);
-        }
-        .card:hover {
-            transform: translateY(-6px); background: var(--card-hover);
-            border-color: var(--border-hover); box-shadow: 0 20px 30px -15px rgba(0, 0, 0, 0.7);
-        }
-
-        .card h3 { margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 10px; color: #fff; font-weight: 600; }
-        .card p { margin: 8px 0; font-size: 0.9rem; color: var(--text-muted); }
-
-        .mono {
-            font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.4);
-            padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; word-break: break-all;
-            display: block; margin-top: 6px; color: #a5b4fc; border: 1px solid rgba(255,255,255,0.05);
+            background: var(--surface);
+            backdrop-filter: var(--glass);
+            -webkit-backdrop-filter: var(--glass);
+            border: 1px solid var(--surface-border);
+            border-radius: 32px;
+            padding: 32px;
+            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        .diagram {
-            background: var(--card); border: 1px solid var(--border); border-radius: 24px;
-            padding: 40px; margin-top: 40px; min-height: 400px; position: relative; overflow: hidden;
+        .card:hover { border-color: rgba(255,255,255,0.2); transform: translateY(-5px); }
+
+        .card-main { grid-column: span 8; }
+        .card-side { grid-column: span 4; }
+        .card-full { grid-column: span 12; }
+
+        .label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 12px;
+            display: block;
         }
 
-        .dns-guide {
-            background: linear-gradient(135deg, #1e1b4b 0%%, #312e81 100%%);
-            border: 2px solid var(--accent); border-radius: 24px; padding: 40px; margin: 40px 0;
-            position: relative; overflow: hidden;
+        .hero-value {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--text-main);
+            margin-bottom: 15px;
         }
 
-        .loud-notice {
-            background: var(--danger); color: #fff; padding: 24px 32px; border-radius: 16px;
-            font-weight: 800; margin-bottom: 32px; display: flex; flex-direction: column;
-            align-items: center; gap: 12px; animation: pulse-danger 2s infinite;
-            text-align: center; border: 2px solid #fff; position: relative; z-index: 10;
-        }
+        .mono { font-family: 'JetBrains Mono', monospace; font-size: 1rem; color: var(--accent); }
 
-        @keyframes pulse-danger {
-            0%% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-            70%% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
-            100%% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        .diagram-container {
+            margin-top: 30px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 20px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.05);
         }
 
         .dns-table {
-            width: 100%%; border-collapse: collapse; margin: 20px 0 30px;
-            background: rgba(0,0,0,0.3); border-radius: 16px; overflow: hidden; border: 1px solid var(--border);
+            width: 100%%;
+            border-collapse: collapse;
         }
-        .dns-table th { background: rgba(79, 70, 229, 0.2); color: var(--text); padding: 16px; text-align: left; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; }
-        .dns-table td { padding: 16px; border-bottom: 1px solid var(--border); font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #fff; }
 
-        .status-dot { width: 10px; height: 10px; background: var(--success); border-radius: 50%%; display: inline-block; box-shadow: 0 0 15px var(--success-glow); margin-right: 8px; }
+        .dns-table th {
+            text-align: left;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            padding: 15px;
+            border-bottom: 1px solid var(--surface-border);
+        }
 
-        .footer { margin-top: 80px; text-align: center; color: var(--text-dim); font-size: 0.8rem; padding: 20px; border-top: 1px solid var(--border); }
-        a { color: var(--accent); text-decoration: none; }
-        a:hover { text-decoration: underline; }
+        .dns-table td {
+            padding: 18px 15px;
+            font-size: 0.95rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .footer {
+            margin-top: 80px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            opacity: 0.6;
+        }
+
+        @media (max-width: 1024px) {
+            .card-main, .card-side { grid-column: span 12; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🚀 Deployment Map (VPS)</h1>
-            <div class="badge">
-                <span class="status-dot"></span>
-                %s
+            <div class="brand-group">
+                <span class="label">Production Instance Ready</span>
+                <h1>%s</h1>
             </div>
-            <p style="color: var(--text-muted); margin-top: 20px;">
-                Resources provisioned for <strong>%s</strong> on <strong>%s</strong>
-            </p>
+            <div class="status-badge">Instance Running</div>
         </header>
 
-        <div class="diagram" id="diagram-container">
-            <div class="mermaid">
-                graph TB
-                    subgraph T ["🌐 Traffic Layer"]
-                        U["👤 User"] --> C["🛡️ Caddy Server<br/><small>Edge Proxy + SSL</small>"]
-                    end
-                    
-                    subgraph CS ["⚡ Application Layer"]
-                        C --> N["🟢 Next.js App<br/><small>Port %d</small>"]
-                        N --> DB["🗄️ Database"]
+        <div class="bento-grid">
+            <!-- Access Section -->
+            <div class="card card-main">
+                <span class="label">Live URL</span>
+                <div class="hero-value"><a href="https://%s" style="color: inherit; text-decoration: none;">https://%s</a></div>
+                
+                <div class="diagram-container">
+                    <span class="label">Infrastructure Flow</span>
+                    <div class="mermaid">
+                        graph LR
+                            U["👤 User"] -- "HTTPS (Port 443)" --> C["🏗️ Caddy Edge"]
+                            subgraph VPS ["Target Server: %s"]
+                                C -- "Internal Proxy" --> APP["🚀 %s (Port %d)"]
+                            end
+                            style VPS fill:rgba(255,255,255,0.02),stroke:var(--primary),stroke-dasharray: 5 5
+                            style C fill:var(--primary),color:#fff
+                            style APP fill:var(--accent),color:#000
                     </div>
-
-                    style T fill:#1e1b4b,stroke:#4f46e5,stroke-width:2px
-                    style CS fill:#15171e,stroke:#334155,stroke-width:2px
-                    style U fill:#2d3748,stroke:#718096
-                    style C fill:#4f46e5,stroke:#6366f1
-                    style N fill:#4f46e5,stroke:#6366f1
-            </div>
-        </div>
-
-        <div class="dns-guide">
-            <div class="loud-notice">
-                <span style="font-size: 1.5rem;">⚠️ CRITICAL: DNS SETUP REQUIRED ⚠️</span>
-                <span style="font-size: 1rem;">Your application is NOT live until you point your domain to this IP.</span>
-            </div>
-
-            <h2 style="font-size: 1.8rem; margin-bottom: 10px;">🌐 %s DNS Guide</h2>
-            <p style="color: var(--text-muted); margin-bottom: 30px; font-size: 1.1rem;">
-                Point your domain to **%s** using these records:
-            </p>
-
-            <table class="dns-table">
-                <thead>
-                    <tr>
-                        <th>Type</th>
-                        <th>Host / Name</th>
-                        <th>Value / Points To</th>
-                        <th>Purpose</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>A Record</td>
-                        <td><code>@</code> (Root)</td>
-                        <td><code>%s</code></td>
-                        <td>Primary Traffic</td>
-                    </tr>
-                    <tr>
-                        <td>CNAME</td>
-                        <td><code>www</code></td>
-                        <td><code>%s</code></td>
-                        <td>WWW Redirection</td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <div style="background: rgba(79, 70, 229, 0.1); border-left: 4px solid var(--accent); padding: 20px; border-radius: 0 8px 8px 0; color: #c7d2fe;">
-                <strong>💡 Automatic SSL (TLS):</strong>
-                <p style="margin-top: 8px; font-size: 0.9rem;">Once DNS propagates, Caddy will automatically provision a Let's Encrypt certificate on the first request. No extra steps needed!</p>
-            </div>
-
-            <p style="font-size: 1rem; color: #facc15; margin-top: 30px; padding: 15px; background: rgba(250, 204, 21, 0.1); border-radius: 8px; text-align: center;">
-                <strong>📅 Propagation usually takes 5-10 minutes.</strong>
-            </p>
         </div>
 
         <div class="grid">

@@ -398,183 +398,64 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
         .dns-table th {
             background: rgba(79, 70, 229, 0.2);
             color: var(--text);
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            padding: 16px;
             text-align: left;
-            font-weight: 600;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            padding: 10px;
+            border-bottom: 1px solid var(--surface-border);
         }
 
         .dns-table td {
-            padding: 16px;
-            border-bottom: 1px solid var(--border);
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.8rem;
-            color: #fff;
-        }
-
-        .dns-table tr:last-child td {
-            border-bottom: none;
-        }
-
-        .dns-table tr:hover td {
-            background: rgba(79, 70, 229, 0.1);
-        }
-
-        .provider-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: rgba(255,255,255,0.05);
-            padding: 4px 12px;
-            border-radius: 99px;
-            font-size: 0.75rem;
-            margin-left: 10px;
-            border: 1px solid var(--border);
-        }
-
-        .warning-box {
-            background: rgba(245, 158, 11, 0.1);
-            border-left: 4px solid var(--warning);
-            padding: 16px 24px;
-            margin: 20px 0;
-            border-radius: 0 8px 8px 0;
-            color: #fcd34d;
-        }
-
-        .tip-box {
-            background: rgba(16, 185, 129, 0.1);
-            border-left: 4px solid var(--success);
-            padding: 16px 24px;
-            margin: 20px 0;
-            border-radius: 0 8px 8px 0;
-            color: #6ee7b7;
-        }
-
-        .propagation-timeline {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            margin: 20px 0;
-            text-align: center;
-        }
-
-        .timeline-item {
-            background: rgba(255,255,255,0.03);
-            padding: 12px;
-            border-radius: 8px;
-            border: 1px solid var(--border);
-        }
-
-        .timeline-item .time {
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: var(--accent);
-            display: block;
-        }
-
-        .timeline-item .label {
-            font-size: 0.7rem;
-            color: var(--text-muted);
-        }
-
-        .verification-command {
-            background: #0d0f14;
-            padding: 16px 20px;
-            border-radius: 12px;
-            font-family: 'JetBrains Mono', monospace;
-            border: 1px solid var(--border);
-            margin: 20px 0;
-            position: relative;
-        }
-
-        .verification-command::before {
-            content: '$';
-            position: absolute;
-            left: -10px;
-            top: 50%%;
-            transform: translateY(-50%%);
-            color: var(--accent);
-            font-size: 1.2rem;
+            padding: 12px 10px;
+            font-size: 0.85rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
         }
 
         .copy-btn {
-            background: var(--accent);
-            color: #fff;
-            border: none;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-size: 0.7rem;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: var(--text-muted);
+            padding: 4px 8px;
+            border-radius: 6px;
             cursor: pointer;
-            margin-left: 10px;
+            font-size: 0.7rem;
             transition: all 0.2s;
         }
 
-        .copy-btn:hover {
-            background: var(--accent-soft);
-            transform: scale(1.05);
+        .copy-btn:hover { background: var(--primary); color: white; }
+
+        .footer {
+            margin-top: 60px;
+            text-align: center;
+            padding-top: 20px;
+            border-top: 1px solid var(--surface-border);
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         @media (max-width: 768px) {
-            h1 { font-size: 2rem; }
-            .dns-guide { padding: 20px; }
-            .propagation-timeline { grid-template-columns: repeat(2, 1fr); }
+            .bento-grid { grid-template-columns: 1fr; }
+            .card-large, .card-medium, .card-small, .card-full { grid-column: span 1; }
+            header { flex-direction: column; align-items: flex-start; gap: 20px; }
         }
     </style>
 </head>
 <body>
+    <div class="mesh-bg"></div>
     <div class="container">
         <header>
-            <h1>🚀 Deployment Map</h1>
-            <div class="badge">
-                <span class="status-dot %s"></span>
-                %s
+            <div class="brand-group">
+                <span class="label">Deployment Report</span>
+                <h1>%s</h1>
             </div>
-            <p style="color: var(--text-muted); margin-top: 20px;">
-                Resources provisioned for <strong>%s</strong> in <strong>%s</strong>
-            </p>
+            <div class="status-badge">%s</div>
         </header>
 
-        <div class="diagram" id="diagram-container">
-            <div class="mermaid">
-                graph TB
-                    subgraph T ["🌐 Traffic Layer"]
-                        U["👤 User"] --> CF["📡 CloudFront<br/><small>%s</small>"]
-                    end
-
-                    subgraph CS ["⚡ Compute & Storage Layer"]
-                        CF --> L["🔷 Lambda<br/><small>%s</small>"]
-                        L --> S3["📦 S3 Assets<br/><small>%s</small>"]
-                        L --> SM["🔐 Secrets Manager"]
-                    end
-
-                    subgraph S ["🔒 Security Layer"]
-                        ACM["📜 SSL Certificate"] -.-> CF
-                    end
-
-                    style T fill:#1e1b4b,stroke:#4f46e5,stroke-width:2px
-                    style CS fill:#15171e,stroke:#334155,stroke-width:2px
-                    style S fill:#064e3b,stroke:#10b981,stroke-width:2px
-                    style U fill:#2d3748,stroke:#718096
-                    style CF fill:#4f46e5,stroke:#6366f1
-                    style L fill:#4f46e5,stroke:#6366f1
-            </div>
-        </div>
-
-        <div class="dns-guide">
-            %s
-
-            <h2 style="font-size: 1.8rem; margin-bottom: 10px;">%s %s DNS Setup</h2>
-            <p style="color: var(--text-muted); margin-bottom: 30px; font-size: 1.1rem;">
-                Follow these exact steps for %s to make your site live.
-            </p>
-
-            <div class="warning-box">
-                <strong>⏱️ DNS Propagation Timeline:</strong>
-                <div class="propagation-timeline">
-                    <div class="timeline-item">
-                        <span class="time">⚡</span>
                         <span class="label">Your Provider</span>
                     </div>
                     <div class="timeline-item">

@@ -74,12 +74,16 @@
       become: true
       ignore_errors: true # Caddy might not be installed yet, will retry later
 
-    - name: "Phase 1 | Gather system info"
+    - name: "Phase 1 | System info | Gather all required info in one RTT"
       ansible.builtin.shell: |
         echo "uname  : $(uname -a)"
         echo "disk   : $(df -h / | awk 'NR==2')"
         echo "memory : $(free -m | awk 'NR==2')"
         echo "uptime : $(uptime)"
+        echo "node   : $(node --version 2>/dev/null || echo 'missing')"
+        echo "go     : $(go version 2>/dev/null || echo 'missing')"
+        echo "bun    : $(bun --version 2>/dev/null || echo 'missing')"
+        echo "doppler: $(doppler --version 2>/dev/null || echo 'missing')"
       register: sysinfo
       changed_when: false
 
@@ -145,18 +149,10 @@
     # PHASE 2 – Node.js  (3-tier glibc fallback)
     # ────────────────────────────────────────────────────────────────────────────
 
-    - name: "Phase 2 | Node.js | Check if already functional"
-      ansible.builtin.shell: |
-        set +e
-        OUT=$(node --version 2>&1)
-        RC=$?
-        echo "$OUT" | grep -qi 'glibc' && exit 1
-        exit $RC
-      register: node_pre
-      failed_when: false
-      changed_when: false
+    - name: "Phase 2 | Node.js | check pre-existence"
+      ansible.builtin.set_fact:
+        node_installed: "{{ 'missing' not in (sysinfo.stdout_lines | select('match', '^node.*') | first | default('missing')) }}"
 
-    # Tier 1 – webi latest (glibc 2.28+)
     - name: "Phase 2 | Node.js | Tier-1: install via webi latest"
       ansible.builtin.shell: |
         set -euo pipefail
@@ -167,7 +163,7 @@
         done
       args:
         executable: /bin/bash
-      when: node_pre.rc != 0
+      when: not node_installed
 
     - name: "Phase 2 | Node.js | Re-check after webi latest"
       ansible.builtin.shell: >
@@ -176,9 +172,8 @@
       register: node_after_latest
       failed_when: false
       changed_when: false
-      when: node_pre.rc != 0
+      when: not node_installed
 
-    # Tier 2 – webi@18 (glibc 2.27+, Ubuntu 18.04 / Debian Buster)
     - name: "Phase 2 | Node.js | Tier-2: install via webi@18"
       ansible.builtin.shell: |
         set -euo pipefail
@@ -190,7 +185,7 @@
       args:
         executable: /bin/bash
       when:
-        - node_pre.rc != 0
+        - not node_installed
         - node_after_latest is defined
         - node_after_latest.rc != 0
 
@@ -220,7 +215,7 @@
       args:
         executable: /bin/bash
       when:
-        - node_pre.rc != 0
+        - not node_installed
         - node_after_latest is defined
         - node_after_latest.rc != 0
         - node_after_18 is defined
@@ -239,15 +234,15 @@
         fail_msg: >-
           node is not runnable after all three install tiers.
           glibc on this host may be older than 2.17 — manual intervention required.
+      when: not node_installed
 
     # ────────────────────────────────────────────────────────────────────────────
     # PHASE 2 – Bun
     # ────────────────────────────────────────────────────────────────────────────
 
-    - name: "Phase 2 | Bun | Check if already installed"
-      ansible.builtin.stat:
-        path: /usr/local/bin/bun
-      register: bun_stat_pre
+    - name: "Phase 2 | Bun | check pre-existence"
+      ansible.builtin.set_fact:
+        bun_installed: "{{ 'missing' not in (sysinfo.stdout_lines | select('match', '^bun.*') | first | default('missing')) }}"
 
     - name: "Phase 2 | Bun | Install via official installer"
       ansible.builtin.shell: |
@@ -283,7 +278,7 @@
         fi
       args:
         executable: /bin/bash
-      when: not bun_stat_pre.stat.exists
+      when: not bun_installed
 
     - name: "Phase 2 | Bun | Verify symlink is executable"
       ansible.builtin.stat:
@@ -304,12 +299,9 @@
     # PHASE 2 – Go  (auto-resolves latest stable; falls back to go_version_fallback)
     # ────────────────────────────────────────────────────────────────────────────
 
-    - name: "Phase 2 | Go | Check if already installed"
-      ansible.builtin.shell: >
-        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        go version 2>/dev/null || echo missing
-      register: go_check
-      changed_when: false
+    - name: "Phase 2 | Go | check pre-existence"
+      ansible.builtin.set_fact:
+        go_installed: "{{ 'missing' not in (sysinfo.stdout_lines | select('match', '^go.*') | first | default('missing')) }}"
 
     - name: "Phase 2 | Go | Resolve latest stable version from go.dev"
       ansible.builtin.shell: |
@@ -327,7 +319,7 @@
         executable: /bin/bash
       register: go_resolved_version
       changed_when: false
-      when: "'go version' not in go_check.stdout"
+      when: not go_installed
 
     - name: "Phase 2 | Go | Install go{{ go_resolved_version.stdout | default(go_version_fallback) | trim }}"
       ansible.builtin.shell: |
@@ -356,7 +348,7 @@
       args:
         executable: /bin/bash
       become: true
-      when: "'go version' not in go_check.stdout"
+      when: not go_installed
 
     - name: "Phase 2 | Go | Final check"
       ansible.builtin.shell: >
@@ -371,15 +363,15 @@
         fail_msg: >-
           go installation failed — 'go version' not found in PATH.
           Attempted version: {{ go_resolved_version.stdout | default(go_version_fallback) | trim }}
+      when: not go_installed
 
     # ────────────────────────────────────────────────────────────────────────────
     # PHASE 2 – Doppler CLI
     # ────────────────────────────────────────────────────────────────────────────
 
-    - name: "Phase 2 | Doppler | Check if already installed"
-      ansible.builtin.stat:
-        path: /usr/local/bin/doppler
-      register: doppler_stat
+    - name: "Phase 2 | Doppler | check pre-existence"
+      ansible.builtin.set_fact:
+        doppler_installed: "{{ 'missing' not in (sysinfo.stdout_lines | select('match', '^doppler.*') | first | default('missing')) }}"
 
     - name: "Phase 2 | Doppler | Install CLI"
       ansible.builtin.shell: |
@@ -395,7 +387,7 @@
         fi
       args:
         executable: /bin/bash
-      when: not doppler_stat.stat.exists
+      when: not doppler_installed
 
     - name: "Phase 2 | Doppler | Assert installed"
       ansible.builtin.shell: >
@@ -409,12 +401,13 @@
     # PHASE 2 – Caddy
     # ────────────────────────────────────────────────────────────────────────────
 
-    - name: "Phase 2 | Caddy | Check if already installed"
-      ansible.builtin.shell: >
-        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        sh -c 'command -v caddy 2>/dev/null || echo missing'
-      register: caddy_which
-      changed_when: false
+    - name: "Phase 2 | Caddy | check pre-existence"
+      ansible.builtin.set_fact:
+        caddy_installed: "{{ 'missing' not in (sysinfo.stdout_lines | select('match', '^caddy.*') | first | default('missing')) }}"
+
+    - name: "Phase 2 | Caddy | Prepare install logic"
+      ansible.builtin.set_fact:
+        install_caddy: "{{ not caddy_installed }}"
 
     # ── apt path ─────────────────────────────────────────────────────────────
 
@@ -428,7 +421,7 @@
       become: true
       when:
         - ansible_pkg_mgr == "apt"
-        - "'missing' in caddy_which.stdout"
+        - install_caddy
 
     - name: "Phase 2 | Caddy (apt) | Add GPG key"
       ansible.builtin.shell: |
@@ -441,7 +434,7 @@
       become: true
       when:
         - ansible_pkg_mgr == "apt"
-        - "'missing' in caddy_which.stdout"
+        - install_caddy
 
     - name: "Phase 2 | Caddy (apt) | Add repository"
       ansible.builtin.shell: |
@@ -453,7 +446,7 @@
       become: true
       when:
         - ansible_pkg_mgr == "apt"
-        - "'missing' in caddy_which.stdout"
+        - install_caddy
 
     - name: "Phase 2 | Caddy (apt) | Install package"
       ansible.builtin.apt:
@@ -463,7 +456,7 @@
       become: true
       when:
         - ansible_pkg_mgr == "apt"
-        - "'missing' in caddy_which.stdout"
+        - install_caddy
 
     - name: "Phase 2 | Caddy (apt) | Enable and start service"
       ansible.builtin.systemd:
@@ -485,7 +478,7 @@
       register: copr_plugin
       when:
         - ansible_pkg_mgr == "yum"
-        - "'missing' in caddy_which.stdout"
+        - install_caddy
 
     - name: "Phase 2 | Caddy (yum) | Enable COPR repo"
       ansible.builtin.command: yum copr enable -y @caddy/caddy
@@ -495,7 +488,7 @@
       changed_when: "'enabled' in (copr_enable.stdout | default(''))"
       when:
         - ansible_pkg_mgr == "yum"
-        - "'missing' in caddy_which.stdout"
+        - install_caddy
         - copr_plugin is not failed
 
     - name: "Phase 2 | Caddy (yum) | Install via COPR"
@@ -507,7 +500,7 @@
       register: caddy_copr
       when:
         - ansible_pkg_mgr == "yum"
-        - "'missing' in caddy_which.stdout"
+        - install_caddy
         - copr_enable is not failed
 
     - name: "Phase 2 | Caddy (yum) | Static binary fallback"
@@ -537,7 +530,7 @@
       become: true
       when:
         - ansible_pkg_mgr == "yum"
-        - "'missing' in caddy_which.stdout"
+        - install_caddy
         - caddy_copr is failed or caddy_copr is skipped
 
     - name: "Phase 2 | Caddy (yum) | Write systemd unit"
@@ -565,7 +558,7 @@
       become: true
       when:
         - ansible_pkg_mgr == "yum"
-        - "'missing' in caddy_which.stdout"
+        - install_caddy
 
     - name: "Phase 2 | Caddy (yum) | Create config directory"
       ansible.builtin.file:

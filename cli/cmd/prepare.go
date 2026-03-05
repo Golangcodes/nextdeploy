@@ -265,17 +265,23 @@ func writeInventory(tmpDir, serverName string, cfg config.ServerConfig) (string,
 }
 
 func runAnsible(ctx context.Context, inventoryPath, playbookPath string, out io.Writer, verbose bool) error {
+	sshArgs := "-o StrictHostKeyChecking=accept-new -o ControlMaster=auto -o ControlPersist=30m -o Compression=yes"
+
 	args := []string{
 		"-i", inventoryPath,
 		playbookPath,
-		"--ssh-extra-args=-o StrictHostKeyChecking=accept-new -o ControlMaster=auto -o ControlPersist=60s",
+		fmt.Sprintf("--ssh-extra-args=%s", sshArgs),
 	}
 
 	if verbose {
 		args = append(args, "-v")
 	}
 
-	env := append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")
+	env := append(os.Environ(),
+		"ANSIBLE_FORCE_COLOR=1",
+		"ANSIBLE_PIPELINING=True",
+		"ANSIBLE_HOST_KEY_CHECKING=False",
+	)
 
 	// #nosec G204
 	ap := exec.CommandContext(ctx, "ansible-playbook", args...)
