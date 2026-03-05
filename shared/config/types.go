@@ -244,3 +244,21 @@ func SaveConfig(path string, cfg *NextDeployConfig) error {
 
 	return nil
 }
+
+// ResolveTargetType returns the effective target type (vps or serverless)
+// by checking the explicit field, the serverless config block, and an optional metadata fallback.
+func (cfg *NextDeployConfig) ResolveTargetType(metaTarget string) string {
+	if cfg.TargetType != "" {
+		return cfg.TargetType
+	}
+	// If serverless block is present, assume serverless
+	if cfg.Serverless != nil {
+		return "serverless"
+	}
+	// Fallback to metadata if provided
+	if metaTarget != "" {
+		return metaTarget
+	}
+	// Default to VPS
+	return "vps"
+}

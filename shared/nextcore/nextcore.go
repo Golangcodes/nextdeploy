@@ -147,7 +147,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 			Domain:      cfg.App.Domain,
 			Port:        cfg.App.Port,
 			Environment: cfg.App.Environment,
-			TargetType:  cfg.TargetType,
+			TargetType:  cfg.ResolveTargetType(""),
 		},
 		BuildCommand:     buildCommand,
 		StartCommand:     startCommand,

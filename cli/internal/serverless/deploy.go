@@ -136,12 +136,10 @@ func Rollback(ctx context.Context, cfg *config.NextDeployConfig) error {
 		return fmt.Errorf("serverless rollback failed: %w", err)
 	}
 
-	log.Info("✅ Serverless rollback complete!")
+	log.Info(" Serverless rollback complete!")
 	return nil
 }
 
-// loadLocalSecrets reads plaintext/encrypted secrets from the local SecretManager
-// and returns a flat map suitable for cloud injection.
 func loadLocalSecrets(cfg *config.NextDeployConfig) (map[string]string, error) {
 	sm, err := secrets.NewSecretManager(
 		secrets.WithConfig(cfg),
@@ -150,7 +148,6 @@ func loadLocalSecrets(cfg *config.NextDeployConfig) (map[string]string, error) {
 		return nil, fmt.Errorf("failed to init secret manager: %w", err)
 	}
 
-	// Load from the .env file associated with this app if it exists
 	envFilePath := filepath.Join(".nextdeploy", ".env")
 	if _, statErr := os.Stat(envFilePath); statErr == nil {
 		if err := sm.ImportSecrets(envFilePath); err != nil {
@@ -158,7 +155,5 @@ func loadLocalSecrets(cfg *config.NextDeployConfig) (map[string]string, error) {
 		}
 	}
 
-	// Also honour process environment variables (NEXT_PUBLIC_*, etc.)
-	// Future: add Doppler/1Password/Vault provider here via sm.WithProvider(...)
 	return sm.FlattenSecrets(), nil
 }

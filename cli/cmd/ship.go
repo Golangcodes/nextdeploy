@@ -48,11 +48,14 @@ var shipCmd = &cobra.Command{
 			_ = json.Unmarshal(metadataBytes, &meta)
 		}
 
+		// --- RESOLVE EFFECTIVE TARGET ---
+		effectiveTarget := cfg.ResolveTargetType(meta.Config.TargetType)
+
 		// --- BRANCH BY TARGET TYPE ---
-		if cfg.TargetType == "serverless" {
+		if effectiveTarget == "serverless" {
 			log.Info("Deployment Target: SERVERLESS (AWS Lambda + S3 + CloudFront)")
 			if cfg.Serverless == nil {
-				log.Error("TargetType is 'serverless' but 'serverless' config block is missing.")
+				log.Error("Inferred 'serverless' target but 'serverless' config block is missing.")
 				os.Exit(1)
 			}
 
