@@ -151,6 +151,35 @@ var shipCmd = &cobra.Command{
 		}
 
 		log.Info("Ship successful! Deployment instructions relayed to the daemon.")
+
+		// --- 8. Generate VPS Visual Report ---
+		port := meta.Config.Port
+		if port == 0 {
+			port = cfg.App.Port
+		}
+		if port == 0 {
+			port = 3000 // Default Next.js port
+		}
+
+		resMap := server.VPSResourceMap{
+			AppName:        cfg.App.Name,
+			Environment:    "production",
+			ServerIP:       deploymentServer,
+			CustomDomain:   cfg.App.Domain,
+			Port:           port,
+			DeploymentTime: time.Now(),
+		}
+
+		reportPath, err := server.GenerateVPSResourceView(&cfg.App, resMap)
+		if err == nil {
+			log.Info("════════════════════════════════════════════════════════════")
+			log.Success("✨  Visual Deployment Report generated: %s", reportPath)
+			log.Info("    Open this file in your browser to see your provisioned resources.")
+			log.Info("    DNS setup instructions are included in the report and dns.md!")
+			log.Info("════════════════════════════════════════════════════════════")
+		} else {
+			log.Warn("Failed to generate visual report: %v", err)
+		}
 	},
 }
 
