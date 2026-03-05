@@ -59,9 +59,8 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Use the raw template to preserve comments
-	configContent := config.GetSampleConfigTemplate()
+	configContent := config.GetSampleConfigTemplate(targetType)
 	configContent = strings.ReplaceAll(configContent, "name: example-app", "name: "+appName)
-	configContent = strings.ReplaceAll(configContent, "target_type: vps", "target_type: "+targetType)
 
 	if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0600); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)

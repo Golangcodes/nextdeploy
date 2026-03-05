@@ -5,40 +5,18 @@ import (
 	"path/filepath"
 )
 
-const sampleConfig = `
+const commonHeader = `
 # ==============================
 # NEXTDEPLOY CONFIGURATION FILE
 # ==============================
-# This YAML defines everything needed to build, deploy, monitor, and scale your app on a VPS/SERVERlESS using NextDeploy.
+# This YAML defines everything needed to build, deploy, monitor, and scale your app on a VPS/SERVERLESS using NextDeploy.
 # Think of it as your infrastructure-as-code for end-to-end delivery.
 
 # NOTE: DO NOT ADD YOUR SECRETS AS OF NOW WE WORKING ON SECRET MANAGMENT THIS IS HOW WE INTENT TO USE
 version: "1.0" # Config file versioning for forward compatibility with future NextDeploy updates
+`
 
-# -----
-# TARGET TYPE — choose between "vps" (traditional server) or "serverless" (AWS Lambda + S3 + CloudFront)
-# -----
-target_type: serverless
-
-# -----
-# APP METADATA
-# -----
-app:
-  name: example-app # [REQUIRED] Unique app name used for identification
-  environment: production # [REQUIRED] production | staging | development
-  domain: app.example.com # Public domain for your app
-  port: 3000 # [REQUIRED] Internal port your app listens on
-
-# -----
-# DEPLOYMENT SERVERS
-# -----
-servers:
-  - name: "production-01" # [REQUIRED] Friendly name for the server
-    host: 1.2.3.4 # [REQUIRED] IP or hostname of the server
-    username: ubuntu # [REQUIRED] SSH user (e.g., ubuntu, debian, root)
-    key_path: ~/.ssh/id_rsa  # [REQUIRED] Path to your private SSH key
-    # password: "" # Optional: SSH password (key_path takes precedence)
-
+const commonFooter = `
 # -----
 # LOGGING CONFIGURATION
 # -----
@@ -65,10 +43,6 @@ monitoring:
       - high_cpu
       - high_memory
 
-# Example:
-#   - If your Go server crashes due to panic, or memory spikes over 75%, you get a Slack alert.
-#   - Alerts also help you pre-emptively scale or investigate.
-
 # -----
 # BACKUP STRATEGY
 # -----
@@ -80,6 +54,57 @@ backup:
     provider: s3 # Use S3-compatible storage (AWS S3, MinIO, Wasabi, etc.)
     bucket: nextdeploy-backups # S3 bucket name
     region: us-east-1 # AWS region
+
+# -----
+# WEBHOOKS AFTER DEPLOYMENT
+# -----
+webhook:
+  on_success:
+    - curl -X POST https://your-api.com/deploy/success # Notify external system (e.g., Slack, Discord, CI dashboard)
+  on_failure:
+    - curl -X POST https://your-api.com/deploy/failure # Used for alerting, logging, or rollback triggers
+`
+
+const vpsTemplate = `
+# -----
+# TARGET TYPE — choose between "vps" (traditional server) or "serverless" (AWS Lambda + S3 + CloudFront)
+# -----
+target_type: vps
+
+# -----
+# APP METADATA
+# -----
+app:
+  name: example-app # [REQUIRED] Unique app name used for identification
+  environment: production # [REQUIRED] production | staging | development
+  domain: app.example.com # Public domain for your app
+  port: 3000 # [REQUIRED] Internal port your app listens on
+
+# -----
+# DEPLOYMENT SERVERS
+# -----
+servers:
+  - name: "production-01" # [REQUIRED] Friendly name for the server
+    host: 1.2.3.4 # [REQUIRED] IP or hostname of the server
+    username: ubuntu # [REQUIRED] SSH user (e.g., ubuntu, debian, root)
+    key_path: ~/.ssh/id_rsa  # [REQUIRED] Path to your private SSH key
+    # password: "" # Optional: SSH password (key_path takes precedence)
+`
+
+const serverlessTemplate = `
+# -----
+# TARGET TYPE — choose between "vps" (traditional server) or "serverless" (AWS Lambda + S3 + CloudFront)
+# -----
+target_type: serverless
+
+# -----
+# APP METADATA
+# -----
+app:
+  name: example-app # [REQUIRED] Unique app name used for identification
+  environment: production # [REQUIRED] production | staging | development
+  domain: app.example.com # Public domain for your app
+  port: 3000 # [REQUIRED] Internal port your app listens on
 
 # -----
 # CLOUD PROVIDER — RECOMMENDED: USE LOCAL AWS PROFILE
@@ -104,23 +129,18 @@ serverless:
   # runtime: "nodejs20.x"    # [OPTIONAL] Lambda runtime (defaults to nodejs20.x)
   # memory_size: 1024        # [OPTIONAL] Memory in MB (defaults to 1024)
   # timeout: 30              # [OPTIONAL] Timeout in seconds (defaults to 30)
-
-# -----
-# WEBHOOKS AFTER DEPLOYMENT
-# -----
-webhook:
-  on_success:
-    - curl -X POST https://your-api.com/deploy/success # Notify external system (e.g., Slack, Discord, CI dashboard)
-  on_failure:
-    - curl -X POST https://your-api.com/deploy/failure # Used for alerting, logging, or rollback triggers
 `
 
-func GetSampleConfigTemplate() string {
-	return sampleConfig
+func GetSampleConfigTemplate(targetType string) string {
+	if targetType == "serverless" {
+		return commonHeader + serverlessTemplate + commonFooter
+	}
+	// Default to VPS
+	return commonHeader + vpsTemplate + commonFooter
 }
 
 func GenerateSampleConfig() error {
-	// Write the sample config to sample.nextdeploy.yml in the current directory
+	// Write the sample config to nextdeploy.yml in the current directory
 	path := filepath.Join(".", "nextdeploy.yml")
-	return os.WriteFile(path, []byte(sampleConfig), 0600)
+	return os.WriteFile(path, []byte(GetSampleConfigTemplate("vps")), 0600)
 }

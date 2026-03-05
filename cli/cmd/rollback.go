@@ -26,8 +26,9 @@ var rollbackCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		if cfg.TargetType == "serverless" {
-			log.Info("Deployment Target: SERVERLESS (No VPS or Daemon required)")
+		switch cfg.TargetType {
+		case "serverless":
+			log.Info("Deployment Target: SERVERLESS (No VPS required)")
 			if cfg.Serverless == nil {
 				log.Error("TargetType is 'serverless' but 'serverless' config block is missing.")
 				os.Exit(1)
@@ -37,33 +38,44 @@ var rollbackCmd = &cobra.Command{
 				log.Error("Serverless rollback failed: %v", err)
 				os.Exit(1)
 			}
-			return
-		}
+			log.Info("✅ Serverless rollback successful!")
 
-		log.Info("Deployment Target: VPS (Daemon execution)")
+		case "vps":
+			log.Info("Deployment Target: VPS (Daemon execution)")
 
-		srv, err := server.New(server.WithConfig(), server.WithSSH())
-		if err != nil {
-			log.Error("Failed to initialize server connection: %v", err)
+			if len(cfg.Servers) == 0 {
+				log.Error("TargetType is 'vps' but no servers are defined in config.")
+				os.Exit(1)
+			}
+
+			srv, err := server.New(server.WithConfig(), server.WithSSH())
+			if err != nil {
+				log.Error("Failed to initialize server connection: %v", err)
+				os.Exit(1)
+			}
+			defer srv.CloseSSHConnection()
+
+			deploymentServer, err := srv.GetDeploymentServer()
+			if err != nil {
+				log.Error("Failed to get deployment server: %v", err)
+				os.Exit(1)
+			}
+
+			log.Info("Triggering daemon to rollback %s on %s...", cfg.App.Name, deploymentServer)
+			daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd rollback --appName=\"%s\"", cfg.App.Name)
+			output, err := srv.ExecuteCommand(context.Background(), deploymentServer, daemonCmd, os.Stdout)
+			if err != nil {
+				log.Error("Rollback failed: %v\nOutput: %s", err, output)
+				os.Exit(1)
+			}
+
+			log.Info("✅ Rollback successful!")
+
+		default:
+			log.Error("Unknown or unsupported target_type: %s", cfg.TargetType)
+			log.Info("Supported types are: vps, serverless")
 			os.Exit(1)
 		}
-		defer srv.CloseSSHConnection()
-
-		deploymentServer, err := srv.GetDeploymentServer()
-		if err != nil {
-			log.Error("Failed to get deployment server: %v", err)
-			os.Exit(1)
-		}
-
-		log.Info("Triggering daemon to rollback %s on %s...", cfg.App.Name, deploymentServer)
-		daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd rollback --appName=\"%s\"", cfg.App.Name)
-		output, err := srv.ExecuteCommand(context.Background(), deploymentServer, daemonCmd, os.Stdout)
-		if err != nil {
-			log.Error("Rollback failed: %v\nOutput: %s", err, output)
-			os.Exit(1)
-		}
-
-		log.Info("Rollback successful!")
 	},
 }
 
