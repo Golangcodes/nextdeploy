@@ -197,7 +197,7 @@
       failed_when: false
       changed_when: false
       when:
-        - node_pre.rc != 0
+        - not node_installed
         - node_after_latest is defined
         - node_after_latest.rc != 0
 

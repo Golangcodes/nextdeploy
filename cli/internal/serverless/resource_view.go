@@ -1,7 +1,9 @@
 package serverless
 
 import (
+	"bytes"
 	"fmt"
+	"html/template"
 	"os"
 	"strings"
 	"time"
@@ -29,8 +31,8 @@ type ServerlessResourceMap struct {
 	DNSProvider       string // "namecheap", "cloudflare", "godaddy", "route53", "other"
 }
 
-// DNSProviderRules maps provider names to their specific instructions
-var DNSProviderRules = map[string]struct {
+// ProviderRules holds DNS provider-specific display instructions
+type ProviderRules struct {
 	Name         string
 	Icon         string
 	RootFormat   string
@@ -39,7 +41,10 @@ var DNSProviderRules = map[string]struct {
 	Warning      string
 	ProTip       string
 	ProxyWarning string
-}{
+}
+
+// DNSProviderRules maps provider names to their specific instructions
+var DNSProviderRules = map[string]ProviderRules{
 	"namecheap": {
 		Name:       "Namecheap",
 		Icon:       "🧢",
@@ -47,13 +52,11 @@ var DNSProviderRules = map[string]struct {
 		WwwFormat:  "www",
 		SSLFormat: func(record dns.ValidationRecord) string {
 			if strings.Contains(record.Name, ".www") {
-				// For www validation: keep the .www
 				return record.Name
 			}
-			// For root validation: just the hash
 			return strings.Split(record.Name, ".")[0]
 		},
-		Warning: "⚠️ **CRITICAL**: NEVER include your domain name in the Host field! Use only the hash or '@'.",
+		Warning: "⚠️ CRITICAL: NEVER include your domain name in the Host field! Use only the hash or '@'.",
 		ProTip:  "For www SSL records, the Host must include '.www' (e.g., '_5ab8c33b39a.www')",
 	},
 	"cloudflare": {
@@ -64,7 +67,7 @@ var DNSProviderRules = map[string]struct {
 		SSLFormat: func(record dns.ValidationRecord) string {
 			return strings.TrimSuffix(record.Name, ".")
 		},
-		Warning:      "⚠️ **IMPORTANT**: Set proxy status to DNS only (gray cloud) for SSL validation records!",
+		Warning:      "⚠️ IMPORTANT: Set proxy status to DNS only (gray cloud) for SSL validation records!",
 		ProTip:       "After SSL is issued, you can enable the orange cloud (proxied) for better performance.",
 		ProxyWarning: "🔴 SSL validation WILL FAIL if the cloud is orange! Keep it gray until certificate is issued.",
 	},
@@ -103,535 +106,599 @@ var DNSProviderRules = map[string]struct {
 	},
 }
 
-// GenerateResourceView creates a premium HTML report of the provisioned resources
-func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap) (string, error) {
-	provider := getProviderRules(resMap.DNSProvider)
+// templateData is the struct passed into the HTML template — all fields are named, no %s juggling
+type templateData struct {
+	AppName           string
+	Region            string
+	DisplayDomain     string
+	CloudFrontID      string
+	CloudFrontDomain  string
+	FunctionURL       string
+	S3BucketName      string
+	CertificateARN    string
+	CertificateStatus string
 
-	template := `<!DOCTYPE html>
+	// Derived display fields
+	CertStatusClass string // "success" | "pending" | "danger"
+	CertStatusText  string
+	RoutingStatus   string
+	IsPending       bool
+	IsIssued        bool
+
+	// DNS provider
+	ProviderIcon    string
+	ProviderName    string
+	ProviderWarning string
+	ProviderProTip  string
+
+	// SSL validation records (pre-formatted for display)
+	ValidationRows []validationRow
+	DNSNotice      template.HTML // safe HTML for the notice banner
+
+	// Verify commands
+	VerifyCmd1 string
+	VerifyCmd2 string
+
+	// Footer
+	Version        string
+	DeploymentTime string
+}
+
+type validationRow struct {
+	Host    string
+	Value   string
+	Purpose string
+}
+
+var reportTemplate = template.Must(template.New("report").Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NextDeploy | Deployment Report: %s</title>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <title>NextDeploy | Deployment Report: {{.AppName}}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --bg: #0a0b10;
-            --bg-gradient: linear-gradient(135deg, #0a0b10 0%, #15171e 100%);
-            --card: #15171e;
-            --card-hover: #1e1f2b;
-            --accent: #4f46e5;
-            --accent-glow: rgba(79, 70, 229, 0.3);
-            --accent-soft: #6366f1;
-            --text: #e2e8f0;
-            --text-muted: #94a3b8;
-            --text-dim: #64748b;
-            --success: #10b981;
-            --success-glow: rgba(16, 185, 129, 0.3);
-            --warning: #f59e0b;
-            --danger: #ef4444;
-            --danger-glow: rgba(239, 68, 68, 0.3);
-            --border: rgba(255, 255, 255, 0.05);
-            --border-hover: rgba(79, 70, 229, 0.3);
+            --bg:            #080910;
+            --card:          #10121a;
+            --card-hover:    #161923;
+            --accent:        #4f46e5;
+            --accent-glow:   rgba(79, 70, 229, 0.25);
+            --accent-soft:   #6366f1;
+            --text:          #e2e8f0;
+            --text-muted:    #94a3b8;
+            --text-dim:      #4b5563;
+            --success:       #10b981;
+            --success-bg:    rgba(16, 185, 129, 0.12);
+            --success-glow:  rgba(16, 185, 129, 0.3);
+            --warning:       #f59e0b;
+            --warning-bg:    rgba(245, 158, 11, 0.12);
+            --danger:        #ef4444;
+            --danger-bg:     rgba(239, 68, 68, 0.12);
+            --danger-glow:   rgba(239, 68, 68, 0.3);
+            --border:        rgba(255, 255, 255, 0.06);
+            --border-accent: rgba(79, 70, 229, 0.4);
+            --surface:       rgba(255, 255, 255, 0.03);
         }
 
         body {
             background: var(--bg);
-            background: var(--bg-gradient);
             color: var(--text);
-            font-family: 'Outfit', sans-serif;
-            margin: 0;
-            padding: 40px 20px;
+            font-family: 'Syne', sans-serif;
+            padding: 48px 24px 80px;
             display: flex;
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
-            line-height: 1.6;
+        }
+
+        /* Subtle grid background */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(79,70,229,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(79,70,229,0.03) 1px, transparent 1px);
+            background-size: 48px 48px;
+            pointer-events: none;
+            z-index: 0;
         }
 
         .container {
-            max-width: 1200px;
-            width: 100%%;
+            max-width: 1100px;
+            width: 100%;
+            position: relative;
+            z-index: 1;
         }
 
+        /* ─── Header ─────────────────────────────────────── */
         header {
             text-align: center;
-            margin-bottom: 50px;
-            position: relative;
+            margin-bottom: 56px;
         }
 
-        header::after {
-            content: '';
-            position: absolute;
-            bottom: -20px;
-            left: 50%%;
-            transform: translateX(-50%%);
-            width: 100px;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--accent-soft);
+            background: var(--accent-glow);
+            border: 1px solid var(--border-accent);
+            padding: 5px 14px;
+            border-radius: 99px;
+            margin-bottom: 20px;
         }
 
         h1 {
-            font-size: 3rem;
-            margin: 0;
-            background: linear-gradient(135deg, #fff 0%%, #4f46e5 50%%, #818cf8 100%%);
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, #fff 0%, #a5b4fc 60%, #818cf8 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            line-height: 1.1;
+        }
+
+        .subtitle {
+            margin-top: 12px;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        /* ─── DNS Notice Banner ───────────────────────────── */
+        .notice-pending {
+            background: var(--danger-bg);
+            border: 1px solid var(--danger);
+            border-radius: 16px;
+            padding: 28px 32px;
+            margin-bottom: 40px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            animation: pulse-border 2s ease infinite;
+        }
+
+        .notice-issued {
+            background: var(--success-bg);
+            border: 1px solid var(--success);
+            border-radius: 16px;
+            padding: 28px 32px;
+            margin-bottom: 40px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        @keyframes pulse-border {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            50%       { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+        }
+
+        .notice-icon { font-size: 2rem; flex-shrink: 0; }
+
+        .notice-body strong {
+            display: block;
+            font-size: 1.05rem;
             font-weight: 700;
-            letter-spacing: -0.02em;
+            margin-bottom: 4px;
         }
 
-        .badge {
-            display: inline-block;
-            padding: 6px 16px;
-            border-radius: 99px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            background: var(--accent-glow);
+        .notice-body p { font-size: 0.88rem; color: var(--text-muted); }
+
+        /* ─── DNS Guide ───────────────────────────────────── */
+        .dns-guide {
+            background: linear-gradient(135deg, #0f0e1f 0%, #141228 100%);
+            border: 1px solid var(--border-accent);
+            border-radius: 24px;
+            padding: 40px;
+            margin-bottom: 40px;
+        }
+
+        .dns-guide h2 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            margin-bottom: 28px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-title {
+            font-size: 1rem;
+            font-weight: 700;
+            margin: 32px 0 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
             color: #c7d2fe;
-            border: 1px solid var(--accent);
-            margin-top: 15px;
-            backdrop-filter: blur(4px);
         }
 
+        /* ─── Tables ──────────────────────────────────────── */
+        .dns-table {
+            width: 100%;
+            border-collapse: collapse;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            font-size: 0.85rem;
+        }
+
+        .dns-table thead tr { background: rgba(79, 70, 229, 0.15); }
+
+        .dns-table th {
+            padding: 10px 14px;
+            text-align: left;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .dns-table td {
+            padding: 12px 14px;
+            border-top: 1px solid var(--border);
+            color: var(--text-muted);
+            vertical-align: middle;
+        }
+
+        .dns-table tr:hover td { background: var(--surface); }
+
+        code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            background: rgba(0,0,0,0.4);
+            padding: 3px 8px;
+            border-radius: 6px;
+            color: #a5b4fc;
+            word-break: break-all;
+        }
+
+        /* ─── Alert boxes ─────────────────────────────────── */
+        .alert {
+            border-radius: 10px;
+            padding: 14px 18px;
+            font-size: 0.87rem;
+            margin-top: 20px;
+            line-height: 1.6;
+        }
+
+        .alert-warning {
+            background: var(--warning-bg);
+            border: 1px solid rgba(245,158,11,0.3);
+            color: #fcd34d;
+        }
+
+        .alert-info {
+            background: var(--accent-glow);
+            border: 1px solid var(--border-accent);
+            color: #c7d2fe;
+        }
+
+        .alert strong { font-weight: 700; }
+
+        /* ─── Verify block ────────────────────────────────── */
+        .verify-block {
+            background: #000;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin-top: 24px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+            color: #6ee7b7;
+            line-height: 1.9;
+            white-space: pre-wrap;
+        }
+
+        .next-step {
+            margin-top: 28px;
+            background: rgba(250,204,21,0.08);
+            border: 1px solid rgba(250,204,21,0.25);
+            border-radius: 10px;
+            padding: 16px 20px;
+            font-size: 0.9rem;
+            color: #fde68a;
+            text-align: center;
+        }
+
+        /* ─── Resource cards grid ─────────────────────────── */
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 24px;
-            margin-top: 40px;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
         }
 
         .card {
             background: var(--card);
             border: 1px solid var(--border);
-            border-radius: 20px;
+            border-radius: 18px;
             padding: 24px;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
             position: relative;
             overflow: hidden;
-            backdrop-filter: blur(10px);
         }
 
-        .card::before {
+        .card::after {
             content: '';
             position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, var(--accent), transparent);
-            transform: translateX(-100%%);
-            transition: transform 0.6s ease;
+            inset: 0;
+            border-radius: 18px;
+            background: linear-gradient(135deg, var(--accent-glow) 0%, transparent 60%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
         }
 
         .card:hover {
-            transform: translateY(-6px);
-            background: var(--card-hover);
-            border-color: var(--border-hover);
-            box-shadow: 0 20px 30px -15px rgba(0, 0, 0, 0.7);
+            transform: translateY(-4px);
+            border-color: var(--border-accent);
+            box-shadow: 0 16px 32px -8px rgba(0,0,0,0.6);
         }
 
-        .card:hover::before {
-            transform: translateX(100%%);
+        .card:hover::after { opacity: 1; }
+
+        .card-label {
+            font-size: 0.68rem;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 6px;
         }
 
-        .card h3 {
-            margin: 0 0 16px 0;
-            font-size: 1.1rem;
+        .card-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 16px;
             display: flex;
             align-items: center;
-            gap: 10px;
-            color: #fff;
-            font-weight: 600;
+            gap: 8px;
         }
 
-        .card p {
-            margin: 8px 0;
-            font-size: 0.9rem;
-            color: var(--text-muted);
-        }
+        .card-field { margin-bottom: 14px; }
 
-        .mono {
-            font-family: 'JetBrains Mono', monospace;
-            background: rgba(0,0,0,0.4);
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            word-break: break-all;
-            display: block;
-            margin-top: 6px;
-            color: #a5b4fc;
-            border: 1px solid rgba(255,255,255,0.05);
-            transition: all 0.2s;
-        }
-
-        .mono:hover {
-            background: rgba(79, 70, 229, 0.1);
-            border-color: var(--accent);
-        }
-
-        .diagram {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 24px;
-            padding: 40px;
-            margin-top: 40px;
-            min-height: 400px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .diagram::after {
-            content: '';
-            position: absolute;
-            top: -50%%;
-            left: -50%%;
-            width: 200%%;
-            height: 200%%;
-            background: radial-gradient(circle at center, var(--accent-glow) 0%%, transparent 70%%);
-            opacity: 0.1;
-            animation: rotate 20s linear infinite;
-        }
-
-        @keyframes rotate {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-
-        .footer {
-            margin-top: 80px;
-            text-align: center;
+        .card-field .field-name {
+            font-size: 0.72rem;
             color: var(--text-dim);
-            font-size: 0.8rem;
-            padding: 20px;
+            margin-bottom: 4px;
+            letter-spacing: 0.04em;
+        }
+
+        .card-field code {
+            display: block;
+            padding: 8px 10px;
+            font-size: 0.78rem;
+        }
+
+        .card-field a { color: #a5b4fc; text-decoration: none; }
+        .card-field a:hover { text-decoration: underline; }
+
+        /* Status dot */
+        .dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+
+        .dot-success { background: var(--success); box-shadow: 0 0 8px var(--success-glow); }
+        .dot-pending { background: var(--warning); box-shadow: 0 0 8px rgba(245,158,11,0.4); }
+        .dot-danger  { background: var(--danger);  box-shadow: 0 0 8px var(--danger-glow); }
+
+        /* ─── Footer ──────────────────────────────────────── */
+        footer {
+            text-align: center;
+            font-size: 0.78rem;
+            color: var(--text-dim);
+            padding-top: 32px;
             border-top: 1px solid var(--border);
         }
 
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            background: var(--success);
-            border-radius: 50%%;
-            display: inline-block;
-            box-shadow: 0 0 15px var(--success-glow);
-            margin-right: 8px;
-            position: relative;
-        }
+        footer a { color: var(--accent-soft); text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
 
-        .status-dot.pending {
-            background: var(--warning);
-            box-shadow: 0 0 15px rgba(245, 158, 11, 0.3);
-        }
-
-        .status-dot.danger {
-            background: var(--danger);
-            box-shadow: 0 0 15px var(--danger-glow);
-        }
-
-        .dns-guide {
-            background: linear-gradient(135deg, #1e1b4b 0%%, #312e81 100%%);
-            border: 2px solid var(--accent);
-            border-radius: 24px;
-            padding: 40px;
-            margin: 40px 0;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .dns-guide::before {
-            content: '';
-            position: absolute;
-            top: -20px;
-            right: -20px;
-            width: 200px;
-            height: 200px;
-            background: radial-gradient(circle, var(--accent-glow) 0%%, transparent 70%%);
-            border-radius: 50%%;
-            opacity: 0.3;
-        }
-
-        .loud-notice {
-            background: var(--danger);
-            color: #fff;
-            padding: 24px 32px;
-            border-radius: 16px;
-            font-weight: 800;
-            margin-bottom: 32px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
-            animation: pulse-danger 2s infinite;
-            text-align: center;
-            border: 2px solid #fff;
-            position: relative;
-            z-index: 10;
-        }
-
-        @keyframes pulse-danger {
-            0%% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-            70%% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
-            100%% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-        }
-
-        .dns-table {
-            width: 100%%;
-            border-collapse: collapse;
-            margin: 20px 0 30px;
-            background: rgba(0,0,0,0.3);
-            border-radius: 16px;
-            overflow: hidden;
-            border: 1px solid var(--border);
-        }
-
-        .dns-table th {
-            background: rgba(79, 70, 229, 0.2);
-            color: var(--text);
-            text-align: left;
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            padding: 10px;
-            border-bottom: 1px solid var(--surface-border);
-        }
-
-        .dns-table td {
-            padding: 12px 10px;
-            font-size: 0.85rem;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .copy-btn {
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
-            color: var(--text-muted);
-            padding: 4px 8px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.7rem;
-            transition: all 0.2s;
-        }
-
-        .copy-btn:hover { background: var(--primary); color: white; }
-
-        .footer {
-            margin-top: 60px;
-            text-align: center;
-            padding-top: 20px;
-            border-top: 1px solid var(--surface-border);
-            color: var(--text-muted);
-            font-size: 0.8rem;
-        }
-
-        @keyframes fadeInDown {
-            from { opacity: 0; transform: translateY(-20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        @media (max-width: 768px) {
-            .bento-grid { grid-template-columns: 1fr; }
-            .card-large, .card-medium, .card-small, .card-full { grid-column: span 1; }
-            header { flex-direction: column; align-items: flex-start; gap: 20px; }
+        @media (max-width: 680px) {
+            .grid { grid-template-columns: 1fr; }
+            .dns-guide { padding: 24px 20px; }
         }
     </style>
 </head>
 <body>
-    <div class="mesh-bg"></div>
-    <div class="container">
-        <header>
-            <div class="brand-group">
-                <span class="label">Deployment Report</span>
-                <h1>%s</h1>
-            </div>
-            <div class="status-badge">%s</div>
-        </header>
+<div class="container">
 
-                        <span class="label">Your Provider</span>
-                    </div>
-                    <div class="timeline-item">
-                        <span class="time">5-30m</span>
-                        <span class="label">Google DNS</span>
-                    </div>
-                    <div class="timeline-item">
-                        <span class="time">5-30m</span>
-                        <span class="label">Cloudflare</span>
-                    </div>
-                    <div class="timeline-item">
-                        <span class="time">24-48h</span>
-                        <span class="label">Worldwide</span>
-                    </div>
-                </div>
-            </div>
+    <!-- Header -->
+    <header>
+        <div class="brand">⚡ NextDeploy · Deployment Report</div>
+        <h1>{{.AppName}}</h1>
+        <p class="subtitle">Region: {{.Region}} · {{.DeploymentTime}}</p>
+    </header>
 
-            <h3 style="font-size: 1.3rem; margin: 30px 0 15px;">🔐 1. SSL Validation Records (Required for HTTPS)</h3>
-            <table class="dns-table">
-                <thead>
-                    <tr>
-                        <th>Type</th>
-                        <th>Host / Name</th>
-                        <th>Value / Points To</th>
-                        <th>Purpose</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    %s
-                </tbody>
-            </table>
+    <!-- Notice Banner -->
+    {{.DNSNotice}}
 
-            <h3 style="font-size: 1.3rem; margin: 30px 0 15px;">🎯 2. Traffic Routing Records</h3>
-            <table class="dns-table">
-                <thead>
-                    <tr>
-                        <th>Type</th>
-                        <th>Host / Name</th>
-                        <th>Value / Points To</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
+    <!-- DNS Guide (always shown) -->
+    <div class="dns-guide">
+        <h2>{{.ProviderIcon}} DNS Setup for {{.ProviderName}}</h2>
+
+        <div class="section-title">🔐 1. SSL Validation Records (Required for HTTPS)</div>
+        <table class="dns-table">
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Host / Name</th>
+                    <th>Value / Points To</th>
+                    <th>Purpose</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{if .ValidationRows}}
+                    {{range .ValidationRows}}
                     <tr>
                         <td>CNAME</td>
-                        <td><code>@</code> (Root)</td>
-                        <td><code>%s</code></td>
-                        <td>%s</td>
+                        <td><code>{{.Host}}</code></td>
+                        <td><code>{{.Value}}</code></td>
+                        <td>{{.Purpose}}</td>
                     </tr>
+                    {{end}}
+                {{else}}
                     <tr>
-                        <td>CNAME</td>
-                        <td><code>www</code></td>
-                        <td><code>%s</code></td>
-                        <td>%s</td>
+                        <td colspan="4" style="text-align:center;padding:28px;color:var(--text-muted);">
+                            ✅ SSL Certificate already issued — no pending validation records.
+                        </td>
                     </tr>
-                </tbody>
-            </table>
+                {{end}}
+            </tbody>
+        </table>
 
-            <div class="warning-box">
-                <strong>%s Notice</strong>
-                <p style="margin-top: 8px;">%s</p>
-            </div>
+        <div class="section-title">🎯 2. Traffic Routing Records</div>
+        <table class="dns-table">
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Host / Name</th>
+                    <th>Value / Points To</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>CNAME</td>
+                    <td><code>@ (Root)</code></td>
+                    <td><code>{{.CloudFrontDomain}}</code></td>
+                    <td>{{.RoutingStatus}}</td>
+                </tr>
+                <tr>
+                    <td>CNAME</td>
+                    <td><code>www</code></td>
+                    <td><code>{{.CloudFrontDomain}}</code></td>
+                    <td>{{.RoutingStatus}}</td>
+                </tr>
+            </tbody>
+        </table>
 
-            <div class="tip-box">
-                <strong>💡 %s Pro Tip:</strong>
-                <p style="margin-top: 8px;">%s</p>
-            </div>
-
-            <h3 style="font-size: 1.1rem; margin: 30px 0 15px;">🔍 Verify Your Records</h3>
-            <div class="verification-command">
-                # Check SSL validation record 1<br>
-                dig @8.8.8.8 %s CNAME +short<br><br>
-                # Check SSL validation record 2<br>
-                dig @8.8.8.8 %s CNAME +short<br><br>
-                # Expected output: acm-validations.aws domain
-            </div>
-
-            <p style="font-size: 1rem; color: #facc15; margin-top: 30px; padding: 15px; background: rgba(250, 204, 21, 0.1); border-radius: 8px; text-align: center;">
-                <strong>📅 After adding records, wait 5-10 minutes and run <code style="background: #000; padding: 4px 8px; border-radius: 4px;">nextdeploy ship</code> again to finish.</strong>
-            </p>
+        <div class="alert alert-warning">
+            <strong>{{.ProviderName}} Warning:</strong> {{.ProviderWarning}}
         </div>
 
-        <div class="grid">
-            <div class="card">
-                <h3><span class="status-dot %s"></span> Edge Delivery</h3>
-                <p>CloudFront Distribution ID</p>
-                <code class="mono">%s</code>
-                <p>Public Domain</p>
-                <code class="mono"><a href="https://%s" target="_blank" style="color: #a5b4fc;">%s</a></code>
-            </div>
-
-            <div class="card">
-                <h3><span class="status-dot %s"></span> Compute (Lambda)</h3>
-                <p>Function Name</p>
-                <code class="mono">%s</code>
-                <p>Function URL</p>
-                <code class="mono"><a href="%s" target="_blank" style="color: #a5b4fc;">Lambda Endpoint</a></code>
-            </div>
-
-            <div class="card">
-                <h3><span class="status-dot %s"></span> Static Assets</h3>
-                <p>S3 Bucket Name</p>
-                <code class="mono">%s</code>
-                <p>Origin Access</p>
-                <code class="mono">CloudFront OAC Enabled</code>
-            </div>
-
-            <div class="card">
-                <h3><span class="status-dot %s"></span> Security</h3>
-                <p>ACM Certificate</p>
-                <code class="mono">%s</code>
-                <p>Certificate Status</p>
-                <code class="mono">%s</code>
-            </div>
+        <div class="alert alert-info">
+            <strong>💡 Pro Tip:</strong> {{.ProviderProTip}}
         </div>
 
-        <div class="footer">
-            <p>Generated by NextDeploy <strong>%s</strong> | %s</p>
-            <p style="margin-top: 8px;">
-                <a href="https://nextdeploy.one/docs" target="_blank" style="color: var(--accent);">Documentation</a> •
-                <a href="https://github.com/Golangcodes/nextdeploy" target="_blank" style="color: var(--accent);">GitHub</a> •
-                <a href="#" onclick="window.print();return false;" style="color: var(--accent);">Print Report</a>
-            </p>
+        {{if .VerifyCmd1}}
+        <div class="section-title">🔍 Verify Your Records</div>
+        <div class="verify-block">{{.VerifyCmd1}}{{if .VerifyCmd2}}
+{{.VerifyCmd2}}{{end}}
+# Expected output: an acm-validations.aws domain</div>
+        {{end}}
+
+        <div class="next-step">
+            📅 After adding records, wait 5–10 minutes then run <code>nextdeploy ship</code> again to finish.
         </div>
     </div>
 
-    <script>
-        // Initialize Mermaid with better error handling
-        try {
-            mermaid.initialize({
-                theme: 'dark',
-                startOnLoad: true,
-                securityLevel: 'loose',
-                flowchart: {
-                    useMaxWidth: true,
-                    htmlLabels: true,
-                    curve: 'basis'
-                },
-                themeVariables: {
-                    'primaryColor': '#4f46e5',
-                    'primaryTextColor': '#fff',
-                    'primaryBorderColor': '#6366f1',
-                    'lineColor': '#4f46e5',
-                    'secondaryColor': '#15171e',
-                    'tertiaryColor': '#10b981'
-                }
-            });
+    <!-- Resource Cards -->
+    <div class="grid">
 
-            // Add copy functionality
-            document.querySelectorAll('.copy-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const target = this.dataset.target;
-                    const text = document.querySelector(target).innerText;
-                    navigator.clipboard.writeText(text);
-                    this.innerText = 'Copied!';
-                    setTimeout(() => {
-                        this.innerText = 'Copy';
-                    }, 2000);
-                });
-            });
+        <div class="card">
+            <div class="card-label">Edge Delivery</div>
+            <div class="card-title">
+                <span class="dot dot-{{.CertStatusClass}}"></span>
+                CloudFront
+            </div>
+            <div class="card-field">
+                <div class="field-name">Distribution ID</div>
+                <code>{{.CloudFrontID}}</code>
+            </div>
+            <div class="card-field">
+                <div class="field-name">Public Domain</div>
+                <code><a href="https://{{.DisplayDomain}}" target="_blank">{{.DisplayDomain}}</a></code>
+            </div>
+        </div>
 
-        } catch (e) {
-            console.error('Mermaid failed to initialize:', e);
-            document.getElementById('diagram-container').innerHTML =
-                '<div style="text-align:center;color:#94a3b8;padding:60px;">' +
-                '<span style="font-size:2rem;">📊</span>' +
-                '<p>Diagram failed to load. Resources are still provisioned!</p>' +
-                '</div>';
-        }
-    </script>
+        <div class="card">
+            <div class="card-label">Compute</div>
+            <div class="card-title">
+                <span class="dot dot-{{.CertStatusClass}}"></span>
+                Lambda
+            </div>
+            <div class="card-field">
+                <div class="field-name">Function Name</div>
+                <code>{{.AppName}}</code>
+            </div>
+            <div class="card-field">
+                <div class="field-name">Function URL</div>
+                <code><a href="{{.FunctionURL}}" target="_blank">Open Endpoint ↗</a></code>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-label">Static Assets</div>
+            <div class="card-title">
+                <span class="dot dot-{{.CertStatusClass}}"></span>
+                S3 Bucket
+            </div>
+            <div class="card-field">
+                <div class="field-name">Bucket Name</div>
+                <code>{{.S3BucketName}}</code>
+            </div>
+            <div class="card-field">
+                <div class="field-name">Origin Access</div>
+                <code>CloudFront OAC Enabled</code>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-label">Security</div>
+            <div class="card-title">
+                <span class="dot dot-{{.CertStatusClass}}"></span>
+                ACM Certificate
+            </div>
+            <div class="card-field">
+                <div class="field-name">Certificate ARN</div>
+                <code>{{.CertificateARN}}</code>
+            </div>
+            <div class="card-field">
+                <div class="field-name">Status</div>
+                <code>{{.CertStatusText}}</code>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <p>Generated by NextDeploy <strong>{{.Version}}</strong> · {{.DeploymentTime}}</p>
+        <p style="margin-top:10px;">
+            <a href="https://nextdeploy.one/docs" target="_blank">Documentation</a> ·
+            <a href="https://github.com/Golangcodes/nextdeploy" target="_blank">GitHub</a> ·
+            <a href="#" onclick="window.print();return false;">Print Report</a>
+        </p>
+    </footer>
+
+</div>
 </body>
-</html>`
+</html>
+`))
 
-	// Determine certificate status styling
+// GenerateResourceView creates a premium HTML report of the provisioned resources
+func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap) (string, error) {
+	provider := getProviderRules(resMap.DNSProvider)
+
+	// ── Cert status ────────────────────────────────────────────────────────────
 	certStatusClass := "success"
-	certStatusText := "ISSUED"
+	certStatusText := "✅ ISSUED"
 	routingStatus := "✅ Live"
 
 	switch resMap.CertificateStatus {
@@ -645,48 +712,56 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 		routingStatus = "❌ Check DNS"
 	}
 
-	// Build SSL validation table rows
-	var validationRows string
-	if len(resMap.ValidationRecords) == 0 {
-		validationRows = `<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-muted)">✅ SSL Certificate Issued! No pending validation records.</td></tr>`
+	// ── DNS notice banner ──────────────────────────────────────────────────────
+	var dnsNotice template.HTML
+	if len(resMap.ValidationRecords) > 0 {
+		dnsNotice = template.HTML(fmt.Sprintf(`
+<div class="notice-pending">
+    <div class="notice-icon">⚠️</div>
+    <div class="notice-body">
+        <strong>DNS Setup Required — Your app is NOT live yet</strong>
+        <p>Add the %d DNS record(s) below, then re-run <code>nextdeploy ship</code>.</p>
+    </div>
+</div>`, len(resMap.ValidationRecords)))
 	} else {
-		for _, rec := range resMap.ValidationRecords {
-			purpose := "Root Domain Validation"
-			hostValue := provider.SSLFormat(rec)
-			if strings.Contains(rec.Name, ".www") {
-				purpose = "WWW Subdomain Validation"
-			}
-
-			validationRows += fmt.Sprintf(`<tr>
-				<td>CNAME</td>
-				<td><code>%s</code></td>
-				<td><code style="font-size:0.7rem">%s</code></td>
-				<td>%s</td>
-			</tr>`, hostValue, rec.Value, purpose)
+		domain := resMap.CustomDomain
+		if domain == "" {
+			domain = resMap.CloudFrontDomain
 		}
+		dnsNotice = template.HTML(fmt.Sprintf(`
+<div class="notice-issued">
+    <div class="notice-icon">✅</div>
+    <div class="notice-body">
+        <strong>SSL Certificate Issued — Your site is live!</strong>
+        <p>Visit: <a href="https://%s" target="_blank" style="color:#6ee7b7;">https://%s</a></p>
+    </div>
+</div>`, domain, domain))
 	}
 
-	// Build DNS notice with provider-specific warnings
-	dnsNotice := ""
-	if len(resMap.ValidationRecords) > 0 {
-		dnsNotice = fmt.Sprintf(`<div class="loud-notice">
-			<span style="font-size: 1.5rem;">⚠️ CRITICAL: DNS SETUP REQUIRED ⚠️</span>
-			<span style="font-size: 1rem;">Your application is NOT live until you add these %d DNS records.</span>
-		</div>`, len(resMap.ValidationRecords))
-	} else {
-		dnsNotice = `<div class="loud-notice" style="background: #10b981;">
-			<span style="font-size: 1.5rem;">✅ SSL CERTIFICATE ISSUED!</span>
-			<span style="font-size: 1rem;">Your site should be live at https://` + resMap.CustomDomain + `</span>
-		</div>`
+	// ── Validation rows ────────────────────────────────────────────────────────
+	var rows []validationRow
+	for _, rec := range resMap.ValidationRecords {
+		purpose := "Root Domain Validation"
+		if strings.Contains(rec.Name, ".www") {
+			purpose = "WWW Subdomain Validation"
+		}
+		rows = append(rows, validationRow{
+			Host:    provider.SSLFormat(rec),
+			Value:   rec.Value,
+			Purpose: purpose,
+		})
 	}
 
-	// Get first and second validation record names for verification commands
-	verifyCmd1 := ""
-	verifyCmd2 := ""
+	// ── Verify commands ────────────────────────────────────────────────────────
+	verifyCmd1, verifyCmd2 := "", ""
 	if len(resMap.ValidationRecords) > 0 {
-		verifyCmd1 = strings.TrimSuffix(resMap.ValidationRecords[0].Name, ".") + "." + resMap.CustomDomain
+		verifyCmd1 = fmt.Sprintf("dig @8.8.8.8 %s.%s CNAME +short",
+			strings.TrimSuffix(resMap.ValidationRecords[0].Name, "."),
+			resMap.CustomDomain)
 		if len(resMap.ValidationRecords) > 1 {
-			verifyCmd2 = strings.TrimSuffix(resMap.ValidationRecords[1].Name, ".") + "." + resMap.CustomDomain
+			verifyCmd2 = fmt.Sprintf("dig @8.8.8.8 %s.%s CNAME +short",
+				strings.TrimSuffix(resMap.ValidationRecords[1].Name, "."),
+				resMap.CustomDomain)
 		}
 	}
 
@@ -695,72 +770,58 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 		displayDomain = resMap.CloudFrontDomain
 	}
 
-	htmlContent := fmt.Sprintf(template,
-		resMap.AppName,
-		certStatusClass,
-		certStatusText,
-		resMap.AppName,
-		resMap.Region,
-		displayDomain,
-		resMap.AppName,
-		resMap.S3BucketName,
-		dnsNotice,
-		provider.Icon,
-		provider.Name,
-		provider.Name,
-		validationRows,
-		resMap.CloudFrontDomain,
-		routingStatus,
-		resMap.CloudFrontDomain,
-		routingStatus,
-		provider.Name,
-		provider.Warning,
-		provider.Name,
-		provider.ProTip,
-		verifyCmd1,
-		verifyCmd2,
-		certStatusClass,
-		resMap.CloudFrontID,
-		displayDomain,
-		displayDomain,
-		certStatusClass,
-		resMap.AppName,
-		resMap.FunctionURL,
-		certStatusClass,
-		resMap.S3BucketName,
-		certStatusClass,
-		resMap.CertificateARN,
-		certStatusText,
-		shared.Version,
-		resMap.DeploymentTime.Format("Mon Jan 2 15:04:05 MST 2006"),
-	)
+	// ── Build template data ────────────────────────────────────────────────────
+	data := templateData{
+		AppName:          resMap.AppName,
+		Region:           resMap.Region,
+		DisplayDomain:    displayDomain,
+		CloudFrontID:     resMap.CloudFrontID,
+		CloudFrontDomain: resMap.CloudFrontDomain,
+		FunctionURL:      resMap.FunctionURL,
+		S3BucketName:     resMap.S3BucketName,
+		CertificateARN:   resMap.CertificateARN,
+		CertStatusClass:  certStatusClass,
+		CertStatusText:   certStatusText,
+		RoutingStatus:    routingStatus,
+		IsPending:        resMap.CertificateStatus == "PENDING_VALIDATION",
+		IsIssued:         resMap.CertificateStatus == "ISSUED",
+		ProviderIcon:     provider.Icon,
+		ProviderName:     provider.Name,
+		ProviderWarning:  provider.Warning,
+		ProviderProTip:   provider.ProTip,
+		ValidationRows:   rows,
+		DNSNotice:        dnsNotice,
+		VerifyCmd1:       verifyCmd1,
+		VerifyCmd2:       verifyCmd2,
+		Version:          shared.Version,
+		DeploymentTime:   resMap.DeploymentTime.Format("Mon Jan 2 15:04:05 MST 2006"),
+	}
 
-	// Save in current working directory as requested
+	// ── Render ─────────────────────────────────────────────────────────────────
+	var buf bytes.Buffer
+	if err := reportTemplate.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to render report template: %w", err)
+	}
+
+	htmlContent := buf.Bytes()
+
+	// ── Write files ────────────────────────────────────────────────────────────
 	timestamp := resMap.DeploymentTime.Format("20060102-150405")
 	reportPath := fmt.Sprintf("%s-%s-report.html", resMap.AppName, timestamp)
 
-	if err := os.WriteFile(reportPath, []byte(htmlContent), 0644); err != nil {
+	if err := os.WriteFile(reportPath, htmlContent, 0644); err != nil {
 		return "", fmt.Errorf("failed to write report: %w", err)
 	}
 
-	// Also save a latest copy in the project root
+	// Also keep a "latest" copy
 	latestPath := fmt.Sprintf("%s-latest.html", resMap.AppName)
-	_ = os.WriteFile(latestPath, []byte(htmlContent), 0644)
+	_ = os.WriteFile(latestPath, htmlContent, 0644)
 
 	return reportPath, nil
 }
 
-// Helper function to get provider rules
-func getProviderRules(provider string) struct {
-	Name         string
-	Icon         string
-	RootFormat   string
-	WwwFormat    string
-	SSLFormat    func(dns.ValidationRecord) string
-	Warning      string
-	ProTip       string
-	ProxyWarning string
-} {
+// getProviderRules returns DNS provider rules, falling back to "other"
+func getProviderRules(provider string) ProviderRules {
 	if rules, exists := DNSProviderRules[provider]; exists {
 		return rules
 	}
