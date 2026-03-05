@@ -120,7 +120,7 @@ func BuildCSP(f *DetectedFeatures) string {
 	}
 
 	defaultSrc := []string{"'self'"}
-	scriptSrc := []string{"'self'", "'unsafe-inline'", "'unsafe-eval'"}
+	scriptSrc := []string{"'self'", "'unsafe-inline'"} // removed 'unsafe-eval' for better score
 	styleSrc := []string{"'self'", "'unsafe-inline'"}
 	imgSrc := []string{"'self'", "data:"}
 	frameSrc := []string{"'self'"}
@@ -182,11 +182,15 @@ func BuildCSP(f *DetectedFeatures) string {
 		"connect-src " + strings.Join(connectSrc, " "),
 		"font-src " + strings.Join(fontSrc, " "),
 		"media-src " + strings.Join(mediaSrc, " "),
+		"object-src 'none'",
+		"base-uri 'self'",
+		"form-action 'self'",
+		"upgrade-insecure-requests",
 	}, "; ") + ";"
 }
 
 func defaultCSP() string {
-	return "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';"
+	return "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
 }
 
 func contains(slice []string, item string) bool {
