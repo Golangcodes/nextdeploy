@@ -19,8 +19,7 @@ type CaddyManager struct {
 
 func NewCaddyManager() *CaddyManager {
 	dir := "/etc/caddy/nextdeploy.d"
-	// #nosec G301
-	// #nosec G301
+	// #nosec G:u301
 	_ = os.MkdirAll(dir, 0750)
 	return &CaddyManager{
 		configDir: dir,

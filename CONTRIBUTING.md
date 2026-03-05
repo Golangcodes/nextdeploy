@@ -1,125 +1,106 @@
+# NextDeploy Contributor Guide
 
-# 🛠️ Contributing to NextDeploy
+Welcome to the NextDeploy core team! This document provides the deep technical context you need to contribute to the codebase. 
 
-## Welcome to the Future of Next.js Deployment.
+## 1. System Architecture
 
-Thanks for your interest in contributing to **NextDeploy** — the fast, focused, and fully self-hosted deployment engine built **exclusively** for **Next.js**.
+NextDeploy is a hybrid deployment platform composed of three primary layers:
 
-This project is not a tech experiment. It’s a battle-tested infrastructure tool powering real production apps — and we’re building it to **end the era of black-box deployment platforms** like Vercel.
+### A. CLI (`cli/`)
+The entry point for the user. It handles:
+- **Project Discovery**: Uses `shared/nextcore` to analyze Next.js projects.
+- **Packaging**: Archives the build into a `.tar.gz`.
+- **Orchestration**: Communicates with the VPS Daemon or AWS SDK for Serverless targets.
+- **Diagnostics**: Aggregates logs via SSH or cloud APIs.
 
-If you're here, it means you believe developers should control their own tools, infrastructure, and stack. So do we.
+### B. Daemon (`daemon/`)
+The agent running on the VPS. It manages:
+- **Deployment Lifecycle**: Unpacks releases, manages systemd services, and updates symlinks.
+- **Caddy Integration**: Dynamically generates and reloads Caddyfiles with WAF and mTLS support.
+- **Persistent Statics**: Merges new build assets into a shared root to prevent chunk load errors.
+- **State Management**: Tracks ports and active releases in `/var/lib/nextdeployd/state.json`.
 
----
-
-## 🚩 What NextDeploy *Is*
-
-NextDeploy is a **Next.js-only** deployment ecosystem.  
-It gives developers full autonomy over how their Next.js apps ship, scale, and operate on their own VPS infrastructure.
-
-- It's **framework-specific**, for precision and performance.
-- It's **CLI-first**, with a long-running **daemon** for orchestration and monitoring.
-- It’s **cloud-agnostic** — run it on any server, anywhere.
-- It’s **open-source**, and built to be used in the real world — not just in demos.
-
-It’s the deployment platform *we* use — because nothing else gave us the clarity, control, and composability we needed.
-
----
-
-## 🚫 What NextDeploy *Is Not*
-
-We don’t compromise on our scope. We don't chase trends. We don’t build for everyone.
-
-- ❌ We do **not** support other frontend frameworks (Vue, Astro, Remix, etc.)
-- ❌ We do **not** integrate with vendor platforms (Fly.io, Heroku, Vercel)
-- ❌ We do **not** offer plugin APIs or runtime injection systems
-- ❌ We do **not** aim to be a general-purpose DevOps toolkit
-
-This is deliberate. **Focus is a feature.**
+### C. Shared (`shared/`)
+Common logic used by both CLI and Daemon:
+- **NextCore**: The "brain" that detects features (YouTube, Stripe, etc.) and builds the `metadata.json`.
+- **Logging**: Unified colorized logging system.
+- **Caddy**: The DSL generator for Caddy server configurations.
 
 ---
 
-## ✅ What We’re Looking For
+## 2. Core Mechanisms
 
-We’re inviting contributors who align with this mission and want to push NextDeploy forward, without bloating it sideways.
+### NextCore & `metadata.json`
+NextDeploy doesn't just copy files; it *understands* the app. `shared/nextcore` scans `next.config.{js,mjs}` and the project structure to detect:
+- **Feature Flags**: Does the app use YouTube? Google Fonts? Stripe?
+- **CSP Auto-Generation**: Builds a hardened Content Security Policy based on the detected features.
+- **Build Mode**: Detects if the app is a standard Next.js build or a static export (`output: 'export'`).
 
-Here’s what we’d love your help with:
+### Communication Security
+The CLI and Daemon communicate over a secure channel:
+1. **mTLS**: Mutual TLS ensures only authorized CLI clients can talk to the Daemon.
+2. **HMAC Signing**: Every command payload is signed using a `security_secret`. The Daemon rejects any command with an invalid signature, preventing replay attacks.
+3. **Socket/IP Whitelisting**: The Daemon can be restricted to specific IPs or Unix Sockets.
 
-- 🔧 Tightening the Next.js deployment flow (SSR, API routes, middleware, edge cases)
-- 📦 Improving the orchestration daemon (Docker lifecycle, container health, etc.)
-- 📈 Enhancing system-level monitoring, logs, metrics
-- 🧹 Cleaning up configuration and YAML DX
-- 🧠 Improving deployment speed, resilience, and edge-case handling
-- 📘 Writing great docs, error messages, and usage examples
-- 🧪 Running real deployments and submitting bugs/feedback from real-world usage
-
----
-
-## 🧱 Core Principles
-
-> Read this section twice. It defines the soul of the project.
-
-### 1. **Next.js Only**
-NextDeploy is laser-focused on Next.js. That’s not a limitation — it’s our superpower. We optimize every line of code around how *Next.js actually works in production*.
-
-### 2. **Self-Hosted, Fully**
-You own the infrastructure. You own the app. You own the deploy flow. We’ll never lock you into anything.
-
-### 3. **No Plugins. No Black Boxes.**
-NextDeploy is simple by design. No plugin systems. No runtime extensibility. What you see is what runs. If you want more power, fork it, or open a PR.
-
-### 4. **Built From the Trenches**
-This isn't a theory project. It runs production apps: pharmacies, hospitals, dashboards — deployed by the same tool you’re improving. **Every change should earn its keep.**
-
-### 5. **Open Source With Boundaries**
-We move fast, we review hard, and we reject what doesn’t align. It’s not personal — it’s to protect the long-term clarity and usability of the ecosystem.
+### Zero-Downtime Static Assets
+To solve the common "Failed to load chunk" error in Next.js:
+- New releases are unpacked into `releases/<timestamp>`.
+- The `.next/static` assets are synced (via `cp -rn`) into a `shared_static` directory.
+- Caddy serves `/_next/static/*` from `shared_static`, so old client sessions can still find their JS chunks even after a new deployment.
 
 ---
 
-## 📦 PR Checklist
+## 3. Deployment Flows
 
-Before submitting a PR:
+### VPS Flow (`nextdeploy ship`)
+1. CLI prepares local build.
+2. CLI uploads tarball to `/opt/nextdeploy/uploads`.
+3. CLI sends `ship` command to Daemon.
+4. Daemon extracts tarball, allocates a unique port, and starts a systemd service.
+5. Daemon health-checks the port.
+6. Daemon updates the `current` symlink and reloads Caddy.
 
-- [ ] Is this related to **Next.js deployment or orchestration**?
-- [ ] Is this focused, modular, and testable?
-- [ ] Have you avoided introducing plugin systems, vendor dependencies, or feature creep?
-- [ ] Have you documented what changed and why?
-- [ ] Have you followed the CLI + Daemon architecture?
-
-If in doubt, open an issue first and let’s discuss.
-
----
-
-## 🌱 First Steps
-
-If you're new here, here’s how to get started:
-
-- [x] Clone the repo and run `nextdeploy init`
-- [x] Deploy a sample Next.js app to a VPS using `nextdeploy deploy`
-- [x] Review how the CLI interacts with Docker, SSH, and the orchestration daemon
-- [x] Read and tweak the `nextdeploy.yml` config
-- [x] Submit feedback, edge case issues, or suggestions for improvements
+### Serverless Flow
+1. CLI detects Serverless target.
+2. CLI uses `cli/internal/serverless` (AWS Provider) to:
+   - Upload assets to S3.
+   - Deploy/Update Lambda functions.
+   - Configure CloudFront with mTLS and custom aliases.
+   - Perform ACM certificate cleanup and OAC management.
 
 ---
 
-## 🧪 Power User Contributions
+## 4. Contributing
 
-We especially want contributions from developers who:
+### Repository Structure
+```bash
+.
+├── cli/           # CLI source code
+│   ├── cmd/       # Cobra command definitions
+│   └── internal/  # CLI internal logic (AWS, log aggregator)
+├── daemon/        # VPS Daemon source code
+│   └── internal/  # Command handlers, process management
+├── shared/        # Shared packages (NextCore, Caddy logic)
+├── docs/          # Project documentation
+└── .agents/       # AI agent workflows
+```
 
-- Use NextDeploy in real apps (like we do)
-- Find edge cases from SSR/ISR/streaming
-- Push deployments to low-resource servers
-- Care deeply about speed, reliability, and transparency
-- Want to make DevOps better *for the frontend dev*
+### Building for Local Testing
+```bash
+# Build CLI
+go build -o nextdeploy ./cli/main.go
+
+# Build Daemon
+go build -o nextdeployd ./daemon/cmd/nextdeployd
+```
+
+### Security Standards
+- **CSP**: Always use `shared/nextcore` for CSP generation. Do not hardcode `unsafe-eval` unless a detected feature strictly requires it.
+- **Permissions**: The Daemon runs as `root` to manage systemd, but child processes run as the `nextdeploy` user. Ensure all file operations respect this boundary.
 
 ---
 
-## 🤝 Let’s Build It Right
-
-NextDeploy is for developers who are done with platform lock-in, hidden limits, and black-box magic.  
-It’s for builders who want to ship fast **and** sleep at night.
-
-If that’s you — welcome. Pull requests are open. The CLI is live. The engine runs in production.
-
-Let’s make Next.js deployment simple, powerful, and ours again.
-
-— **The NextDeploy Team** *(just me... for now)*
+## 5. Development Principles
+1. **Premium DX**: Every command should output clear, colorized, and actionable feedback.
+2. **Deep Clean**: The `destroy` command must leave zero residue.
+3. **Resiliency**: Assume the network will fail; implement retries and state-recovery for long-running tasks.
