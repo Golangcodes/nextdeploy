@@ -34,7 +34,7 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NextDeploy | Deployment Report: %s</title>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
@@ -150,6 +150,7 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
             border-radius: 16px;
             padding: 40px;
             margin-top: 40px;
+            min-height: 300px;
         }
 
         .footer {
@@ -186,7 +187,7 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
             <p style="color: var(--text-muted); margin-top: 15px;">Resources provisioned for <strong>%s</strong> in <strong>%s</strong></p>
         </header>
 
-        <div class="diagram">
+        <div class="diagram" id="diagram-container">
             <div class="mermaid">
                 graph LR
                     subgraph T ["Traffic"]
@@ -246,18 +247,24 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
         </div>
     </div>
 
-    <script>
-        mermaid.initialize({ 
-            theme: 'dark',
-            startOnLoad: true,
-            themeVariables: {
-                primaryColor: '#4f46e5',
-                primaryTextColor: '#fff',
-                lineColor: '#4f46e5',
-                secondaryColor: '#15171e',
-                tertiaryColor: '#10b981'
-            }
-        });
+    <script shadow>
+        try {
+            mermaid.initialize({ 
+                theme: 'dark',
+                startOnLoad: true,
+                securityLevel: 'loose',
+                themeVariables: {
+                    primaryColor: '#4f46e5',
+                    primaryTextColor: '#fff',
+                    lineColor: '#4f46e5',
+                    secondaryColor: '#15171e',
+                    tertiaryColor: '#10b981'
+                }
+            });
+        } catch (e) {
+            console.error('Mermaid failed to initialize:', e);
+            document.getElementById('diagram-container').innerHTML = '<p style="text-align:center;color:#94a3b8;padding:40px;">Diagram failed to load. Check console for details.</p>';
+        }
     </script>
 </body>
 </html>
