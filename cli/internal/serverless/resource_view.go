@@ -6,23 +6,25 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Golangcodes/nextdeploy/cli/internal/dns"
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/config"
 )
 
 // ServerlessResourceMap holds the metadata for the visual report
 type ServerlessResourceMap struct {
-	AppName          string
-	Environment      string
-	Region           string
-	LambdaARN        string
-	FunctionURL      string
-	S3BucketName     string
-	CloudFrontID     string
-	CloudFrontDomain string
-	CustomDomain     string
-	CertificateARN   string
-	DeploymentTime   time.Time
+	AppName           string
+	Environment       string
+	Region            string
+	LambdaARN         string
+	FunctionURL       string
+	S3BucketName      string
+	CloudFrontID      string
+	CloudFrontDomain  string
+	CustomDomain      string
+	CertificateARN    string
+	ValidationRecords []dns.ValidationRecord
+	DeploymentTime    time.Time
 }
 
 // GenerateResourceView creates a premium HTML report of the provisioned resources
@@ -215,22 +217,25 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
         }
 
         .loud-notice {
-            background: #facc15;
-            color: #000;
-            padding: 12px 20px;
+            background: #ef4444;
+            color: #fff;
+            padding: 16px 24px;
             border-radius: 8px;
-            font-weight: 700;
-            margin-bottom: 20px;
+            font-weight: 800;
+            margin-bottom: 24px;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 10px;
-            animation: pulse 2s infinite;
+            gap: 8px;
+            animation: pulse-red 2s infinite;
+            text-align: center;
+            border: 2px solid #fff;
         }
 
-        @keyframes pulse {
-            0%% { transform: scale(1); }
-            50%% { transform: scale(1.02); }
-            100%% { transform: scale(1); }
+        @keyframes pulse-red {
+            0%% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70%% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+            100%% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
 
         a {
@@ -271,32 +276,61 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
             </div>
         <div class="dns-guide">
             <div class="loud-notice">
-                <span>⚠️ ACTION REQUIRED: Update your DNS records to go live!</span>
+                <span style="font-size: 1.2rem;">⚠️ CRITICAL: DNS SETUP REQUIRED ⚠️</span>
+                <span style="font-size: 0.9rem; font-weight: 400;">Your application is NOT live until you complete these steps.</span>
             </div>
-            <h2>🌐 DNS Configuration Guide</h2>
-            <p style="color: var(--text-muted); margin-bottom: 20px;">Point your domain to your new CloudFront distribution using these settings:</p>
+            <h2>🌐 Step-by-Step DNS Guide</h2>
+            <p style="color: var(--text-muted); margin-bottom: 20px;">
+                AWS needs to verify domain ownership and point traffic to CloudFront. 
+                Please add the following records to your DNS provider:
+            </p>
             
+            <h3 style="color: #fff; font-size: 1rem; margin-top: 30px;">1. SSL Validation Records (Mandatory)</h3>
             <table class="dns-table">
                 <thead>
                     <tr>
                         <th>Type</th>
                         <th>Host / Name</th>
                         <th>Value / Points To</th>
-                        <th>TTL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    %s
+                </tbody>
+            </table>
+
+            <h3 style="color: #fff; font-size: 1rem; margin-top: 30px;">2. Routing Record</h3>
+            <table class="dns-table">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Host / Name</th>
+                        <th>Value / Points To</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
                         <td>CNAME</td>
-                        <td>%s</td>
-                        <td>%s</td>
-                        <td>Auto / 3600</td>
+                        <td>@ (Root)</td>
+                        <td style="color: var(--accent)">%s</td>
+                    </tr>
+                    <tr>
+                        <td>CNAME</td>
+                        <td>www</td>
+                        <td style="color: var(--accent)">%s</td>
                     </tr>
                 </tbody>
             </table>
             
-            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 20px;">
-                * If using Route53, it is recommended to use an <strong>A Record (Alias)</strong> pointing to the CloudFront distribution for better performance.
+            <div style="background: rgba(79, 70, 229, 0.1); border-left: 4px solid var(--accent); padding: 20px; margin-top: 30px; border-radius: 0 8px 8px 0;">
+                <p style="margin: 0; color: #fff; font-weight: 600;">💡 Pro Tip for Route53 Users</p>
+                <p style="margin: 10px 0 0 0; font-size: 0.9rem; color: var(--text-muted);">
+                    Use an <strong>A Record (Alias)</strong> instead of a CNAME. It's faster, free, and works on the root domain!
+                </p>
+            </div>
+
+            <p style="font-size: 0.9rem; color: #facc15; margin-top: 30px; font-weight: 600;">
+                📅 After updating DNS, wait 5-10 minutes and run <code>nextdeploy ship</code> again to finish.
             </p>
         </div>
 
@@ -368,6 +402,16 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 		displayDomain = resMap.CloudFrontDomain
 	}
 
+	// Validation records table rows
+	var validationRows string
+	if len(resMap.ValidationRecords) == 0 {
+		validationRows = `<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">No pending validation records or already issued.</td></tr>`
+	} else {
+		for _, rec := range resMap.ValidationRecords {
+			validationRows += fmt.Sprintf(`<tr><td>CNAME</td><td style="font-size:0.7rem">%s</td><td style="font-size:0.7rem">%s</td></tr>`, rec.Name, rec.Value)
+		}
+	}
+
 	htmlContent := fmt.Sprintf(template,
 		resMap.AppName,
 		resMap.Environment,
@@ -376,6 +420,9 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 		displayDomain,
 		resMap.AppName,
 		resMap.S3BucketName,
+		validationRows,
+		resMap.CloudFrontDomain,
+		resMap.CloudFrontDomain,
 		resMap.CloudFrontID,
 		displayDomain,
 		displayDomain,
@@ -383,8 +430,6 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 		resMap.FunctionURL,
 		resMap.S3BucketName,
 		resMap.CertificateARN,
-		displayDomain,
-		resMap.CloudFrontDomain,
 		shared.Version,
 		resMap.DeploymentTime.Format(time.RFC1123),
 	)

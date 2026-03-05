@@ -20,6 +20,7 @@ import (
 	smTypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
+	"github.com/Golangcodes/nextdeploy/cli/internal/dns"
 	"github.com/Golangcodes/nextdeploy/shared"
 	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
 )
@@ -396,7 +397,24 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 		acmCfg, acmErr := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
 		if acmErr == nil {
 			acmClient := acm.NewFromConfig(acmCfg)
-			res.CertificateARN, _ = p.findExistingCertificate(ctx, acmClient, res.CustomDomain)
+			certARN, _ := p.findExistingCertificate(ctx, acmClient, res.CustomDomain)
+			if certARN != "" {
+				res.CertificateARN = certARN
+				// Fetch validation records
+				desc, descErr := acmClient.DescribeCertificate(ctx, &acm.DescribeCertificateInput{
+					CertificateArn: aws.String(certARN),
+				})
+				if descErr == nil && desc.Certificate != nil {
+					for _, dvo := range desc.Certificate.DomainValidationOptions {
+						if dvo.ResourceRecord != nil {
+							res.ValidationRecords = append(res.ValidationRecords, dns.ValidationRecord{
+								Name:  *dvo.ResourceRecord.Name,
+								Value: *dvo.ResourceRecord.Value,
+							})
+						}
+					}
+				}
+			}
 		}
 	}
 
