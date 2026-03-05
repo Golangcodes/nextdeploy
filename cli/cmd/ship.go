@@ -161,6 +161,14 @@ var shipCmd = &cobra.Command{
 			port = 3000 // Default Next.js port
 		}
 
+		// Find DNS provider for report personalization
+		dnsProvider := "other"
+		if cfg.SSLConfig != nil {
+			dnsProvider = cfg.SSLConfig.DNSProvider
+		} else if cfg.SSL != nil {
+			dnsProvider = cfg.SSL.DNSProvider
+		}
+
 		resMap := server.VPSResourceMap{
 			AppName:        cfg.App.Name,
 			Environment:    "production",
@@ -168,6 +176,7 @@ var shipCmd = &cobra.Command{
 			CustomDomain:   cfg.App.Domain,
 			Port:           port,
 			DeploymentTime: time.Now(),
+			DNSProvider:    dnsProvider,
 		}
 
 		reportPath, err := server.GenerateVPSResourceView(&cfg.App, resMap)

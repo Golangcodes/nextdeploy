@@ -392,6 +392,12 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 
 	// 3. Custom Domain & cert
 	res.CustomDomain = appCfg.App.Domain
+	if appCfg.SSLConfig != nil {
+		res.DNSProvider = appCfg.SSLConfig.DNSProvider
+	} else if appCfg.SSL != nil {
+		res.DNSProvider = appCfg.SSL.DNSProvider
+	}
+
 	if res.CustomDomain != "" {
 		// ACM certs for CloudFront must be in us-east-1
 		acmCfg, acmErr := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))

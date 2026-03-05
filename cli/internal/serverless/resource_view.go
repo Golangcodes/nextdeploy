@@ -3,7 +3,6 @@ package serverless
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -635,7 +634,7 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
             </table>
 
             <div class="warning-box">
-                <strong>%s</strong>
+                <strong>%s Notice</strong>
                 <p style="margin-top: 8px;">%s</p>
             </div>
 
@@ -818,7 +817,7 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 	htmlContent := fmt.Sprintf(template,
 		resMap.AppName,
 		certStatusClass,
-		resMap.Environment,
+		certStatusText,
 		resMap.AppName,
 		resMap.Region,
 		displayDomain,
@@ -833,7 +832,7 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 		routingStatus,
 		resMap.CloudFrontDomain,
 		routingStatus,
-		provider.Warning,
+		provider.Name,
 		provider.Warning,
 		provider.Name,
 		provider.ProTip,
@@ -855,22 +854,16 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 		resMap.DeploymentTime.Format("Mon Jan 2 15:04:05 MST 2006"),
 	)
 
-	// Create reports directory if it doesn't exist
-	reportsDir := filepath.Join(os.Getenv("HOME"), ".nextdeploy", "reports")
-	if err := os.MkdirAll(reportsDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create reports directory: %w", err)
-	}
-
-	// Generate report filename with timestamp
+	// Save in current working directory as requested
 	timestamp := resMap.DeploymentTime.Format("20060102-150405")
-	reportPath := filepath.Join(reportsDir, fmt.Sprintf("%s-%s-report.html", resMap.AppName, timestamp))
+	reportPath := fmt.Sprintf("%s-%s-report.html", resMap.AppName, timestamp)
 
 	if err := os.WriteFile(reportPath, []byte(htmlContent), 0644); err != nil {
 		return "", fmt.Errorf("failed to write report: %w", err)
 	}
 
-	// Also save a latest copy
-	latestPath := filepath.Join(reportsDir, fmt.Sprintf("%s-latest.html", resMap.AppName))
+	// Also save a latest copy in the project root
+	latestPath := fmt.Sprintf("%s-latest.html", resMap.AppName)
 	_ = os.WriteFile(latestPath, []byte(htmlContent), 0644)
 
 	return reportPath, nil
