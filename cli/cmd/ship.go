@@ -181,11 +181,14 @@ var shipCmd = &cobra.Command{
 
 		reportPath, err := server.GenerateVPSResourceView(&cfg.App, resMap)
 		if err == nil {
-			log.Info("════════════════════════════════════════════════════════════")
-			log.Success("✨  Visual Deployment Report generated: %s", reportPath)
-			log.Info("    Open this file in your browser to see your provisioned resources.")
-			log.Info("    DNS setup instructions are included in the report and dns.md!")
-			log.Info("════════════════════════════════════════════════════════════")
+			log.Info("┌────────────────────────────────────────────────────────────┐")
+			log.Success("│  ✨  VPS DEPLOYMENT REPORT READY                           │")
+			log.Info("├────────────────────────────────────────────────────────────┤")
+			log.Info("│  Location: %s", reportPath)
+			log.Info("│                                                            │")
+			log.Info("│  🚨  DNS ACTION REQUIRED: Point your domain to %s     ", deploymentServer)
+			log.Info("│     Open this report for the full DNS setup strategy.      │")
+			log.Info("└────────────────────────────────────────────────────────────┘")
 		} else {
 			log.Warn("Failed to generate visual report: %v", err)
 		}

@@ -102,12 +102,14 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	if err == nil {
 		reportPath, err := GenerateResourceView(&cfg.App, resMap)
 		if err == nil {
-			//TODO this should more loud so that the user can find it easily for dns guidance
-			log.Info("════════════════════════════════════════════════════════════")
-			log.Success("Visual Deployment Report generated: %s", reportPath)
-			log.Info("    Open this file in your browser to see your provisioned resources.")
-			log.Info("    DNS setup instructions are included in the report and dns.md!")
-			log.Info("════════════════════════════════════════════════════════════")
+			log.Info("┌────────────────────────────────────────────────────────────┐")
+			log.Success("│  🚀 DEPLOYMENT REPORT READY                                │")
+			log.Info("├────────────────────────────────────────────────────────────┤")
+			log.Info("│  Location: %s", reportPath)
+			log.Info("│                                                            │")
+			log.Info("│  ⚠️  DNS GUIDANCE: Open this report immediately to see     │")
+			log.Info("│     the exact DNS records needed for your custom domain.   │")
+			log.Info("└────────────────────────────────────────────────────────────┘")
 		} else {
 			log.Warn("Failed to generate visual report: %v", err)
 		}
