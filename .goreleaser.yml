@@ -51,16 +51,15 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
-  - id: nextdeploy-archive
+  - id: nextdeploy-cli-archive
     builds:
       - nextdeploy-cli
-      - nextdeploy-daemon
     format: tar.gz
     format_overrides:
       - goos: windows
         format: zip
     name_template: >-
-      {{ .ProjectName }}_
+      nextdeploy_
       {{- .Version }}_
       {{- title .Os }}_
       {{- .Arch }}
@@ -68,6 +67,19 @@ archives:
       - README.md
       - LICENSE
       - sample.nextdeploy.yml
+
+  - id: nextdeploy-daemon-archive
+    builds:
+      - nextdeploy-daemon
+    format: tar.gz
+    name_template: >-
+      nextdeployd_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- .Arch }}
+    files:
+      - README.md
+      - LICENSE
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
