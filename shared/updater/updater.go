@@ -927,7 +927,7 @@ func extractZipBinary(archivePath, binaryName, destPath string) error {
 	if err != nil {
 		return err
 	}
-	defer ignoreErr(r.Close())
+	defer closeBestEffort(r)
 
 	for _, f := range r.File {
 		if filepath.Base(f.Name) == binaryName || filepath.Base(f.Name) == binaryName+".exe" {
@@ -935,13 +935,13 @@ func extractZipBinary(archivePath, binaryName, destPath string) error {
 			if err != nil {
 				return err
 			}
-			defer ignoreErr(rc.Close())
+			defer closeBestEffort(rc)
 
 			out, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
 			if err != nil {
 				return err
 			}
-			defer ignoreErr(out.Close())
+			defer closeBestEffort(out)
 
 			_, err = io.Copy(out, rc)
 			return err
@@ -955,13 +955,13 @@ func extractTarGzBinary(archivePath, binaryName, destPath string) error {
 	if err != nil {
 		return err
 	}
-	defer ignoreErr(f.Close())
+	defer closeBestEffort(f)
 
 	gzr, err := gzip.NewReader(f)
 	if err != nil {
 		return err
 	}
-	defer ignoreErr(gzr.Close())
+	defer closeBestEffort(gzr)
 
 	tr := tar.NewReader(gzr)
 	for {
@@ -978,7 +978,7 @@ func extractTarGzBinary(archivePath, binaryName, destPath string) error {
 			if err != nil {
 				return err
 			}
-			defer ignoreErr(out.Close())
+			defer closeBestEffort(out)
 
 			_, err = io.Copy(out, tr)
 			return err
