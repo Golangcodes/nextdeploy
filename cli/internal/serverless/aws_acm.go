@@ -54,7 +54,19 @@ func (p *AWSProvider) ensureACMCertificateExists(ctx context.Context, domain str
 	certARN = *reqOutput.CertificateArn
 	p.log.Info("ACM certificate requested: %s", certARN)
 
-	time.Sleep(5 * time.Second)
+	// Poll until ACM populates DomainValidationOptions (usually 2-10s)
+	for i := 0; i < 6; i++ {
+		time.Sleep(5 * time.Second)
+		desc, err := client.DescribeCertificate(ctx, &acm.DescribeCertificateInput{
+			CertificateArn: aws.String(certARN),
+		})
+		if err == nil && desc.Certificate != nil && len(desc.Certificate.DomainValidationOptions) > 0 {
+			if desc.Certificate.DomainValidationOptions[0].ResourceRecord != nil {
+				break // records are ready
+			}
+		}
+		p.log.Info("Waiting for ACM to populate DNS validation records (%d/6)...", i+1)
+	}
 	p.printDNSValidationRecords(ctx, client, certARN, domain)
 
 	return certARN, nil

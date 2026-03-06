@@ -109,7 +109,7 @@ func runServerlessSecretAction(action string, args []string, appName string, cfg
 			if err := p.SetSecret(ctx, appName, parts[0], parts[1]); err != nil {
 				log.Error("Failed to set secret %s: %v", parts[0], err)
 			} else {
-				log.Success("✅ Secret %s set in AWS Secrets Manager", parts[0])
+				log.Success("Secret %s set in AWS Secrets Manager", parts[0])
 			}
 		}
 	case "get":
@@ -143,7 +143,7 @@ func runServerlessSecretAction(action string, args []string, appName string, cfg
 			if err := p.UnsetSecret(ctx, appName, key); err != nil {
 				log.Error("Failed to unset secret %s: %v", key, err)
 			} else {
-				log.Success("✅ Secret %s removed from AWS Secrets Manager", key)
+				log.Success("Secret %s removed from AWS Secrets Manager", key)
 			}
 		}
 	}
@@ -180,7 +180,7 @@ func runVPSSecretAction(action string, args []string, appName string, log *share
 			if err != nil {
 				log.Error("Failed to set secret %s: %v\nOutput: %s", key, err, output)
 			} else {
-				log.Success("✅ Secret %s set", key)
+				log.Success(" Secret %s set", key)
 			}
 		}
 	case "get":

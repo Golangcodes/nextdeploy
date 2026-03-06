@@ -350,7 +350,7 @@ func (p *AWSProvider) saveLambdaZipToS3(ctx context.Context, bucketName, functio
 	_, err = client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(bucketName),
 		Key:         aws.String(manifestKey),
-		Body:        bytesReader(manifestBytes),
+		Body:        bytes.NewReader(manifestBytes),
 		ContentType: aws.String("application/json"),
 	})
 	if err != nil {
@@ -379,9 +379,4 @@ func (p *AWSProvider) getLambdaDeploymentHistory(ctx context.Context, bucketName
 		return nil, fmt.Errorf("failed to parse deployment manifest: %w", err)
 	}
 	return manifest.Deployments, nil
-}
-
-// bytesReader wraps a []byte as an io.Reader for S3 PutObject.
-func bytesReader(b []byte) *strings.Reader {
-	return strings.NewReader(string(b))
 }

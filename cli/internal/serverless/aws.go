@@ -412,6 +412,7 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 					CertificateArn: aws.String(certARN),
 				})
 				if descErr == nil && desc.Certificate != nil {
+					res.CertificateStatus = string(desc.Certificate.Status)
 					for _, dvo := range desc.Certificate.DomainValidationOptions {
 						if dvo.ResourceRecord != nil {
 							res.ValidationRecords = append(res.ValidationRecords, dns.ValidationRecord{

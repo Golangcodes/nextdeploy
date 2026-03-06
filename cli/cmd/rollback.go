@@ -38,7 +38,7 @@ var rollbackCmd = &cobra.Command{
 				log.Error("Serverless rollback failed: %v", err)
 				os.Exit(1)
 			}
-			log.Info("✅ Serverless rollback successful!")
+			log.Info("Serverless rollback successful!")
 
 		case "vps":
 			log.Info("Deployment Target: VPS (Daemon execution)")
@@ -69,7 +69,7 @@ var rollbackCmd = &cobra.Command{
 				os.Exit(1)
 			}
 
-			log.Info("✅ Rollback successful!")
+			log.Info("Rollback successful!")
 
 		default:
 			log.Error("Unknown or unsupported target_type: %s", cfg.TargetType)

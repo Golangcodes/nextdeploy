@@ -33,12 +33,9 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	log := shared.PackageLogger("serverless", "☁️  SERVERLESS")
 
 	// ── 1. Resolve provider ──────────────────────────────────────────────────
-	var p Provider
-	switch cfg.Serverless.Provider {
-	case "aws":
-		p = NewAWSProvider()
-	default:
-		return fmt.Errorf("unsupported serverless provider: %s (supported: aws)", cfg.Serverless.Provider)
+	p, err := New(cfg.Serverless.Provider)
+	if err != nil {
+		return err
 	}
 
 	if err := p.Initialize(ctx, cfg); err != nil {
@@ -125,12 +122,9 @@ func Rollback(ctx context.Context, cfg *config.NextDeployConfig) error {
 	log := shared.PackageLogger("serverless", "☁️  SERVERLESS")
 
 	// ── 1. Resolve provider ──────────────────────────────────────────────────
-	var p Provider
-	switch cfg.Serverless.Provider {
-	case "aws":
-		p = NewAWSProvider()
-	default:
-		return fmt.Errorf("unsupported serverless provider: %s (supported: aws)", cfg.Serverless.Provider)
+	p, err := New(cfg.Serverless.Provider)
+	if err != nil {
+		return err
 	}
 
 	if err := p.Initialize(ctx, cfg); err != nil {

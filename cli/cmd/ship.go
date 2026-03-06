@@ -37,7 +37,7 @@ var shipCmd = &cobra.Command{
 
 		// --- PRE-DEPLOY VALIDATIONS ---
 		if git.IsDirty() {
-			log.Warn("⚠️  Git directory is dirty (uncommitted changes).")
+			log.Warn(" Git directory is dirty (uncommitted changes).")
 			log.Warn("   It is recommended to commit your changes before shipping for better deployment provenance.")
 		}
 
@@ -120,7 +120,7 @@ var shipCmd = &cobra.Command{
 			if err := dns.GenerateVPSGuide(cfg.App.Domain, deploymentServer); err != nil {
 				log.Warn("Failed to generate DNS guide: %v", err)
 			} else {
-				log.Info("  🌐 DNS Guide Generated: dns.md (Point %s to %s)", cfg.App.Domain, deploymentServer)
+				log.Info("   DNS Guide Generated: dns.md (Point %s to %s)", cfg.App.Domain, deploymentServer)
 			}
 		}
 

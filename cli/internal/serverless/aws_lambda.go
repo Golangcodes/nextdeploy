@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -65,7 +63,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	}
 
 	// 4. Ensure Lambda function exists (provision if missing).
-	functionJustCreated, err := p.ensureLambdaFunctionExists(ctx, client, functionName, appCfg.Serverless, zipContents)
+	functionJustCreated, err := p.ensureLambdaFunctionExists(ctx, client, functionName, appCfg.App.Name, appCfg.Serverless, zipContents)
 	if err != nil {
 		return err
 	}
@@ -136,6 +134,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 
 	maxRetries := 5
 	layersToApply := []string{secretsExtensionLayer}
+	layerFallbackApplied := false
 	for i := 0; i < maxRetries; i++ {
 		_, err := client.UpdateFunctionConfiguration(ctx, &lambda.UpdateFunctionConfigurationInput{
 			FunctionName: aws.String(functionName),
@@ -155,12 +154,15 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 		// Fallback if they lack permissions to grab the AWS-managed Secrets Extension layer
 		var apiErr smithy.APIError
 		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException" && strings.Contains(err.Error(), "lambda:GetLayerVersion") && len(layersToApply) > 0 {
-			p.log.Warn("IAM user lacks lambda:GetLayerVersion permissions for the Secrets Extension Layer.")
-			p.log.Warn("ACTION REQUIRED: To enable secure cloud secrets, add the 'lambda:GetLayerVersion' permission to your IAM policy.")
-			p.log.Warn("Falling back to standard environment variables for secret injection.")
-			layersToApply = nil // remove the layer and retry immediately
-			i--                 // don't count this as a rate-limit retry
-			continue
+			if !layerFallbackApplied {
+				p.log.Warn("IAM user lacks lambda:GetLayerVersion permissions for the Secrets Extension Layer.")
+				p.log.Warn("ACTION REQUIRED: To enable secure cloud secrets, add the 'lambda:GetLayerVersion' permission to your IAM policy.")
+				p.log.Warn("Falling back to standard environment variables for secret injection.")
+				layersToApply = nil // remove the layer and retry immediately
+				layerFallbackApplied = true
+				i-- // safe: only happens once, guarded by flag
+				continue
+			}
 		}
 
 		var conflict *lambdaTypes.ResourceConflictException
@@ -245,7 +247,7 @@ func (p *AWSProvider) Rollback(ctx context.Context, appCfg *cfgTypes.NextDeployC
 	return nil
 }
 
-func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *lambda.Client, name string, sCfg *cfgTypes.ServerlessConfig, zipContents []byte) (justCreated bool, err error) {
+func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *lambda.Client, name, appName string, sCfg *cfgTypes.ServerlessConfig, zipContents []byte) (justCreated bool, err error) {
 	_, err = client.GetFunction(ctx, &lambda.GetFunctionInput{
 		FunctionName: aws.String(name),
 	})
@@ -313,7 +315,7 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 		Environment: &lambdaTypes.Environment{
 			Variables: map[string]string{
 				"NODE_ENV":       "production",
-				"ND_SECRET_NAME": fmt.Sprintf("nextdeploy/apps/%s/production", strings.Split(name, "-")[0]), // Extract app name
+				"ND_SECRET_NAME": fmt.Sprintf("nextdeploy/apps/%s/production", appName),
 			},
 		},
 		Timeout:    aws.Int32(timeout),
@@ -323,6 +325,7 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 
 	maxRetries := 10
 	retryDelay := 5 * time.Second
+	layerFallbackApplied := false
 	for i := 0; i < maxRetries; i++ {
 		_, createErr := client.CreateFunction(ctx, createInput)
 		if createErr == nil {
@@ -332,12 +335,15 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 
 		var apiErr smithy.APIError
 		if errors.As(createErr, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException" && strings.Contains(createErr.Error(), "lambda:GetLayerVersion") && len(createInput.Layers) > 0 {
-			p.log.Warn("IAM user lacks lambda:GetLayerVersion permissions for the Secrets Extension Layer.")
-			p.log.Warn("ACTION REQUIRED: To enable secure cloud secrets, add the 'lambda:GetLayerVersion' permission to your IAM policy.")
-			p.log.Warn("Falling back to standard environment variables for secret injection.")
-			createInput.Layers = nil // remove the layer and retry immediately
-			i--                      // don't count this as a rate-limit retry
-			continue
+			if !layerFallbackApplied {
+				p.log.Warn("IAM user lacks lambda:GetLayerVersion permissions for the Secrets Extension Layer.")
+				p.log.Warn("ACTION REQUIRED: To enable secure cloud secrets, add the 'lambda:GetLayerVersion' permission to your IAM policy.")
+				p.log.Warn("Falling back to standard environment variables for secret injection.")
+				createInput.Layers = nil // remove the layer and retry immediately
+				layerFallbackApplied = true
+				i-- // safe: only happens once, guarded by flag
+				continue
+			}
 		}
 
 		var invalidParam *lambdaTypes.InvalidParameterValueException
@@ -504,25 +510,4 @@ func (p *AWSProvider) ensureLambdaFunctionURLExists(ctx context.Context, client 
 	}
 
 	return functionUrl, nil
-}
-
-// downloadURL fetches the content from a URL and returns the bytes.
-// Used to download Lambda code from a presigned S3 URL during rollback.
-func (p *AWSProvider) downloadURL(url string) ([]byte, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("HTTP GET failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	return data, nil
 }

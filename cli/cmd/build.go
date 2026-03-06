@@ -289,17 +289,12 @@ func createTarball(sourceDir, targetTar, targetType string, payload *nextcore.Ne
 		}
 
 		if d.IsDir() {
-			// Dynamic exclusion of build/export dirs
 			if d.Name() == ".git" || d.Name() == ".nextdeploy" {
 				log.Info("[tarball] Skip dir (excluded): %s", relPath)
 				return filepath.SkipDir
 			}
 
-			// Exclude the configured distDir and exportDir from the source walk
 			if d.Name() == payload.DistDir || d.Name() == payload.ExportDir {
-				// But only if we are walking the ROOT of the project (sourceDir == ".")
-				// If sourceDir is "out", we are already inside it, and we shouldn't skip it.
-				// However, the walk starts at sourceDir, so d.Name() will be children.
 				if sourceDir == "." || sourceDir == "./" {
 					log.Info("[tarball] Skip build/export dir: %s", relPath)
 					return filepath.SkipDir
@@ -307,7 +302,6 @@ func createTarball(sourceDir, targetTar, targetType string, payload *nextcore.Ne
 			}
 
 			if shouldExcludeDir(d.Name()) {
-				// Special case: node_modules inclusion logic depends on TargetType
 				if d.Name() == "node_modules" {
 					if targetType == "vps" && (outputMode == nextcore.OutputModeStandalone || outputMode == nextcore.OutputModeDefault) {
 						log.Info("[tarball] VPS: Including node_modules (mode=%s): %s", outputMode, relPath)

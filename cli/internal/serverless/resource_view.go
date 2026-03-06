@@ -755,13 +755,11 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 	// ── Verify commands ────────────────────────────────────────────────────────
 	verifyCmd1, verifyCmd2 := "", ""
 	if len(resMap.ValidationRecords) > 0 {
-		verifyCmd1 = fmt.Sprintf("dig @8.8.8.8 %s.%s CNAME +short",
-			strings.TrimSuffix(resMap.ValidationRecords[0].Name, "."),
-			resMap.CustomDomain)
+		verifyCmd1 = fmt.Sprintf("dig @8.8.8.8 %s CNAME +short",
+			strings.TrimSuffix(resMap.ValidationRecords[0].Name, "."))
 		if len(resMap.ValidationRecords) > 1 {
-			verifyCmd2 = fmt.Sprintf("dig @8.8.8.8 %s.%s CNAME +short",
-				strings.TrimSuffix(resMap.ValidationRecords[1].Name, "."),
-				resMap.CustomDomain)
+			verifyCmd2 = fmt.Sprintf("dig @8.8.8.8 %s CNAME +short",
+				strings.TrimSuffix(resMap.ValidationRecords[1].Name, "."))
 		}
 	}
 

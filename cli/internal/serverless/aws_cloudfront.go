@@ -16,11 +16,8 @@ import (
 	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
 )
 
-// cfDistributionIDPattern is used to validate a real CloudFront distribution ID
-// and reject placeholder values from config (e.g. "E1234567890ABC", "YOUR_DIST_ID").
 var cfDistributionIDPattern = regexp.MustCompile(`^E[A-Z0-9]{10,14}$`)
 
-// isPlaceholderDistributionID checks if the provided ID is the default placeholder.
 func isPlaceholderDistributionID(id string) bool {
 	return id == "E1234567890ABC" || !cfDistributionIDPattern.MatchString(id)
 }
@@ -98,7 +95,7 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 		}
 
 		distConfig := getConfig.DistributionConfig
-		needsUpdate := p.applyDistributionConfig(distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl)
+		needsUpdate := p.applyDistributionConfig(ctx, distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl)
 
 		if needsUpdate {
 			p.log.Info("CloudFront configuration update required, applying changes...")
@@ -121,7 +118,7 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 	p.log.Info("CloudFront distribution not found, creating one (this may take a few minutes to be fully active)...")
 
 	distConfig := &cfTypes.DistributionConfig{}
-	p.applyDistributionConfig(distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl)
+	p.applyDistributionConfig(ctx, distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl)
 
 	createOutput, err := client.CreateDistribution(ctx, &cloudfront.CreateDistributionInput{
 		DistributionConfig: distConfig,
@@ -156,7 +153,7 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 
 // applyDistributionConfig centralizes the logic for both creating and updating a distribution.
 // It returns true if any changes were made (for updates).
-func (p *AWSProvider) applyDistributionConfig(dc *cfTypes.DistributionConfig, callerRef, domain, certARN, s3OacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl string) bool {
+func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.DistributionConfig, callerRef, domain, certARN, s3OacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl string) bool {
 	changed := false
 
 	if dc.CallerReference == nil || *dc.CallerReference == "" {
@@ -174,7 +171,7 @@ func (p *AWSProvider) applyDistributionConfig(dc *cfTypes.DistributionConfig, ca
 
 	// 1. Handle Domain Aliases
 	if domain != "" {
-		if certARN != "" && p.isCertificateIssued(context.Background(), certARN) {
+		if certARN != "" && p.isCertificateIssued(ctx, certARN) {
 			// Ensure Aliases
 			found := false
 			if dc.Aliases != nil {
