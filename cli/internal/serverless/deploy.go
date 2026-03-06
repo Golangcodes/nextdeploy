@@ -99,10 +99,11 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	if err == nil {
 		reportPath, err := GenerateResourceView(&cfg.App, resMap)
 		if err == nil {
+			absPath, _ := filepath.Abs(reportPath)
 			log.Info("┌────────────────────────────────────────────────────────────┐")
 			log.Success("│  🚀 DEPLOYMENT REPORT READY                                │")
 			log.Info("├────────────────────────────────────────────────────────────┤")
-			log.Info("│  Location: %s", reportPath)
+			log.Info("│  Report: file://%s", absPath)
 			log.Info("│                                                            │")
 			log.Info("│  ⚠️  DNS GUIDANCE: Open this report immediately to see     │")
 			log.Info("│     the exact DNS records needed for your custom domain.   │")
