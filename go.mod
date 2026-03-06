@@ -57,3 +57,7 @@ require (
 	golang.org/x/term v0.40.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 )
+
+// Retract versions that were accidentally published ahead of the v0.2.x series.
+// These versions required Go 1.26 and broke linearity.
+retract [v0.3.0, v0.5.0]
