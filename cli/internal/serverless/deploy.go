@@ -61,7 +61,7 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	}
 
 	if pkgResult.SizeWarning != "" {
-		log.Warn(pkgResult.SizeWarning)
+		log.Warn("%s", pkgResult.SizeWarning)
 	}
 	log.Info("Package split: %dMB Lambda zip, %d S3 assets", pkgResult.LambdaZipSize/(1024*1024), len(pkgResult.S3Assets))
 
