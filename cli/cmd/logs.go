@@ -100,10 +100,15 @@ func streamAppLogs(ctx context.Context, srv *server.ServerStruct, serverName, ap
 	daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd logs --appName=%s", appName)
 	serviceName, err := srv.ExecuteCommand(ctx, serverName, daemonCmd, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\033[31mError: %v\033[0m\n", err)
+		fmt.Fprintf(os.Stderr, "\033[31mError querying app logs: %v\033[0m\n", err)
 		return
 	}
 	serviceName = strings.TrimSpace(serviceName)
+
+	if serviceName == "APP_NOT_DEPLOYED" {
+		fmt.Printf("\033[33mNo logs found.\033[0m The application '%s' is not currently running or has been decommissioned.\n", appName)
+		return
+	}
 
 	journalCmd := fmt.Sprintf("journalctl -u %s -f -n 50", serviceName)
 	if routeFilter != "" {

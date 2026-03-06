@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -20,6 +22,18 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 
 	serviceName, err := ch.findActiveService(appName)
 	if err != nil {
+		// Check if app directory exists to distinguish between "not yet deployed" and "decommissioned"
+		appDir := filepath.Join(appsDir, appName)
+		if _, statErr := os.Stat(appDir); os.IsNotExist(statErr) {
+			return types.Response{
+				Success: true,
+				Message: "Status: Decommissioned\nThe application has been destroyed and all resources decommissioned.",
+				Data: map[string]interface{}{
+					"status": "Decommissioned",
+				},
+			}
+		}
+
 		return types.Response{Success: false, Message: fmt.Sprintf("Application '%s' has not been deployed yet. Please run 'nextdeploy ship' first.", appName)}
 	}
 
@@ -107,7 +121,7 @@ func (ch *CommandHandler) handleLogs(args map[string]interface{}) types.Response
 
 	serviceName, err := ch.findActiveService(appName)
 	if err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("Application '%s' has not been deployed yet. Please run 'nextdeploy ship' first.", appName)}
+		return types.Response{Success: true, Message: "APP_NOT_DEPLOYED"}
 	}
 	return types.Response{
 		Success: true,
