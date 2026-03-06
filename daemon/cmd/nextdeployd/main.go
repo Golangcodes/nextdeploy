@@ -91,8 +91,6 @@ func main() {
 	// but available to getSocketPath if ever called after flag.Parse).
 	socketPathOverride = *socketPath
 
-	go updater.CheckAndPrint(shared.Version)
-
 	if !*foreground {
 		daemonize()
 		return

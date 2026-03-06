@@ -6,11 +6,15 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Golangcodes/nextdeploy/daemon/internal/config"
 	"github.com/Golangcodes/nextdeploy/daemon/internal/logging"
 	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
+	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/updater"
 )
 
 const systemctlPath = "/usr/bin/systemctl" // Assuming a default path for systemctl
@@ -68,7 +72,46 @@ func (d *NextDeployDaemon) Start() error {
 	go d.socketServer.AcceptConnections()
 	d.logger.Println("NextDeploy Daemon started successfully")
 
+	// Start background auto-update loop
+	go d.startBackgroundUpdateLoop()
+
 	return d.handleSignals()
+}
+
+func (d *NextDeployDaemon) startBackgroundUpdateLoop() {
+	// Initial check after 5 minutes
+	select {
+	case <-time.After(5 * time.Minute):
+		d.checkAndUpdate()
+	case <-d.ctx.Done():
+		return
+	}
+
+	// Periodic check every 6 hours
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			d.checkAndUpdate()
+		case <-d.ctx.Done():
+			return
+		}
+	}
+}
+
+func (d *NextDeployDaemon) checkAndUpdate() {
+	d.logger.Println("[auto-update] Checking for daemon updates...")
+	if err := updater.SelfUpdateDaemon(shared.Version); err != nil {
+		if strings.Contains(err.Error(), "Already up to date") || strings.Contains(err.Error(), "up to date") {
+			d.logger.Println("[auto-update] Daemon is already up to date")
+		} else {
+			d.logger.Printf("[auto-update] Warning: auto-update failed: %v", err)
+		}
+	} else {
+		d.logger.Println("[auto-update] Update successfully applied. Daemon will restart via systemd.")
+	}
 }
 
 func (d *NextDeployDaemon) handleSignals() error {

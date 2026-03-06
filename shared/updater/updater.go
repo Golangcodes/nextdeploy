@@ -584,6 +584,11 @@ func verifyBinaryIntegrity(binPath, binaryName string, checksums map[string]stri
 	return nil
 }
 
+// DownloadBinaryForCLI is an exported wrapper for CLI tools
+func DownloadBinaryForCLI(version, binaryName, destPath string, opts *UpdateOptions) error {
+	return downloadBinary(version, binaryName, destPath, opts)
+}
+
 // downloadBinary downloads the binary with progress and retries
 func downloadBinary(version, binaryName, destPath string, opts *UpdateOptions) error {
 	downloadURL := fmt.Sprintf(
@@ -912,6 +917,11 @@ func removeAllBestEffort(path string) {
 		return
 	}
 	ignoreErr(os.RemoveAll(path))
+}
+
+// ExtractBinaryForCLI is an exported wrapper for CLI tools
+func ExtractBinaryForCLI(archivePath, binaryName, destPath string) error {
+	return extractBinary(archivePath, binaryName, destPath)
 }
 
 // extractBinary extracts the specific binary from the downloaded archive.
