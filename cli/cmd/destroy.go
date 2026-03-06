@@ -117,8 +117,8 @@ var destroyCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		log.Info("\nNote: Manual steps may still be required (DNS updates, Caddyfile entries, etc.) to fully decommission.")
-		log.Info("Note: This did not remove the systemd service or Caddy configuration if they were manually created.")
+		log.Info("\n✅ App and all associated resources (services, Caddy configs, and files) have been decommissioned.")
+		log.Info("Note: Manual DNS records or project-specific external integrations may still require manual cleanup.")
 	},
 }
 
