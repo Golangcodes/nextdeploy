@@ -134,6 +134,9 @@ jobs:
             exit 1
           fi
 
+          # Clean up test binary to avoid dirty git state
+          rm nextdeploy-test
+
       - name: Run GoReleaser (Tag Release)
         if: steps.version.outputs.is_tag == 'true'
         uses: goreleaser/goreleaser-action@v6
