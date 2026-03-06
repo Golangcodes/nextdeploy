@@ -55,6 +55,22 @@ func main() {
 		case "destroy":
 			handleDestroySubcommand()
 			return
+		case "stop":
+			handleStopSubcommand()
+			return
+		case "remove":
+			handleDestroySubcommand() // remove is an alias for destroy
+			return
+		case "help", "--help", "-h":
+			handleHelpSubcommand()
+			return
+		default:
+			if strings.HasPrefix(os.Args[1], "-") {
+				// Likely a flag for the daemon itself, fall through
+				break
+			}
+			fmt.Fprintf(os.Stderr, "Unknown command: %s\nRun 'nextdeployd help' for usage.\n", os.Args[1])
+			os.Exit(1)
 		}
 	}
 
@@ -229,6 +245,40 @@ func handleRollbackSubcommand() {
 		args["dopplerToken"] = dopplerToken
 	}
 	sendDaemonCommand(daemontypes.Command{Type: "rollback", Args: args})
+}
+
+func handleStopSubcommand() {
+	appName := ""
+	for _, arg := range os.Args[2:] {
+		if strings.HasPrefix(arg, "--appName=") {
+			appName = strings.TrimPrefix(arg, "--appName=")
+		}
+	}
+	if appName == "" {
+		fmt.Fprintln(os.Stderr, "Error: --appName is required")
+		os.Exit(1)
+	}
+	sendDaemonCommand(daemontypes.Command{Type: "stop", Args: map[string]interface{}{"appName": appName}})
+}
+
+func handleHelpSubcommand() {
+	fmt.Println("NextDeploy Daemon (nextdeployd)")
+	fmt.Println("Usage: nextdeployd <command> [arguments]")
+	fmt.Println()
+	fmt.Println("Available commands:")
+	fmt.Println("  ship --tarball=<path>     Deploy a new release")
+	fmt.Println("  status --appName=<name>   Check app status")
+	fmt.Println("  stop --appName=<name>     Stop an application")
+	fmt.Println("  destroy --appName=<name>  Remove an application")
+	fmt.Println("  remove --appName=<name>   Remove an application (alias for destroy)")
+	fmt.Println("  logs --appName=<name>     Stream app logs")
+	fmt.Println("  rollback --appName=<name> Rollback to previous release")
+	fmt.Println("  secrets --action=...      Manage application secrets")
+	fmt.Println("  version                   Show version information")
+	fmt.Println("  update                    Update nextdeployd to latest version")
+	fmt.Println()
+	fmt.Println("Run as daemon:")
+	fmt.Println("  nextdeployd [--config <path>] [--socket-path <path>] [--foreground]")
 }
 
 func handleDestroySubcommand() {

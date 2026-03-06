@@ -202,15 +202,33 @@ func (pm *ProcessManager) StartService(serviceName string) error {
 
 func (pm *ProcessManager) StopService(serviceName string) error {
 	systemctl := resolveTool("systemctl")
+
+	// Get MainPID before stopping
+	// #nosec G204
+	pidCmd := exec.Command(systemctl, "show", "-p", "MainPID", "--value", serviceName)
+	pidOut, _ := pidCmd.CombinedOutput()
+	pidStr := strings.TrimSpace(string(pidOut))
+
 	// #nosec G204
 	cmd := exec.Command(systemctl, "stop", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
-		log.Printf("Warning: failed to stop service %s: %s", serviceName, out)
+		log.Printf("[process] Warning: systemctl stop %s failed: %v - %s", serviceName, err, string(out))
 	}
+
+	// Force kill if PID is known and still exists
+	if pidStr != "" && pidStr != "0" {
+		log.Printf("[process] Forcefully killing process %s for service %s", pidStr, serviceName)
+		// #nosec G204
+		_ = exec.Command("sudo", "kill", "-9", pidStr).Run()
+		// Also kill the process group to be sure
+		// #nosec G204
+		_ = exec.Command("sudo", "kill", "-9", "-"+pidStr).Run()
+	}
+
 	// #nosec G204
 	cmd = exec.Command(systemctl, "disable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
-		log.Printf("Warning: failed to disable service %s: %s", serviceName, out)
+		return fmt.Errorf("failed to disable service %s: %v - %s", serviceName, err, string(out))
 	}
 
 	return nil

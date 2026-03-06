@@ -73,6 +73,7 @@ var allowedCommands = map[string]struct{}{
 	"status":        {},
 	"logs":          {},
 	"destroy":       {},
+	"stop":          {},
 }
 
 func (ch *CommandHandler) ValidateCommand(cmd types.Command) error {
@@ -123,6 +124,8 @@ func (ch *CommandHandler) HandleCommand(cmd types.Command, clientIdentity string
 		resp = ch.handleLogs(cmd.Args)
 	case "destroy":
 		resp = ch.handleDestroy(cmd.Args)
+	case "stop":
+		resp = ch.handleStopApp(cmd.Args)
 	default:
 		resp = types.Response{
 			Success: false,
@@ -708,31 +711,110 @@ func (ch *CommandHandler) handleDestroy(args map[string]interface{}) types.Respo
 
 	log.Printf("[destroy] Destroying app: %s", appName)
 
+	var errors []string
+
 	// 1. Stop and remove services
 	services, err := ch.processManager.FindAppServices(appName)
-	if err == nil {
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("failed to find app services: %v", err))
+	} else {
 		for _, s := range services {
 			log.Printf("[destroy] Removing service: %s", s)
-			_ = ch.processManager.RemoveService(s)
+			if err := ch.processManager.RemoveService(s); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to remove service %s: %v", s, err))
+			}
 		}
 	}
 
 	// 2. Remove Caddy configuration
 	if err := ch.caddyManager.RemoveConfig(appName); err != nil {
 		log.Printf("[destroy] Warning: failed to remove Caddy config: %v", err)
+		errors = append(errors, fmt.Sprintf("failed to remove Caddy config: %v", err))
 	}
 	_ = ch.caddyManager.Reload()
 
 	// 3. Remove application files
 	appDir := filepath.Join(appsDir, appName)
-	if err := os.RemoveAll(appDir); err != nil {
-		log.Printf("[destroy] Warning: failed to remove app directory %s: %v", appDir, err)
+	if _, err := os.Stat(appDir); err == nil {
+		if err := os.RemoveAll(appDir); err != nil {
+			log.Printf("[destroy] Warning: failed to remove app directory %s: %v", appDir, err)
+			errors = append(errors, fmt.Sprintf("failed to remove app directory: %v", err))
+		}
 	}
 
-	// 4. Clean up state
-	ch.stateManager.SetPort(appName, 0)
-	_ = ch.stateManager.Save()
+	// 4. Remove uploads
+	if entries, err := os.ReadDir(uploadsDir); err == nil {
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), appName) {
+				path := filepath.Join(uploadsDir, entry.Name())
+				log.Printf("[destroy] Removing upload artifact: %s", path)
+				_ = os.Remove(path)
+			}
+		}
+	}
 
-	log.Printf("[destroy] App %s successfully destroyed", appName)
-	return types.Response{Success: true, Message: fmt.Sprintf("app %s successfully destroyed", appName)}
+	// 5. Remove logs
+	// We check common log locations
+	logPaths := []string{
+		fmt.Sprintf("/var/log/containers/%s.log", appName),
+		filepath.Join("/var/log/containers", appName),
+	}
+	for _, lp := range logPaths {
+		if _, err := os.Stat(lp); err == nil {
+			log.Printf("[destroy] Removing log artifact: %s", lp)
+			if err := os.RemoveAll(lp); err != nil {
+				log.Printf("[destroy] Warning: failed to remove log %s: %v", lp, err)
+			}
+		}
+	}
+
+	// 6. Clean up state
+	ch.stateManager.SetPort(appName, 0)
+	if err := ch.stateManager.Save(); err != nil {
+		errors = append(errors, fmt.Sprintf("failed to save state: %v", err))
+	}
+
+	if len(errors) > 0 {
+		msg := fmt.Sprintf("App %s destruction completed with warnings:\n- %s", appName, strings.Join(errors, "\n- "))
+		log.Printf("[destroy] %s", msg)
+		return types.Response{Success: true, Message: msg}
+	}
+
+	log.Printf("[destroy] App %s successfully destroyed with deep cleanup", appName)
+	return types.Response{Success: true, Message: fmt.Sprintf("app %s successfully destroyed with deep cleanup", appName)}
+}
+
+func (ch *CommandHandler) handleStopApp(args map[string]interface{}) types.Response {
+	appName, ok := StringArg(args, "appName")
+	if !ok {
+		return types.Response{Success: false, Message: "missing 'appName' argument"}
+	}
+
+	log.Printf("[stop] Stopping app: %s", appName)
+
+	services, err := ch.processManager.FindAppServices(appName)
+	if err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to find app services: %v", err)}
+	}
+
+	if len(services) == 0 {
+		return types.Response{Success: false, Message: fmt.Sprintf("no services found for app %s", appName)}
+	}
+
+	var errors []string
+	for _, s := range services {
+		log.Printf("[stop] Stopping service: %s", s)
+		if err := ch.processManager.StopService(s); err != nil {
+			errors = append(errors, fmt.Sprintf("failed to stop service %s: %v", s, err))
+		}
+	}
+
+	if len(errors) > 0 {
+		return types.Response{
+			Success: false,
+			Message: fmt.Sprintf("Failed to stop some services for %s:\n- %s", appName, strings.Join(errors, "\n- ")),
+		}
+	}
+
+	return types.Response{Success: true, Message: fmt.Sprintf("App %s stopped successfully", appName)}
 }
