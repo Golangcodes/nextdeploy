@@ -1,6 +1,9 @@
 package updater
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -320,29 +323,45 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 	}
 	defer removeAllBestEffort(tmpDir)
 
-	// 8. Detect platform for binary name
-	platform := detectPlatform()
-	binaryName := fmt.Sprintf("%s-%s", binaryBase, platform)
+	// 8. Detect platform for archive name
+	archiveName := detectArchiveName(latest.TagName, binaryBase)
 	checksumsURL := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/checksums.txt",
 		githubOwner, githubRepo, latest.TagName)
 
-	// 9. Download binary and checksums
-	newBin := filepath.Join(tmpDir, binaryBase+".new")
+	// 9. Download archive and checksums
+	archivePath := filepath.Join(tmpDir, archiveName)
+	newBin := filepath.Join(tmpDir, binaryBase+".new") // target binary name
 	checksumsFile := filepath.Join(tmpDir, "checksums.txt")
 
 	// Download checksums first (optional)
 	checksums, _ := downloadChecksums(checksumsURL, checksumsFile)
 
-	// Download binary with progress
-	if err := downloadBinary(latest.TagName, binaryName, newBin, opts); err != nil {
+	// Download archive with progress
+	if err := downloadBinary(latest.TagName, archiveName, archivePath, opts); err != nil {
 		return err
 	}
 
-	// 10. Verify binary integrity
-	if err := verifyBinaryIntegrity(newBin, binaryName, checksums); err != nil {
+	// 10. Verify archive integrity
+	if err := verifyBinaryIntegrity(archivePath, archiveName, checksums); err != nil {
 		return &UpdateError{
 			Stage:       "verification",
-			Message:     "binary integrity check failed",
+			Message:     "archive integrity check failed",
+			Recoverable: true,
+			Err:         err,
+		}
+	}
+	fmt.Println("✅ Archive integrity verified")
+
+	// Extract binary from archive
+	fmt.Println("📦 Extracting binary...")
+	extBinName := binaryBase
+	if runtime.GOOS == "windows" {
+		extBinName += ".exe"
+	}
+	if err := extractBinary(archivePath, extBinName, newBin); err != nil {
+		return &UpdateError{
+			Stage:       "extraction",
+			Message:     "failed to extract binary from archive",
 			Recoverable: true,
 			Err:         err,
 		}
@@ -438,32 +457,32 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 	return nil
 }
 
-// detectPlatform returns the platform string for binary downloads
-func detectPlatform() string {
-	os := runtime.GOOS
+// detectArchiveName returns the correct archive name based on GoReleaser naming
+func detectArchiveName(version, binaryBase string) string {
+	osStr := runtime.GOOS
 	arch := runtime.GOARCH
 
-	// Normalize architecture
-	switch arch {
-	case "amd64":
-		arch = "x86_64"
-	case "arm64":
-		arch = "aarch64"
+	// Format OS title case (e.g. Linux, Darwin, Windows)
+	switch osStr {
+	case "linux":
+		osStr = "Linux"
+	case "darwin":
+		osStr = "Darwin"
+	case "windows":
+		osStr = "Windows"
 	}
 
-	// Special case for Linux musl
-	if os == "linux" {
-		if isMusl() {
-			return fmt.Sprintf("%s-musl-%s", os, arch)
-		}
+	// Windows uses zip, others use tar.gz
+	ext := ".tar.gz"
+	if osStr == "Windows" {
+		ext = ".zip"
 	}
 
-	// Windows special case
-	if os == "windows" {
-		return fmt.Sprintf("%s_%s", os, arch)
-	}
+	// Remove leading v from version for the GoReleaser asset
+	cleanVersion := stripV(version)
 
-	return fmt.Sprintf("%s-%s", os, arch)
+	// e.g. nextdeploy_0.6.0_Linux_amd64.tar.gz
+	return fmt.Sprintf("%s_%s_%s_%s%s", binaryBase, cleanVersion, osStr, arch, ext)
 }
 
 // isMusl checks if the system uses musl libc
@@ -893,4 +912,77 @@ func removeAllBestEffort(path string) {
 		return
 	}
 	ignoreErr(os.RemoveAll(path))
+}
+
+// extractBinary extracts the specific binary from the downloaded archive.
+func extractBinary(archivePath, binaryName, destPath string) error {
+	if strings.HasSuffix(archivePath, ".zip") {
+		return extractZipBinary(archivePath, binaryName, destPath)
+	}
+	return extractTarGzBinary(archivePath, binaryName, destPath)
+}
+
+func extractZipBinary(archivePath, binaryName, destPath string) error {
+	r, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return err
+	}
+	defer ignoreErr(r.Close())
+
+	for _, f := range r.File {
+		if filepath.Base(f.Name) == binaryName || filepath.Base(f.Name) == binaryName+".exe" {
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			defer ignoreErr(rc.Close())
+
+			out, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+			if err != nil {
+				return err
+			}
+			defer ignoreErr(out.Close())
+
+			_, err = io.Copy(out, rc)
+			return err
+		}
+	}
+	return fmt.Errorf("binary %s not found in zip archive", binaryName)
+}
+
+func extractTarGzBinary(archivePath, binaryName, destPath string) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer ignoreErr(f.Close())
+
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer ignoreErr(gzr.Close())
+
+	tr := tar.NewReader(gzr)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		if header.Typeflag == tar.TypeReg && (filepath.Base(header.Name) == binaryName || filepath.Base(header.Name) == binaryName+".exe") {
+			out, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+			if err != nil {
+				return err
+			}
+			defer ignoreErr(out.Close())
+
+			_, err = io.Copy(out, tr)
+			return err
+		}
+	}
+	return fmt.Errorf("binary %s not found in tar.gz archive", binaryName)
 }
