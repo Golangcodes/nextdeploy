@@ -48,7 +48,7 @@ jobs:
 
       - name: Install NextDeploy CLI
         run: |
-          go install github.com/aynaash/NextDeploy/cli@latest
+          go install github.com/Golangcodes/nextdeploy/cli@latest
           export PATH=$PATH:$(go env GOPATH)/bin
 
       - name: Setup SSH Key

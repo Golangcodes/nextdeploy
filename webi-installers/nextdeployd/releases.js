@@ -1,7 +1,7 @@
 'use strict';
 
 var github = require('../_common/github.js');
-var owner = 'aynaash';
+var owner = 'Golangcodes';
 var repo = 'nextdeploy';
 
 module.exports = function (request) {

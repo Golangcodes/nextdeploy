@@ -15,6 +15,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/Golangcodes/nextdeploy/shared"
 )
 
 const (
@@ -91,7 +93,7 @@ func LatestRelease() (Release, error) {
 		}
 
 		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("User-Agent", "nextdeploy-updater/"+Version)
+		req.Header.Set("User-Agent", "nextdeploy-updater/"+shared.Version)
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -102,7 +104,7 @@ func LatestRelease() (Release, error) {
 			}
 			break
 		}
-		defer resp.Body.Close()
+		defer closeBestEffort(resp.Body)
 
 		// Handle rate limiting
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
@@ -230,8 +232,8 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 		}
 	}
 	defer func() {
-		lock.Close()
-		os.Remove(lockFile)
+		closeBestEffort(lock)
+		removeBestEffort(lockFile)
 	}()
 
 	// 2. Get current binary path
@@ -316,7 +318,7 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 			Err:         err,
 		}
 	}
-	defer os.RemoveAll(tmpDir)
+	defer removeAllBestEffort(tmpDir)
 
 	// 8. Detect platform for binary name
 	platform := detectPlatform()
@@ -413,7 +415,7 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 		fmt.Printf("✅ Successfully updated to %s\n", latest.TagName)
 		// Remove backup on success
 		if backupBin != "" {
-			os.Remove(backupBin)
+			removeBestEffort(backupBin)
 			runCommand("sudo", "rm", "-f", backupBin)
 		}
 	}
@@ -498,7 +500,7 @@ func downloadChecksums(url, destPath string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer closeBestEffort(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
@@ -548,7 +550,7 @@ func verifyBinaryIntegrity(binPath, binaryName string, checksums map[string]stri
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer closeBestEffort(file)
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -603,7 +605,7 @@ func attemptDownload(url, destPath, binaryName string, opts *UpdateOptions) erro
 		return err
 	}
 	req.Header.Set("Accept", "application/octet-stream")
-	req.Header.Set("User-Agent", "nextdeploy-updater/"+Version)
+	req.Header.Set("User-Agent", "nextdeploy-updater/"+shared.Version)
 
 	client := &http.Client{
 		Timeout: 10 * time.Minute,
@@ -618,7 +620,7 @@ func attemptDownload(url, destPath, binaryName string, opts *UpdateOptions) erro
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer closeBestEffort(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
@@ -637,7 +639,7 @@ func attemptDownload(url, destPath, binaryName string, opts *UpdateOptions) erro
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer closeBestEffort(f)
 
 	// Download with progress
 	progress := &progressWriter{
@@ -752,13 +754,13 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer source.Close()
+	defer closeBestEffort(source)
 
 	destination, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer destination.Close()
+	defer closeBestEffort(destination)
 
 	_, err = io.Copy(destination, source)
 	return err
@@ -804,9 +806,9 @@ func runCommand(name string, args ...string) error {
 // clearCommandCache clears shell command cache
 func clearCommandCache() {
 	// Try bash hash -r
-	exec.Command("bash", "-c", "hash -r 2>/dev/null").Run()
+	ignoreErr(exec.Command("bash", "-c", "hash -r 2>/dev/null").Run())
 	// Try zsh rehash
-	exec.Command("zsh", "-c", "rehash 2>/dev/null").Run()
+	ignoreErr(exec.Command("zsh", "-c", "rehash 2>/dev/null").Run())
 }
 
 // Version comparison functions
@@ -868,5 +870,27 @@ func splitVer(v string) []int {
 	return parts
 }
 
-// Version constant
-var Version = "dev"
+func ignoreErr(err error) {
+	_ = err
+}
+
+func closeBestEffort(c io.Closer) {
+	if c == nil {
+		return
+	}
+	ignoreErr(c.Close())
+}
+
+func removeBestEffort(path string) {
+	if path == "" {
+		return
+	}
+	ignoreErr(os.Remove(path))
+}
+
+func removeAllBestEffort(path string) {
+	if path == "" {
+		return
+	}
+	ignoreErr(os.RemoveAll(path))
+}

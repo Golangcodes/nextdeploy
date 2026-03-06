@@ -60,7 +60,7 @@ install_systemd_service() {
     sudo tee /etc/systemd/system/nextdeployd.service > /dev/null <<EOF
 [Unit]
 Description=NextDeploy Daemon
-Documentation=https://github.com/aynaash/nextdeploy
+Documentation=https://github.com/Golangcodes/nextdeploy
 After=network.target docker.service
 Requires=docker.service
 

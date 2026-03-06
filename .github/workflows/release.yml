@@ -50,8 +50,8 @@ jobs:
       - name: Check version consistency
         run: |
           # Verify that version variables are properly set
-          if grep -r "var Version = \"dev\"" --include="*.go" | grep -v "updater.go"; then
-            echo "⚠️  Found hardcoded 'dev' version in non-updater files"
+          if grep -r "var Version = \"dev\"" --include="*.go" | grep -v "version.go"; then
+            echo "⚠️  Found hardcoded 'dev' version in unauthorized files"
             exit 1
           fi
 

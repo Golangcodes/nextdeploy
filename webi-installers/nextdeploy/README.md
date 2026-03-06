@@ -1,6 +1,6 @@
 ---
 title: NextDeploy
-homepage: https://github.com/aynaash/nextdeploy
+homepage: https://github.com/Golangcodes/nextdeploy
 tagline: |
   Self-hosted Next.js deployment platform
 description: |
