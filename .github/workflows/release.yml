@@ -82,7 +82,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Set up GoReleaser
-        uses: goreleaser/goreleaser-action@v5
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
@@ -136,7 +136,7 @@ jobs:
 
       - name: Run GoReleaser (Tag Release)
         if: steps.version.outputs.is_tag == 'true'
-        uses: goreleaser/goreleaser-action@v5
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
@@ -147,7 +147,7 @@ jobs:
 
       - name: Run GoReleaser (Snapshot)
         if: steps.version.outputs.is_tag != 'true'
-        uses: goreleaser/goreleaser-action@v5
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
