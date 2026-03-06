@@ -16,8 +16,9 @@ import (
 )
 
 var upgradeDaemonCmd = &cobra.Command{
-	Use:   "upgrade-daemon",
-	Short: "Automatically upgrade the remote NextDeploy daemon on your server",
+	Use:     "upgrade-daemon",
+	Aliases: []string{"update-daemon"},
+	Short:   "Automatically upgrade the remote NextDeploy daemon on your server",
 	Long: `Fetch the latest daemon release, upload it to your server, and perform a zero-downtime restart.
 This is useful when the remote daemon is an old version that cannot self-update.`,
 	Run: runUpgradeDaemon,

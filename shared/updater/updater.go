@@ -425,7 +425,7 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 	installedVersion, err := getVersionFromBinary(currentBin)
 	if err != nil {
 		fmt.Printf("⚠️  Warning: Could not verify installed version: %v\n", err)
-	} else if installedVersion != latest.TagName {
+	} else if compareVersions(installedVersion, latest.TagName) != 0 {
 		fmt.Printf("⚠️  Warning: Version mismatch. Expected %s, got %s\n", latest.TagName, installedVersion)
 		if backupBin != "" {
 			fmt.Printf("ℹ️  Backup preserved at: %s\n", backupBin)
