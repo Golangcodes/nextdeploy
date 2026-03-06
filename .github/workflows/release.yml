@@ -178,9 +178,9 @@ jobs:
           done
 
           # Verify checksums
-          if [ -f "dist/nextdeploy_${{ env.VERSION }}_checksums.txt" ]; then
+          if [ -f dist/*_checksums.txt ]; then
             echo "✅ Checksums file created"
-            cat "dist/nextdeploy_${{ env.VERSION }}_checksums.txt"
+            cat dist/*_checksums.txt
           else
             echo "❌ Checksums file missing!"
             exit 1
