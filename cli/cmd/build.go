@@ -206,15 +206,15 @@ var buildCmd = &cobra.Command{
 			if payload.OutputMode == nextcore.OutputModeStandalone {
 				report, err := packaging.AuditStandaloneSize(standaloneDir)
 				if err == nil {
-					log.Info("🔍 Bundle Audit: %.2fMB total (node_modules: %.2fMB)", report.TotalMB, report.NodeModulesMB)
+					log.Info("Bundle Audit: %.2fMB total (node_modules: %.2fMB)", report.TotalMB, report.NodeModulesMB)
 					if len(report.TopOffenders) > 0 {
 						log.Info("   Top offender: %s (%.2fMB)", report.TopOffenders[0].Package, report.TopOffenders[0].SizeMB)
 					}
 					if report.TotalMB > 250 {
-						log.Warn("❌ WARNING: Bundle size exceeds Lambda's 250MB unzipped limit!")
+						log.Warn("WARNING: Bundle size exceeds Lambda's 250MB unzipped limit!")
 						log.Warn("   Run 'nextdeploy inspect' for a full report.")
 					} else if report.TotalMB > 200 {
-						log.Warn("⚠️  WARNING: Bundle size is approaching Lambda's 250MB limit.")
+						log.Warn("WARNING: Bundle size is approaching Lambda's 250MB limit.")
 					}
 				}
 			}

@@ -23,14 +23,12 @@ var destroyCmd = &cobra.Command{
 		log := shared.PackageLogger("destroy", "🧹 DESTROY")
 		log.Info("Starting NextDeploy destruction process...")
 
-		// 1. Load config
 		cfg, err := config.Load()
 		if err != nil {
 			log.Error("Failed to load config: %v", err)
 			os.Exit(1)
 		}
 
-		// 2. Try to load metadata to get app name and targeted VPS
 		var meta nextcore.NextCorePayload
 		metadataBytes, err := os.ReadFile(".nextdeploy/metadata.json")
 		if err != nil {
@@ -53,7 +51,6 @@ var destroyCmd = &cobra.Command{
 				os.Exit(1)
 			}
 
-			// Initialize provider
 			var p serverless.Provider
 			switch cfg.Serverless.Provider {
 			case "aws":
@@ -76,7 +73,7 @@ var destroyCmd = &cobra.Command{
 				os.Exit(1)
 			}
 
-			log.Info("✅ Serverless resources successfully destroyed.")
+			log.Info(" Serverless resources successfully destroyed.")
 
 		case "vps":
 			if len(cfg.Servers) == 0 {
@@ -86,7 +83,6 @@ var destroyCmd = &cobra.Command{
 
 			log.Info("Targeting VPS for destruction of app: %s", appName)
 
-			// 3. Connect to server
 			srv, err := server.New(server.WithConfig(), server.WithSSH())
 			if err != nil {
 				log.Error("Failed to initialize server connection: %v", err)
@@ -113,7 +109,7 @@ var destroyCmd = &cobra.Command{
 				os.Exit(1)
 			}
 
-			log.Info("✅ App resources successfully destroyed by daemon.")
+			log.Info("App resources successfully destroyed by daemon.")
 
 		default:
 			log.Error("Unknown or unsupported target_type: %s", cfg.TargetType)

@@ -1,9 +1,10 @@
 package cmd
 
 import (
-	"github.com/Golangcodes/nextdeploy/shared"
 	"os"
 	"path/filepath"
+
+	"github.com/Golangcodes/nextdeploy/shared"
 
 	"github.com/spf13/cobra"
 )
@@ -12,7 +13,7 @@ var generateCICmd = &cobra.Command{
 	Use:     "generate-ci",
 	Aliases: []string{"ci"},
 	Short:   "Generate a GitHub Actions workflow for zero-touch deployment",
-	Long: `Creates a .github/workflows/nextdeploy.yml file that automatically 
+	Long: `Creates a .github/workflows/nextdeploy.yml file that automatically
 builds your Next.js project and ships it using NextDeploy on every push to main.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		log := shared.PackageLogger("generate-ci", "🤖 CI/CD")
@@ -85,7 +86,7 @@ jobs:
 			os.Exit(1)
 		}
 
-		log.Info("\n✓ Successfully generated GitHub Actions workflow at: %s", workflowPath)
+		log.Info("\n: Successfully generated GitHub Actions workflow at: %s", workflowPath)
 		log.Info("\nNext Steps:")
 		log.Info("1. Go to your GitHub Repository Settings > Secrets and variables > Actions.")
 		log.Info("2. Add a new repository secret named: SSH_PRIVATE_KEY")

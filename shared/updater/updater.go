@@ -2,6 +2,9 @@ package updater
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,46 +22,155 @@ const (
 	githubRepo  = "nextdeploy"
 	apiURL      = "https://api.github.com/repos/" + githubOwner + "/" + githubRepo + "/releases/latest"
 	lockFile    = "/tmp/nextdeploy-update.lock"
+	maxRetries  = 3
+	retryDelay  = 2 * time.Second
 )
 
+// Release represents a GitHub release
 type Release struct {
 	TagName string `json:"tag_name"`
 	HTMLURL string `json:"html_url"`
 }
 
-// LatestRelease fetches the latest release info from GitHub
+// UpdateOptions configures the update process
+type UpdateOptions struct {
+	Force       bool          // Force downgrade if current is newer
+	Timeout     time.Duration // Overall update timeout
+	VerifySSL   bool          // Verify SSL certificates
+	SkipBackup  bool          // Skip backup creation
+	SkipService bool          // Skip service restart
+}
+
+// DefaultUpdateOptions returns sensible defaults
+func DefaultUpdateOptions() *UpdateOptions {
+	return &UpdateOptions{
+		Force:       false,
+		Timeout:     15 * time.Minute,
+		VerifySSL:   true,
+		SkipBackup:  false,
+		SkipService: false,
+	}
+}
+
+// UpdateError represents a structured update error
+type UpdateError struct {
+	Stage       string
+	Message     string
+	Recoverable bool
+	Err         error
+}
+
+func (e *UpdateError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("[%s] %s: %v", e.Stage, e.Message, e.Err)
+	}
+	return fmt.Sprintf("[%s] %s", e.Stage, e.Message)
+}
+
+func (e *UpdateError) Unwrap() error {
+	return e.Err
+}
+
+// LatestRelease fetches the latest release info from GitHub with retries
 func LatestRelease() (Release, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
-	if err != nil {
-		return Release{}, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "nextdeploy-updater/"+Version)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return Release{}, fmt.Errorf("failed to fetch latest release: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
-		return Release{}, fmt.Errorf("GitHub API rate limit exceeded. Please try again later")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return Release{}, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
-	}
-
 	var release Release
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return Release{}, fmt.Errorf("failed to parse GitHub response: %w", err)
+	var lastErr error
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
 	}
 
-	if release.TagName == "" {
-		return Release{}, fmt.Errorf("no release tag found in GitHub response")
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create request: %w", err)
+			continue
+		}
+
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("User-Agent", "nextdeploy-updater/"+Version)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("request failed (attempt %d/%d): %w", attempt, maxRetries, err)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay * time.Duration(attempt))
+				continue
+			}
+			break
+		}
+		defer resp.Body.Close()
+
+		// Handle rate limiting
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+			resetTime := resp.Header.Get("X-RateLimit-Reset")
+			if resetTime != "" {
+				if resetUnix, err := parseUnixTime(resetTime); err == nil {
+					waitTime := time.Until(resetUnix)
+					if waitTime > 0 && waitTime < 5*time.Minute {
+						fmt.Fprintf(os.Stderr, "GitHub API rate limited. Waiting %v...\n", waitTime)
+						time.Sleep(waitTime)
+						continue
+					}
+				}
+			}
+			return Release{}, &UpdateError{
+				Stage:       "api",
+				Message:     "GitHub API rate limit exceeded",
+				Recoverable: true,
+				Err:         fmt.Errorf("rate limited"),
+			}
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("GitHub API returned %d (attempt %d/%d)", resp.StatusCode, attempt, maxRetries)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay * time.Duration(attempt))
+				continue
+			}
+			break
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read response: %w", err)
+			continue
+		}
+
+		if err := json.Unmarshal(body, &release); err != nil {
+			lastErr = fmt.Errorf("failed to parse GitHub response: %w", err)
+			continue
+		}
+
+		if release.TagName == "" {
+			return Release{}, &UpdateError{
+				Stage:       "api",
+				Message:     "no release tag found in GitHub response",
+				Recoverable: false,
+			}
+		}
+
+		return release, nil
 	}
 
-	return release, nil
+	return Release{}, &UpdateError{
+		Stage:       "api",
+		Message:     "failed to fetch latest release after retries",
+		Recoverable: true,
+		Err:         lastErr,
+	}
+}
+
+// parseUnixTime parses GitHub's X-RateLimit-Reset header
+func parseUnixTime(s string) (time.Time, error) {
+	var sec int64
+	if _, err := fmt.Sscanf(s, "%d", &sec); err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(sec, 0), nil
 }
 
 // CheckAndPrint checks for updates and prints a message if available
@@ -74,27 +186,48 @@ func CheckAndPrint(current string) {
 	}
 
 	if latest.TagName != "" && isNewer(latest.TagName, current) {
-		fmt.Fprintf(os.Stderr, "\n  🚀 Update available: %s -> %s\n  Run: nextdeploy update\n  📦 %s\n\n",
-			current, latest.TagName, latest.HTMLURL)
+		fmt.Fprintf(os.Stderr, "\n  🚀 Update available: %s -> %s\n", current, latest.TagName)
+		fmt.Fprintf(os.Stderr, "  📦 Run: nextdeploy update\n")
+		fmt.Fprintf(os.Stderr, "  🔗 %s\n\n", latest.HTMLURL)
 	}
 }
 
 // SelfUpdate performs an atomic update of the nextdeploy binary
 func SelfUpdate(current string) error {
-	return selfUpdate(current, "nextdeploy", false)
+	return SelfUpdateWithOptions(current, DefaultUpdateOptions())
 }
 
 // SelfUpdateDaemon performs an atomic update of the nextdeployd daemon
 func SelfUpdateDaemon(current string) error {
-	return selfUpdate(current, "nextdeployd", true)
+	opts := DefaultUpdateOptions()
+	opts.SkipService = false
+	return selfUpdateWithOptions(current, "nextdeployd", opts)
 }
 
-// selfUpdate is the core update logic with atomic operations
-func selfUpdate(current, binaryBase string, restartSvc bool) error {
+// SelfUpdateWithOptions performs an update with custom options
+func SelfUpdateWithOptions(current string, opts *UpdateOptions) error {
+	return selfUpdateWithOptions(current, "nextdeploy", opts)
+}
+
+// selfUpdateWithOptions is the core update logic with all improvements
+func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) error {
+	// Validate options
+	if opts == nil {
+		opts = DefaultUpdateOptions()
+	}
+	if opts.Timeout == 0 {
+		opts.Timeout = 15 * time.Minute
+	}
+
 	// 1. Create lock file to prevent concurrent updates
 	lock, err := os.Create(lockFile)
 	if err != nil {
-		return fmt.Errorf("another update may be in progress (lock file exists): %w", err)
+		return &UpdateError{
+			Stage:       "lock",
+			Message:     "another update may be in progress",
+			Recoverable: true,
+			Err:         err,
+		}
 	}
 	defer func() {
 		lock.Close()
@@ -104,117 +237,334 @@ func selfUpdate(current, binaryBase string, restartSvc bool) error {
 	// 2. Get current binary path
 	currentBin, err := os.Executable()
 	if err != nil {
-		// Fallback to default location
 		currentBin = "/usr/local/bin/" + binaryBase
 	}
 
 	// 3. Verify we're not updating from a temp file
 	if strings.Contains(currentBin, "go-build") || strings.Contains(currentBin, "temp") {
-		return fmt.Errorf("cannot update from development/temp binary: %s", currentBin)
+		return &UpdateError{
+			Stage:       "validation",
+			Message:     "cannot update from development/temp binary",
+			Recoverable: false,
+			Err:         fmt.Errorf("binary path: %s", currentBin),
+		}
+	}
+
+	// 4. Check if binary is currently running
+	if isProcessRunning(binaryBase) {
+		fmt.Printf("⚠️  %s is currently running. Continuing anyway...\n", binaryBase)
 	}
 
 	fmt.Printf("📦 Current version: %s\n", current)
 	fmt.Println("🔄 Fetching latest release info...")
 
-	// 4. Get latest release
-	latest, err := LatestRelease()
-	if err != nil {
-		return fmt.Errorf("failed to fetch latest release: %w", err)
+	// 5. Get latest release with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
+	defer cancel()
+
+	type releaseResult struct {
+		release Release
+		err     error
+	}
+	releaseCh := make(chan releaseResult, 1)
+
+	go func() {
+		release, err := LatestRelease()
+		releaseCh <- releaseResult{release, err}
+	}()
+
+	var latest Release
+	select {
+	case res := <-releaseCh:
+		if res.err != nil {
+			return res.err
+		}
+		latest = res.release
+	case <-ctx.Done():
+		return &UpdateError{
+			Stage:       "api",
+			Message:     "timeout fetching latest release",
+			Recoverable: true,
+			Err:         ctx.Err(),
+		}
 	}
 
-	// 5. Version comparison
-	if latest.TagName == current {
+	// 6. Version comparison
+	cmp := compareVersions(latest.TagName, current)
+	switch {
+	case latest.TagName == current:
 		fmt.Printf("✅ Already up to date (%s).\n", current)
 		return nil
-	}
-
-	if !isNewer(latest.TagName, current) {
-		fmt.Printf("⚠️ Current version %s is newer than %s. Use --force to downgrade.\n", current, latest.TagName)
-		return nil
+	case cmp < 0 && !opts.Force:
+		return &UpdateError{
+			Stage:       "version",
+			Message:     fmt.Sprintf("current version %s is newer than %s", current, latest.TagName),
+			Recoverable: true,
+			Err:         fmt.Errorf("use --force to downgrade"),
+		}
 	}
 
 	fmt.Printf("📈 Updating %s -> %s\n", current, latest.TagName)
 
-	// 6. Create temporary directory for atomic update
+	// 7. Create temporary directory
 	tmpDir, err := os.MkdirTemp("", binaryBase+"-update-*")
 	if err != nil {
-		return fmt.Errorf("failed to create temp directory: %w", err)
+		return &UpdateError{
+			Stage:       "temp",
+			Message:     "failed to create temp directory",
+			Recoverable: true,
+			Err:         err,
+		}
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// 7. Download and verify new binary
+	// 8. Detect platform for binary name
+	platform := detectPlatform()
+	binaryName := fmt.Sprintf("%s-%s", binaryBase, platform)
+	checksumsURL := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/checksums.txt",
+		githubOwner, githubRepo, latest.TagName)
+
+	// 9. Download binary and checksums
 	newBin := filepath.Join(tmpDir, binaryBase+".new")
-	if err := downloadBinary(latest.TagName, binaryBase, newBin); err != nil {
-		return fmt.Errorf("download failed: %w", err)
+	checksumsFile := filepath.Join(tmpDir, "checksums.txt")
+
+	// Download checksums first (optional)
+	checksums, _ := downloadChecksums(checksumsURL, checksumsFile)
+
+	// Download binary with progress
+	if err := downloadBinary(latest.TagName, binaryName, newBin, opts); err != nil {
+		return err
 	}
 
-	// 8. Verify the downloaded binary works
-	fmt.Println("🔍 Verifying new binary...")
+	// 10. Verify binary integrity
+	if err := verifyBinaryIntegrity(newBin, binaryName, checksums); err != nil {
+		return &UpdateError{
+			Stage:       "verification",
+			Message:     "binary integrity check failed",
+			Recoverable: true,
+			Err:         err,
+		}
+	}
+	fmt.Println("✅ Binary integrity verified")
+
+	// 11. Verify binary works
+	fmt.Println("🔍 Testing new binary...")
 	if err := verifyBinary(newBin); err != nil {
-		return fmt.Errorf("downloaded binary verification failed: %w", err)
+		return &UpdateError{
+			Stage:       "verification",
+			Message:     "binary test failed",
+			Recoverable: true,
+			Err:         err,
+		}
+	}
+	fmt.Println("✅ Binary test passed")
+
+	// 12. Create backup (unless skipped)
+	backupBin := ""
+	if !opts.SkipBackup {
+		backupBin = currentBin + ".backup." + current
+		fmt.Printf("💾 Creating backup: %s\n", filepath.Base(backupBin))
+
+		if err := copyFileWithSudo(currentBin, backupBin); err != nil {
+			fmt.Printf("⚠️  Warning: failed to create backup: %v\n", err)
+			backupBin = ""
+		}
 	}
 
-	// 9. Create backup of current binary with version tag
-	backupBin := currentBin + ".backup." + current
-	fmt.Printf("💾 Creating backup: %s\n", filepath.Base(backupBin))
-
-	if err := copyFileWithSudo(currentBin, backupBin); err != nil {
-		return fmt.Errorf("failed to create backup: %w", err)
-	}
-
-	// 10. Atomic replacement with rollback capability
+	// 13. Atomic replacement
 	fmt.Println("⚙️ Installing update...")
 	if err := atomicReplace(newBin, currentBin); err != nil {
-		// Restore from backup on failure
-		fmt.Println("❌ Update failed, restoring from backup...")
-		if restoreErr := atomicReplace(backupBin, currentBin); restoreErr != nil {
-			return fmt.Errorf("critical: update failed AND backup restore failed: %v (original error: %w)", restoreErr, err)
+		// Try to restore from backup
+		if backupBin != "" {
+			fmt.Println("⚠️  Update failed, restoring from backup...")
+			if restoreErr := atomicReplace(backupBin, currentBin); restoreErr != nil {
+				return &UpdateError{
+					Stage:       "critical",
+					Message:     "update failed AND backup restore failed",
+					Recoverable: false,
+					Err:         fmt.Errorf("original: %w, restore: %v", err, restoreErr),
+				}
+			}
 		}
-		return fmt.Errorf("update failed but backup restored: %w", err)
+		return &UpdateError{
+			Stage:       "install",
+			Message:     "failed to install update",
+			Recoverable: backupBin != "",
+			Err:         err,
+		}
 	}
 
-	// 11. Set proper permissions
+	// 14. Set permissions
 	if err := setPermissions(currentBin); err != nil {
-		fmt.Printf("⚠️ Warning: could not set permissions: %v\n", err)
+		fmt.Printf("⚠️  Warning: could not set permissions: %v\n", err)
 	}
 
-	// 12. Verify the installed version
+	// 15. Verify installed version
 	fmt.Println("🔍 Verifying installed version...")
 	installedVersion, err := getVersionFromBinary(currentBin)
 	if err != nil {
-		fmt.Printf("⚠️ Warning: Could not verify installed version: %v\n", err)
+		fmt.Printf("⚠️  Warning: Could not verify installed version: %v\n", err)
 	} else if installedVersion != latest.TagName {
-		fmt.Printf("⚠️ Warning: Version mismatch. Expected %s, got %s\n", latest.TagName, installedVersion)
-		// Keep backup for manual recovery
-		fmt.Printf("ℹ️ Backup preserved at: %s\n", backupBin)
+		fmt.Printf("⚠️  Warning: Version mismatch. Expected %s, got %s\n", latest.TagName, installedVersion)
+		if backupBin != "" {
+			fmt.Printf("ℹ️  Backup preserved at: %s\n", backupBin)
+		}
 	} else {
-		// Success - remove backup
-		fmt.Println("✅ Update successful! Cleaning up...")
-		os.Remove(backupBin)
-		runCommand("sudo", "rm", "-f", backupBin) // Ensure removal
-	}
-
-	fmt.Printf("🎉 Successfully updated to %s\n", latest.TagName)
-
-	// 13. Restart service if needed
-	if restartSvc {
-		fmt.Println("🔄 Restarting service...")
-		if err := restartService(binaryBase); err != nil {
-			fmt.Printf("⚠️ Note: could not restart %s service: %v\n", binaryBase, err)
-			fmt.Printf("ℹ️ Please restart manually: sudo systemctl restart %s\n", binaryBase)
+		fmt.Printf("✅ Successfully updated to %s\n", latest.TagName)
+		// Remove backup on success
+		if backupBin != "" {
+			os.Remove(backupBin)
+			runCommand("sudo", "rm", "-f", backupBin)
 		}
 	}
 
-	// 14. Clear command hash cache
-	exec.Command("hash", "-r").Run() // For bash
+	// 16. Restart service if needed
+	if strings.Contains(binaryBase, "daemon") || strings.Contains(binaryBase, "nextdeployd") {
+		if !opts.SkipService {
+			fmt.Println("🔄 Restarting service...")
+			if err := restartService(binaryBase); err != nil {
+				fmt.Printf("⚠️  Note: could not restart %s service: %v\n", binaryBase, err)
+				fmt.Printf("ℹ️  Please restart manually: sudo systemctl restart %s\n", binaryBase)
+			}
+		}
+	}
+
+	// 17. Clear command cache
+	clearCommandCache()
+
 	fmt.Println("💡 You may need to restart your terminal or run 'hash -r'")
+	return nil
+}
+
+// detectPlatform returns the platform string for binary downloads
+func detectPlatform() string {
+	os := runtime.GOOS
+	arch := runtime.GOARCH
+
+	// Normalize architecture
+	switch arch {
+	case "amd64":
+		arch = "x86_64"
+	case "arm64":
+		arch = "aarch64"
+	}
+
+	// Special case for Linux musl
+	if os == "linux" {
+		if isMusl() {
+			return fmt.Sprintf("%s-musl-%s", os, arch)
+		}
+	}
+
+	// Windows special case
+	if os == "windows" {
+		return fmt.Sprintf("%s_%s", os, arch)
+	}
+
+	return fmt.Sprintf("%s-%s", os, arch)
+}
+
+// isMusl checks if the system uses musl libc
+func isMusl() bool {
+	if _, err := os.Stat("/lib/libc.musl-x86_64.so.1"); err == nil {
+		return true
+	}
+	if _, err := os.Stat("/lib/libc.musl-aarch64.so.1"); err == nil {
+		return true
+	}
+	// Try ldd check
+	cmd := exec.Command("ldd", "/bin/ls")
+	output, err := cmd.CombinedOutput()
+	if err == nil && strings.Contains(string(output), "musl") {
+		return true
+	}
+	return false
+}
+
+// downloadChecksums downloads and parses the checksums file
+func downloadChecksums(url, destPath string) (map[string]string, error) {
+	checksums := make(map[string]string)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: 2 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(string(body), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			checksum := parts[0]
+			filename := parts[1]
+			checksums[filename] = checksum
+		}
+	}
+
+	return checksums, nil
+}
+
+// verifyBinaryIntegrity checks the binary against its checksum
+func verifyBinaryIntegrity(binPath, binaryName string, checksums map[string]string) error {
+	if checksums == nil {
+		fmt.Println("⚠️  No checksums available, skipping integrity check")
+		return nil
+	}
+
+	expectedChecksum, ok := checksums[binaryName]
+	if !ok {
+		// Try with .exe suffix for Windows
+		expectedChecksum, ok = checksums[binaryName+".exe"]
+		if !ok {
+			fmt.Println("⚠️  No checksum found for binary, skipping integrity check")
+			return nil
+		}
+	}
+
+	// Calculate actual checksum
+	file, err := os.Open(binPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return err
+	}
+	actualChecksum := hex.EncodeToString(hash.Sum(nil))
+
+	if actualChecksum != expectedChecksum {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, actualChecksum)
+	}
 
 	return nil
 }
 
-// downloadBinary downloads the binary with progress indication
-func downloadBinary(version, binaryBase, destPath string) error {
-	binaryName := fmt.Sprintf("%s-%s-%s", binaryBase, runtime.GOOS, runtime.GOARCH)
+// downloadBinary downloads the binary with progress and retries
+func downloadBinary(version, binaryName, destPath string, opts *UpdateOptions) error {
 	downloadURL := fmt.Sprintf(
 		"https://github.com/%s/%s/releases/download/%s/%s",
 		githubOwner, githubRepo, version, binaryName,
@@ -222,57 +572,110 @@ func downloadBinary(version, binaryBase, destPath string) error {
 
 	fmt.Printf("📥 Downloading: %s\n", binaryName)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err := attemptDownload(downloadURL, destPath, binaryName, opts)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		fmt.Printf("⚠️  Download failed (attempt %d/%d): %v\n", attempt, maxRetries, err)
+		if attempt < maxRetries {
+			time.Sleep(retryDelay * time.Duration(attempt))
+		}
+	}
+
+	return &UpdateError{
+		Stage:       "download",
+		Message:     fmt.Sprintf("failed to download after %d attempts", maxRetries),
+		Recoverable: true,
+		Err:         lastErr,
+	}
+}
+
+// attemptDownload performs a single download attempt
+func attemptDownload(url, destPath, binaryName string, opts *UpdateOptions) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create download request: %w", err)
+		return err
 	}
 	req.Header.Set("Accept", "application/octet-stream")
-	req.Header.Set("User-Agent", "nextdeploy-updater/"+version)
+	req.Header.Set("User-Agent", "nextdeploy-updater/"+Version)
 
 	client := &http.Client{
-		Timeout: 5 * time.Minute,
+		Timeout: 10 * time.Minute,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: !opts.VerifySSL,
+			},
+		},
 	}
+
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("download failed: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("binary %s not found for version %s (CI might still be building)", binaryName, version)
+			return fmt.Errorf("binary not found (may still be building)")
 		}
-		return fmt.Errorf("download failed with HTTP %d", resp.StatusCode)
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	// Create file with exclusive creation to avoid symlink attacks
+	// Check Content-Length
+	if resp.ContentLength > 0 {
+		fmt.Printf("   Size: %s\n", formatBytes(resp.ContentLength))
+	}
+
+	// Create file with exclusive creation
 	f, err := os.OpenFile(destPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0755)
 	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
+		return err
 	}
 	defer f.Close()
 
-	// Download with progress indicator
+	// Download with progress
 	progress := &progressWriter{
 		total:      resp.ContentLength,
 		reader:     resp.Body,
 		binaryName: binaryName,
 	}
 
-	if _, err := io.Copy(f, progress); err != nil {
-		return fmt.Errorf("failed to write binary: %w", err)
+	written, err := io.Copy(f, progress)
+	if err != nil {
+		return err
 	}
 
-	// Ensure all data is written
+	// Verify download completed
+	if resp.ContentLength > 0 && written != resp.ContentLength {
+		return fmt.Errorf("incomplete download: %d of %d bytes", written, resp.ContentLength)
+	}
+
 	if err := f.Sync(); err != nil {
-		return fmt.Errorf("failed to sync file: %w", err)
+		return err
 	}
 
 	fmt.Println() // New line after progress
 	return nil
+}
+
+// formatBytes converts bytes to human readable format
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 // progressWriter shows download progress
@@ -288,14 +691,15 @@ func (p *progressWriter) Read(b []byte) (int, error) {
 	n, err := p.reader.Read(b)
 	p.current += int64(n)
 
-	// Update progress every 100ms
 	if p.total > 0 && time.Since(p.lastPrint) > 100*time.Millisecond {
 		percentage := float64(p.current) / float64(p.total) * 100
-		fmt.Printf("\r⏬ Downloading %s... %.1f%%", p.binaryName, percentage)
+		speed := float64(p.current) / time.Since(p.lastPrint).Seconds()
+		fmt.Printf("\r   Downloading... %.1f%% (%.1f MB/s)",
+			percentage, speed/1024/1024)
 		p.lastPrint = time.Now()
 
 		if p.current == p.total {
-			fmt.Print("\r✅ Download complete!                    \n")
+			fmt.Print("\r   Download complete!                    \n")
 		}
 	}
 	return n, err
@@ -318,7 +722,6 @@ func getVersionFromBinary(binPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Parse "nextdeploy v1.2.3" format
 	parts := strings.Fields(string(output))
 	if len(parts) >= 2 {
 		return parts[1], nil
@@ -326,14 +729,20 @@ func getVersionFromBinary(binPath string) (string, error) {
 	return "", fmt.Errorf("unexpected version output: %s", output)
 }
 
+// isProcessRunning checks if a process with the given name is running
+func isProcessRunning(name string) bool {
+	cmd := exec.Command("pgrep", "-f", name)
+	if err := cmd.Run(); err == nil {
+		return true
+	}
+	return false
+}
+
 // copyFileWithSudo copies a file, using sudo if necessary
 func copyFileWithSudo(src, dst string) error {
-	// Try direct copy first
 	if err := copyFile(src, dst); err == nil {
 		return nil
 	}
-
-	// Fall back to sudo cp
 	return runCommand("sudo", "cp", src, dst)
 }
 
@@ -357,7 +766,7 @@ func copyFile(src, dst string) error {
 
 // atomicReplace performs an atomic file replacement
 func atomicReplace(src, dst string) error {
-	// Try direct rename first (atomic on same filesystem)
+	// Try direct rename first
 	if err := os.Rename(src, dst); err == nil {
 		return nil
 	}
@@ -392,46 +801,46 @@ func runCommand(name string, args ...string) error {
 	return cmd.Run()
 }
 
-// Version comparison functions (your existing ones, slightly improved)
+// clearCommandCache clears shell command cache
+func clearCommandCache() {
+	// Try bash hash -r
+	exec.Command("bash", "-c", "hash -r 2>/dev/null").Run()
+	// Try zsh rehash
+	exec.Command("zsh", "-c", "rehash 2>/dev/null").Run()
+}
+
+// Version comparison functions
 func isNewer(candidate, current string) bool {
-	return semverGT(stripV(candidate), stripV(current))
+	return compareVersions(candidate, current) > 0
 }
 
 func stripV(v string) string {
 	return strings.TrimPrefix(v, "v")
 }
 
-func semverGT(a, b string) bool {
-	// Strip pre-release/build metadata for comparison
-	a = strings.Split(a, "-")[0]
-	a = strings.Split(a, "+")[0]
-	b = strings.Split(b, "-")[0]
-	b = strings.Split(b, "+")[0]
+func compareVersions(v1, v2 string) int {
+	v1 = stripV(strings.Split(v1, "-")[0])
+	v2 = stripV(strings.Split(v2, "-")[0])
 
-	aParts := splitVer(a)
-	bParts := splitVer(b)
+	v1Parts := splitVer(v1)
+	v2Parts := splitVer(v2)
 
-	max := len(aParts)
-	if len(bParts) > max {
-		max = len(bParts)
-	}
-
-	for i := 0; i < max; i++ {
-		av, bv := 0, 0
-		if i < len(aParts) {
-			av = aParts[i]
+	for i := 0; i < len(v1Parts) || i < len(v2Parts); i++ {
+		var v1Val, v2Val int
+		if i < len(v1Parts) {
+			v1Val = v1Parts[i]
 		}
-		if i < len(bParts) {
-			bv = bParts[i]
+		if i < len(v2Parts) {
+			v2Val = v2Parts[i]
 		}
-		if av > bv {
-			return true
+		if v1Val > v2Val {
+			return 1
 		}
-		if av < bv {
-			return false
+		if v1Val < v2Val {
+			return -1
 		}
 	}
-	return false
+	return 0
 }
 
 func splitVer(v string) []int {
@@ -448,7 +857,6 @@ func splitVer(v string) []int {
 			cur = cur*10 + int(c-'0')
 			hasDigit = true
 		} else {
-			// Stop at first non-digit, non-dot (like -beta, +build)
 			break
 		}
 	}
@@ -460,5 +868,5 @@ func splitVer(v string) []int {
 	return parts
 }
 
-// Version constant - should be set at build time
+// Version constant
 var Version = "dev"

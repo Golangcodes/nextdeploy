@@ -1,28 +1,16 @@
-
-# GoReleaser configuration for NextDeploy
+# .goreleaser.yml
 version: 2
 
-# Environment variables
 env:
   - GO111MODULE=on
   - CGO_ENABLED=0
 
-# Git configuration
-git:
-  # What should be used to sort tags when gathering the current and previous
-  # tags if there are more than one tag in the same commit.
-  tag_sort: -version:refname
-
-# Before hooks
 before:
   hooks:
     - go mod tidy
     - go generate ./...
-    - go test ./...
 
-# Build configuration
 builds:
-  # CLI builds (multiplatform)
   - id: nextdeploy-cli
     main: ./cli
     binary: nextdeploy
@@ -34,22 +22,17 @@ builds:
       - amd64
       - arm64
     ignore:
-      # Windows ARM64 has limited support
       - goos: windows
         goarch: arm64
     ldflags:
       - -s -w
       - -X github.com/Golangcodes/nextdeploy/shared.Version={{.Version}}
+      - -X github.com/Golangcodes/nextdeploy/shared/updater.Version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
       - -X main.builtBy=goreleaser
-    flags:
-      - -trimpath
-    env:
-      - CGO_ENABLED=0
-    mod_timestamp: '{{ .CommitTimestamp }}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
 
-  # Daemon builds (Linux only)
   - id: nextdeploy-daemon
     main: ./daemon
     binary: nextdeployd
@@ -61,16 +44,12 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/Golangcodes/nextdeploy/shared.Version={{.Version}}
+      - -X github.com/Golangcodes/nextdeploy/shared/updater.Version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
       - -X main.builtBy=goreleaser
-    flags:
-      - -trimpath
-    env:
-      - CGO_ENABLED=0
-    mod_timestamp: '{{ .CommitTimestamp }}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
 
-# Archive configuration
 archives:
   - id: nextdeploy-archive
     builds:
@@ -80,88 +59,32 @@ archives:
     format_overrides:
       - goos: windows
         format: zip
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- .Arch }}
     files:
       - README.md
       - LICENSE
-      - CHANGELOG.md
       - sample.nextdeploy.yml
-      - packaging/systemd/nextdeploy-daemon.service
 
-# Checksum configuration
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
   algorithm: sha256
 
-# Snapshot configuration for non-release builds
-snapshot:
-  name_template: "{{ incpatch .Version }}-next"
-
-# Changelog configuration
-changelog:
-  sort: asc
-  use: github
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^ci:"
-      - "^build:"
-      - "^style:"
-      - "^refactor:"
-      - Merge pull request
-      - Merge branch
-  groups:
-    - title: Features
-      regexp: "^.*feat[(\\w)]*:+.*$"
-      order: 0
-    - title: 'Bug fixes'
-      regexp: "^.*fix[(\\w)]*:+.*$"
-      order: 1
-    - title: 'Performance improvements'
-      regexp: "^.*perf[(\\w)]*:+.*$"
-      order: 2
-    - title: Others
-      order: 999
-
-# Release configuration
 release:
   github:
-    owner: aynaash # Replace with actual GitHub username
-    name: nextdeploy     # Replace with actual repository name
+    owner: Golangcodes
+    name: nextdeploy
   draft: false
   prerelease: auto
   mode: replace
   header: |
-    ## NextDeploy {{ .Tag }}
+    ## 🚀 NextDeploy {{ .Tag }}
 
-    Welcome to this new release of NextDeploy!
+    ### 📦 Installation
 
-    ### Quick Start
-
-    #### Install CLI (Linux/macOS)
+    #### Linux/macOS
     ```bash
-    curl -L https://github.com/aynaash/nextdeploy/releases/download/{{ .Tag }}/nextdeploy_{{ .Version }}_Linux_x86_64.tar.gz | tar -xz
-    sudo mv nextdeploy /usr/local/bin/
-    ```
-
-    #### Install Daemon (Linux)
-    ```bash
-    curl -L https://github.com/aynaash/nextdeploy/releases/download/{{ .Tag }}/nextdeploy_{{ .Version }}_Linux_x86_64.tar.gz | tar -xz
-    sudo mv nextdeployd /usr/local/bin/
-    sudo systemctl enable --now nextdeploy-daemon
-    ```
-
-  footer: |
-    **Full Changelog**: https://github.com/aynaash/nextdeploy/compare/{{ .PreviousTag }}...{{ .Tag }}
-
-    ## Docker Images
-    
-    ```bash
-    docker pull ghcr.io/aynaash/nextdeploy:{{ .Tag }}
-    docker pull ghcr.io/aynaash/nextdeploy:latest
-    ```
-
-# Package managers
-brews:
-  - name: nextdeploy
+    curl -fsSL https://nextdeploy.one/install.sh | bash
