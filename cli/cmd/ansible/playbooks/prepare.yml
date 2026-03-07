@@ -443,6 +443,9 @@
         curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
           | sudo gpg --batch --yes --dearmor \
               -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/xcaddy/gpg.key' \
+          | sudo gpg --batch --yes --dearmor \
+              -o /usr/share/keyrings/caddy-xcaddy-archive-keyring.gpg
       args:
         executable: /bin/bash
       become: true
@@ -455,6 +458,8 @@
         set -euo pipefail
         curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
           | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/xcaddy/debian.deb.txt' \
+          | sudo tee /etc/apt/sources.list.d/caddy-xcaddy.list
       args:
         executable: /bin/bash
       become: true
