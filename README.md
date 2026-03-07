@@ -1,6 +1,7 @@
 # NextDeploy
 
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Golangcodes_nextdeploy&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Golangcodes_nextdeploy)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Golangcodes/nextdeploy)](https://goreportcard.com/report/github.com/Golangcodes/nextdeploy)
 
 
 ## 📚 Documentation

@@ -381,14 +381,13 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 
 	// Port selection with persistence
 	port := ch.stateManager.GetPort(ctx.AppName)
+	var cleanupPort func() error
 	if port == 0 || !isPortAvailable(port) {
 		p, closePort, err := findFreePort()
 		if err != nil {
 			return types.Response{Success: false, Message: fmt.Sprintf("failed to allocate port: %v", err)}
 		}
-		// Keep the port open by not calling closePort() immediately.
-		// The service will bind to it, preventing other processes from using it.
-		// We'll close it after the service confirms it's running.
+		cleanupPort = closePort
 		portAcquired = p
 		port = p
 		ch.stateManager.SetPort(ctx.AppName, port)
@@ -397,8 +396,8 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 		}
 		// Defer port cleanup in case of failure
 		defer func() {
-			if portAcquired != 0 {
-				_ = closePort()
+			if portAcquired != 0 && cleanupPort != nil {
+				_ = cleanupPort()
 			}
 		}()
 	}
@@ -415,6 +414,13 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	}
 
 	if serviceGenerated {
+		// Port release: we must close our listener BEFORE starting the service so it can bind to the port
+		if portAcquired != 0 && cleanupPort != nil {
+			log.Printf("[activate] Releasing reserved port %d before starting service", port)
+			_ = cleanupPort()
+			portAcquired = 0 // Mark as released
+		}
+
 		if err := ch.processManager.StartService(serviceName); err != nil {
 			_ = ch.processManager.RemoveService(serviceName)
 			ch.stateManager.SetPort(ctx.AppName, 0)
@@ -435,8 +441,9 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 		return types.Response{Success: false, Message: fmt.Sprintf("health check failed after 5m: %v", err)}
 	}
 
-	// Port is now in use by the healthy service - close our listener
-	if portAcquired != 0 {
+	// Port is now in use by the healthy service - close our listener if it was still open
+	if portAcquired != 0 && cleanupPort != nil {
+		_ = cleanupPort()
 		portAcquired = 0 // Mark as released
 	}
 
@@ -459,10 +466,10 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	sourceStaticDir := filepath.Join(ctx.ReleaseDir, ctx.DistDir, "static")
 	if _, err := os.Stat(sourceStaticDir); err == nil {
 		if err := os.MkdirAll(sharedStaticDir, 0755); err == nil {
-			// Use cp -rn to copy only new files, preserving existing ones
+			// Use cp -R to copy assets, overwriting existing ones to ensure newest versions are served
 			cpPath := resolveTool("cp")
 			// #nosec G204
-			cmd := exec.Command(cpPath, "-rn", sourceStaticDir+string(filepath.Separator)+".", sharedStaticDir)
+			cmd := exec.Command(cpPath, "-R", sourceStaticDir+string(filepath.Separator)+".", sharedStaticDir)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				log.Printf("[activate] Warning: failed to sync shared static assets: %v - %s", err, string(out))
 			} else {
