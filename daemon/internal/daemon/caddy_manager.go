@@ -41,23 +41,33 @@ func (cm *CaddyManager) GenerateConfig(appName, domain, outputMode string, port 
 
 func (cm *CaddyManager) EnsureMainCaddyfile() error {
 	importDirective := fmt.Sprintf("import %s/*.caddy\n", cm.configDir)
+	corazaGlobal := "{\n\torder coraza_waf first\n}\n\n"
+
 	content, err := os.ReadFile(mainCaddyfilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return os.WriteFile(mainCaddyfilePath, []byte(importDirective), 0600)
+			return os.WriteFile(mainCaddyfilePath, []byte(corazaGlobal+importDirective), 0600)
 		}
 		return fmt.Errorf("failed to read main Caddyfile: %w", err)
 	}
 
 	contentStr := string(content)
-	if !containsStr(contentStr, importDirective) {
-		f, err := os.OpenFile(mainCaddyfilePath, os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			return fmt.Errorf("failed to open main Caddyfile for appending: %w", err)
+	newContent := contentStr
+
+	if !containsStr(newContent, "order coraza_waf") {
+		newContent = corazaGlobal + newContent
+	}
+
+	if !containsStr(newContent, importDirective) {
+		if len(newContent) > 0 && newContent[len(newContent)-1] != '\n' {
+			newContent += "\n"
 		}
-		defer f.Close()
-		if _, err := f.WriteString("\n" + importDirective); err != nil {
-			return fmt.Errorf("failed to append to main Caddyfile: %w", err)
+		newContent += importDirective
+	}
+
+	if newContent != contentStr {
+		if err := os.WriteFile(mainCaddyfilePath, []byte(newContent), 0600); err != nil {
+			return fmt.Errorf("failed to update main Caddyfile: %w", err)
 		}
 	}
 

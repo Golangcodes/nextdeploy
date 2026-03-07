@@ -54,18 +54,16 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 		X-Permitted-Cross-Domain-Policies "none"
 		Content-Security-Policy "%s"
 	}
-	route {
-		coraza_waf {
-			load_owasp_crs
-			directives "
-				SecRuleEngine On
-				SecRequestBodyAccess On
-				SecAuditLog /var/log/caddy/audit.log
-				SecAuditLogType Serial
-				SecDebugLog /var/log/caddy/debug.log
-				SecDebugLogLevel 3
-			"
-		}
+	coraza_waf {
+		load_owasp_crs
+		directives "
+			SecRuleEngine On
+			SecRequestBodyAccess On
+			SecAuditLog /var/log/caddy/audit.log
+			SecAuditLogType Serial
+			SecDebugLog /var/log/caddy/debug.log
+			SecDebugLogLevel 3
+		"
 	}`, csp)
 
 	sDomain := domain
