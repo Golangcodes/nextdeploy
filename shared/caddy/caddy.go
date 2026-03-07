@@ -54,16 +54,18 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 		X-Permitted-Cross-Domain-Policies "none"
 		Content-Security-Policy "%s"
 	}
-	coraza_waf {
-		load_owasp_crs
-		directives "
-			SecRuleEngine On
-			SecRequestBodyAccess On
-			SecAuditLog /var/log/caddy/audit.log
-			SecAuditLogType Serial
-			SecDebugLog /var/log/caddy/debug.log
-			SecDebugLogLevel 3
-		"
+	route {
+		coraza_waf {
+			load_owasp_crs
+			directives "
+				SecRuleEngine On
+				SecRequestBodyAccess On
+				SecAuditLog /var/log/caddy/audit.log
+				SecAuditLogType Serial
+				SecDebugLog /var/log/caddy/debug.log
+				SecDebugLogLevel 3
+			"
+		}
 	}`, csp)
 
 	sDomain := domain
@@ -93,8 +95,6 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 
 	sharedStaticDir := filepath.Join(filepath.Dir(appDir), "shared_static")
 
-	// log must come before the catch-all `handle` block; placing it after
-	// causes Caddy to misparse it as a new site address (line-order matters).
 	return fmt.Sprintf(`%s {%s
 	log {
 		output file /var/log/caddy/access.log
