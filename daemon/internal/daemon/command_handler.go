@@ -16,6 +16,7 @@ import (
 	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/Golangcodes/nextdeploy/shared/updater"
 )
 
 const (
@@ -246,6 +247,16 @@ func (ch *CommandHandler) setUpCaddy(args map[string]interface{}) types.Response
 }
 
 func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response {
+	// Auto-update check before processing deployment
+	// This ensures the daemon updates itself when a new version is available
+	go func() {
+		if err := updater.SelfUpdateDaemon(shared.Version); err != nil {
+			if !strings.Contains(err.Error(), "up to date") {
+				log.Printf("[ship] Warning: auto-update check failed: %v", err)
+			}
+		}
+	}()
+
 	tarballPath, ok := StringArg(args, "tarball")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'tarball' argument"}
