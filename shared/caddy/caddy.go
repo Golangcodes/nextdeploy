@@ -84,7 +84,6 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	}
 
 	if outputMode == "export" {
-		// Static site hosting
 		staticDir := filepath.Join(appDir, exportDir)
 		return fmt.Sprintf(`%s {%s
 	root * %s
@@ -93,28 +92,25 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	}
 
 	sharedStaticDir := filepath.Join(filepath.Dir(appDir), "shared_static")
+	portFilePath := fmt.Sprintf("/opt/nextdeploy/apps/%s/port", appName)
 
 	// log must come before the catch-all `handle` block; placing it after
 	// causes Caddy to misparse it as a new site address (line-order matters).
+	// The %s in {file.Read %s} will be replaced with the actual port file path.
 	return fmt.Sprintf(`%s {%s
+	log {
+		output file /var/log/caddy/access.log
+		format json
+	}
 	handle_path /_next/static/* {
 		root * %s
 		header Cache-Control "public, max-age=31536000, immutable"
 		file_server
 	}
-
-	log {
-		output file /var/log/caddy/access.log
-		format json
-	}
-
 	handle {
-		# Enable templates to use file.Read
-		templates
-		# Read port from file dynamically
-		reverse_proxy localhost:{file.Read "/opt/nextdeploy/apps/%s/port"}
+		reverse_proxy localhost:{file.Read %s}
 	}
-}`, domainList, commonHeaders, sharedStaticDir, appName)
+}`, domainList, commonHeaders, sharedStaticDir, portFilePath)
 }
 
 func (cm *CaddyManager) GetConfig(ctx context.Context) (*Config, error) {

@@ -65,6 +65,11 @@ func (cm *CaddyManager) EnsureMainCaddyfile() error {
 }
 
 func (cm *CaddyManager) Reload() error {
+	// Validate config before attempting reload to prevent broken configs
+	if err := cm.Validate(); err != nil {
+		return fmt.Errorf("config validation failed before reload: %w", err)
+	}
+
 	systemctl := resolveTool("systemctl")
 	// #nosec G204
 	cmd := exec.Command(systemctl, "reload", "caddy")

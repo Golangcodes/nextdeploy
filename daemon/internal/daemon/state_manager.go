@@ -48,8 +48,8 @@ func (sm *StateManager) load() error {
 }
 
 func (sm *StateManager) Save() error {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
 	if err := os.MkdirAll(filepath.Dir(sm.path), 0750); err != nil {
 		return err

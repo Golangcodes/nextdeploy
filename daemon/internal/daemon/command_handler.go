@@ -363,6 +363,10 @@ type ReleaseContext struct {
 
 func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	currentSymlink := filepath.Join(appsDir, ctx.AppName, "current")
+	var serviceName string
+	var serviceGenerated bool
+	var portAcquired int
+	var err error
 
 	// Port selection with persistence
 	port := ch.stateManager.GetPort(ctx.AppName)
@@ -371,41 +375,64 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 		if err != nil {
 			return types.Response{Success: false, Message: fmt.Sprintf("failed to allocate port: %v", err)}
 		}
-		_ = closePort()
+		// Keep the port open by not calling closePort() immediately.
+		// The service will bind to it, preventing other processes from using it.
+		// We'll close it after the service confirms it's running.
+		portAcquired = p
 		port = p
 		ch.stateManager.SetPort(ctx.AppName, port)
 		if err := ch.stateManager.Save(); err != nil {
 			log.Printf("[activate] Warning: failed to save state: %v", err)
 		}
+		// Defer port cleanup in case of failure
+		defer func() {
+			if portAcquired != 0 {
+				_ = closePort()
+			}
+		}()
 	}
 
 	log.Printf("[activate] Allocated port %d for release %s", port, ctx.ReleaseID)
 
-	// Port file for Caddy or other discovery tools
-	portFilePath := filepath.Join(appsDir, ctx.AppName, "port")
-	if err := os.WriteFile(portFilePath, []byte(fmt.Sprintf("%d", port)), 0644); err != nil {
-		log.Printf("[activate] Warning: failed to write port file to %s: %v", portFilePath, err)
-	}
-
-	serviceName, serviceGenerated, err := ch.processManager.GenerateServiceFile(
+	serviceName, serviceGenerated, err = ch.processManager.GenerateServiceFile(
 		ctx.AppName, ctx.ReleaseDir, ctx.OutputMode, ctx.DopplerToken, port, ctx.PackageManager, ctx.ReleaseID,
 	)
 	if err != nil {
+		ch.stateManager.SetPort(ctx.AppName, 0)
+		_ = ch.stateManager.Save()
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to generate service file: %v", err)}
 	}
 
 	if serviceGenerated {
 		if err := ch.processManager.StartService(serviceName); err != nil {
+			_ = ch.processManager.RemoveService(serviceName)
+			ch.stateManager.SetPort(ctx.AppName, 0)
+			_ = ch.stateManager.Save()
 			return types.Response{Success: false, Message: fmt.Sprintf("failed to start service: %v", err)}
 		}
 	}
 
 	log.Printf("[activate] Waiting for app to become healthy on port %d...", port)
 	if err := waitForHealthy(port, 5*time.Minute); err != nil {
+		log.Printf("[activate] Health check failed on port %d, cleaning up...", port)
 		if serviceGenerated {
 			_ = ch.processManager.RemoveService(serviceName)
 		}
+		// Release the port back to the pool
+		ch.stateManager.SetPort(ctx.AppName, 0)
+		_ = ch.stateManager.Save()
 		return types.Response{Success: false, Message: fmt.Sprintf("health check failed after 5m: %v", err)}
+	}
+
+	// Port is now in use by the healthy service - close our listener
+	if portAcquired != 0 {
+		portAcquired = 0 // Mark as released
+	}
+
+	// Port file for Caddy and other discovery tools (write after health check passes)
+	portFilePath := filepath.Join(appsDir, ctx.AppName, "port")
+	if err := os.WriteFile(portFilePath, []byte(fmt.Sprintf("%d", port)), 0644); err != nil {
+		log.Printf("[activate] Warning: failed to write port file to %s: %v", portFilePath, err)
 	}
 
 	// Atomic symlink update
