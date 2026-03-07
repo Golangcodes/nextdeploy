@@ -20,7 +20,7 @@ var destroyCmd = &cobra.Command{
 	Short: "Remove the application files from the remote server",
 	Long:  "Deletes the application deployment from the remote VPS by removing the files in /opt/nextdeploy/apps/<app-name>.",
 	Run: func(cmd *cobra.Command, args []string) {
-		log := shared.PackageLogger("destroy", "🧹 DESTROY")
+		log := shared.PackageLogger("destroy", " DESTROY")
 		log.Info("Starting NextDeploy destruction process...")
 
 		cfg, err := config.Load()
@@ -117,7 +117,7 @@ var destroyCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		log.Info("\n✅ App and all associated resources (services, Caddy configs, and files) have been decommissioned.")
+		log.Info("\n App and all associated resources (services, Caddy configs, and files) have been decommissioned.")
 		log.Info("Note: Manual DNS records or project-specific external integrations may still require manual cleanup.")
 	},
 }

@@ -4,20 +4,19 @@ import (
 	"strings"
 )
 
-// DetectedFeatures holds everything Caddy needs to know about the app
 type DetectedFeatures struct {
 	HasYouTube         bool
 	HasGoogleFonts     bool
 	HasGoogleAnalytics bool
 	HasStripe          bool
 	HasCloudinary      bool
-	HasExternalImages  []string // all external image hostnames
+	HasExternalImages  []string
 	HasServerActions   bool
 	HasI18n            bool
-	UserDefinedCSP     bool     // user already set CSP in their next.config headers
-	AllowedOrigins     []string // all trusted origins detected
-	DistDir            string   // path to build output (default: .next)
-	ExportDir          string   // path to export output (default: out)
+	UserDefinedCSP     bool
+	AllowedOrigins     []string
+	DistDir            string
+	ExportDir          string
 }
 
 // DetectFeatures inspects a NextConfig and returns what external services

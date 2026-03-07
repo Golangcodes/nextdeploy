@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 )
 
-// ExtractTarGz extracts a gzipped tarball using the system's `tar` utility for high performance.
 func ExtractTarGz(src, dest string) error {
 	if err := os.MkdirAll(dest, 0750); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dest, err)
@@ -28,21 +27,15 @@ func ExtractTarGz(src, dest string) error {
 	return nil
 }
 
-// CreateZip zips the contents of the source directory into the target zip file.
 func CreateZip(srcDir, targetZip string) error {
 	absTarget, _ := filepath.Abs(targetZip)
 	absSrc, _ := filepath.Abs(srcDir)
 
 	zipPath, err := exec.LookPath("zip")
 	if err == nil {
-		// Use system zip for performance
-		// -r = recursive, -j = junk paths (don't record directory names) - but wait, we WANT directory names for Next.js
-		// -q = quiet, -9 = best compression
-		// We CD into srcDir to zip everything FROM there.
 		cmd := exec.Command(zipPath, "-rq9", absTarget, ".")
 		cmd.Dir = absSrc
 		if out, err := cmd.CombinedOutput(); err != nil {
-			// Fallback to Go implementation if system zip fails
 			fmt.Printf("System zip failed, falling back: %v - %s\n", err, string(out))
 		} else {
 			return nil

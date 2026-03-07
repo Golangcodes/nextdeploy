@@ -60,7 +60,8 @@ Deploy your Next.js app to *any* VPS — with SSL, logs, and zero downtime.
 			fmt.Println(highlight("Quick Start:"))
 			fmt.Printf("  %s - Initialize a new project\n", command("nextdeploy init"))
 			fmt.Printf("  %s - Prepare a target server\n", command("nextdeploy prepare"))
-			fmt.Printf("  %s - Deploy your app on the VPS\n\n", command("nextdeploy deploy"))
+			fmt.Printf("  %s - Build your app locally\n", command("nextdeploy build"))
+			fmt.Printf("  %s - Deploy your app on the VPS\n\n", command("nextdeploy ship"))
 
 			fmt.Printf("%s %s\n\n",
 				warning("Docs →"), command("https://nextdeploy.one/docs"),

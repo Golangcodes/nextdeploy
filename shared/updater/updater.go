@@ -31,7 +31,6 @@ const (
 	retryDelay  = 2 * time.Second
 )
 
-// Release represents a GitHub release
 type Release struct {
 	TagName string `json:"tag_name"`
 	HTMLURL string `json:"html_url"`
@@ -57,7 +56,6 @@ func DefaultUpdateOptions() *UpdateOptions {
 	}
 }
 
-// UpdateError represents a structured update error
 type UpdateError struct {
 	Stage       string
 	Message     string
@@ -76,7 +74,6 @@ func (e *UpdateError) Unwrap() error {
 	return e.Err
 }
 
-// LatestRelease fetches the latest release info from GitHub with retries
 func LatestRelease() (Release, error) {
 	var release Release
 	var lastErr error
@@ -191,9 +188,9 @@ func CheckAndPrint(current string) {
 	}
 
 	if latest.TagName != "" && isNewer(latest.TagName, current) {
-		fmt.Fprintf(os.Stderr, "\n  🚀 Update available: %s -> %s\n", current, latest.TagName)
-		fmt.Fprintf(os.Stderr, "  📦 Run: nextdeploy update\n")
-		fmt.Fprintf(os.Stderr, "  🔗 %s\n\n", latest.HTMLURL)
+		fmt.Fprintf(os.Stderr, "\n  Update available: %s -> %s\n", current, latest.TagName)
+		fmt.Fprintf(os.Stderr, "   Run: nextdeploy update\n")
+		fmt.Fprintf(os.Stderr, "   %s\n\n", latest.HTMLURL)
 	}
 }
 
@@ -260,8 +257,8 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 		fmt.Printf("⚠️  %s is currently running. Continuing anyway...\n", binaryBase)
 	}
 
-	fmt.Printf("📦 Current version: %s\n", current)
-	fmt.Println("🔄 Fetching latest release info...")
+	fmt.Printf(" Current version: %s\n", current)
+	fmt.Println(" Fetching latest release info...")
 
 	// 5. Get latest release with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
@@ -298,7 +295,7 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 	cmp := compareVersions(latest.TagName, current)
 	switch {
 	case latest.TagName == current:
-		fmt.Printf("✅ Already up to date (%s).\n", current)
+		fmt.Printf(" Already up to date (%s).\n", current)
 		return nil
 	case cmp < 0 && !opts.Force:
 		return &UpdateError{
@@ -350,10 +347,10 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 			Err:         err,
 		}
 	}
-	fmt.Println("✅ Archive integrity verified")
+	fmt.Println(" Archive integrity verified")
 
 	// Extract binary from archive
-	fmt.Println("📦 Extracting binary...")
+	fmt.Println(" Extracting binary...")
 	extBinName := binaryBase
 	if runtime.GOOS == "windows" {
 		extBinName += ".exe"
@@ -366,7 +363,7 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 			Err:         err,
 		}
 	}
-	fmt.Println("✅ Binary integrity verified")
+	fmt.Println(" Binary integrity verified")
 
 	// 11. Verify binary works
 	fmt.Println("🔍 Testing new binary...")
@@ -378,13 +375,13 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 			Err:         err,
 		}
 	}
-	fmt.Println("✅ Binary test passed")
+	fmt.Println(" Binary test passed")
 
 	// 12. Create backup (unless skipped)
 	backupBin := ""
 	if !opts.SkipBackup {
 		backupBin = currentBin + ".backup." + current
-		fmt.Printf("💾 Creating backup: %s\n", filepath.Base(backupBin))
+		fmt.Printf(" Creating backup: %s\n", filepath.Base(backupBin))
 
 		if err := copyFileWithSudo(currentBin, backupBin); err != nil {
 			fmt.Printf("⚠️  Warning: failed to create backup: %v\n", err)
@@ -393,11 +390,11 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 	}
 
 	// 13. Atomic replacement
-	fmt.Println("⚙️ Installing update...")
+	fmt.Println(" Installing update...")
 	if err := atomicReplace(newBin, currentBin); err != nil {
 		// Try to restore from backup
 		if backupBin != "" {
-			fmt.Println("⚠️  Update failed, restoring from backup...")
+			fmt.Println("  Update failed, restoring from backup...")
 			if restoreErr := atomicReplace(backupBin, currentBin); restoreErr != nil {
 				return &UpdateError{
 					Stage:       "critical",
@@ -417,21 +414,21 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 
 	// 14. Set permissions
 	if err := setPermissions(currentBin); err != nil {
-		fmt.Printf("⚠️  Warning: could not set permissions: %v\n", err)
+		fmt.Printf("  Warning: could not set permissions: %v\n", err)
 	}
 
 	// 15. Verify installed version
-	fmt.Println("🔍 Verifying installed version...")
+	fmt.Println(" Verifying installed version...")
 	installedVersion, err := getVersionFromBinary(currentBin)
 	if err != nil {
-		fmt.Printf("⚠️  Warning: Could not verify installed version: %v\n", err)
+		fmt.Printf("  Warning: Could not verify installed version: %v\n", err)
 	} else if compareVersions(installedVersion, latest.TagName) != 0 {
-		fmt.Printf("⚠️  Warning: Version mismatch. Expected %s, got %s\n", latest.TagName, installedVersion)
+		fmt.Printf("  Warning: Version mismatch. Expected %s, got %s\n", latest.TagName, installedVersion)
 		if backupBin != "" {
 			fmt.Printf("ℹ️  Backup preserved at: %s\n", backupBin)
 		}
 	} else {
-		fmt.Printf("✅ Successfully updated to %s\n", latest.TagName)
+		fmt.Printf(" Successfully updated to %s\n", latest.TagName)
 		// Remove backup on success
 		if backupBin != "" {
 			removeBestEffort(backupBin)
@@ -442,7 +439,7 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 	// 16. Restart service if needed
 	if strings.Contains(binaryBase, "daemon") || strings.Contains(binaryBase, "nextdeployd") {
 		if !opts.SkipService {
-			fmt.Println("🔄 Restarting service...")
+			fmt.Println(" Restarting service...")
 			if err := restartService(binaryBase); err != nil {
 				fmt.Printf("⚠️  Note: could not restart %s service: %v\n", binaryBase, err)
 				fmt.Printf("ℹ️  Please restart manually: sudo systemctl restart %s\n", binaryBase)
@@ -453,7 +450,7 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 	// 17. Clear command cache
 	clearCommandCache()
 
-	fmt.Println("💡 You may need to restart your terminal or run 'hash -r'")
+	fmt.Println(" You may need to restart your terminal or run 'hash -r'")
 	return nil
 }
 
@@ -550,7 +547,7 @@ func downloadChecksums(url, destPath string) (map[string]string, error) {
 // verifyBinaryIntegrity checks the binary against its checksum
 func verifyBinaryIntegrity(binPath, binaryName string, checksums map[string]string) error {
 	if checksums == nil {
-		fmt.Println("⚠️  No checksums available, skipping integrity check")
+		fmt.Println("  No checksums available, skipping integrity check")
 		return nil
 	}
 
@@ -559,7 +556,7 @@ func verifyBinaryIntegrity(binPath, binaryName string, checksums map[string]stri
 		// Try with .exe suffix for Windows
 		expectedChecksum, ok = checksums[binaryName+".exe"]
 		if !ok {
-			fmt.Println("⚠️  No checksum found for binary, skipping integrity check")
+			fmt.Println("  No checksum found for binary, skipping integrity check")
 			return nil
 		}
 	}
@@ -596,7 +593,7 @@ func downloadBinary(version, binaryName, destPath string, opts *UpdateOptions) e
 		githubOwner, githubRepo, version, binaryName,
 	)
 
-	fmt.Printf("📥 Downloading: %s\n", binaryName)
+	fmt.Printf(" Downloading: %s\n", binaryName)
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {

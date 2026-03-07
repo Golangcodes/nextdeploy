@@ -16,7 +16,7 @@ var generateCICmd = &cobra.Command{
 	Long: `Creates a .github/workflows/nextdeploy.yml file that automatically
 builds your Next.js project and ships it using NextDeploy on every push to main.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		log := shared.PackageLogger("generate-ci", "🤖 CI/CD")
+		log := shared.PackageLogger("generate-ci", " CI/CD")
 		log.Info("Setting up NextDeploy GitHub Actions workflow...")
 
 		workflowContent := `name: Deploy Next.js App
@@ -92,7 +92,7 @@ jobs:
 		log.Info("2. Add a new repository secret named: SSH_PRIVATE_KEY")
 		log.Info("3. (Optional) Add a new repository secret named: DOPPLER_TOKEN")
 		log.Info("4. Commit your code and push to `main`.\n")
-		log.Info("GitHub Actions will now handle all future deployments automatically! 🚀")
+		log.Info("GitHub Actions will now handle all future deployments automatically! ")
 	},
 }
 
