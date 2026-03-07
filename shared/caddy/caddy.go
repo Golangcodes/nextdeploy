@@ -94,7 +94,8 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 
 	sharedStaticDir := filepath.Join(filepath.Dir(appDir), "shared_static")
 
-	// FIXED: Use templates and file.Read for dynamic port reading
+	// log must come before the catch-all `handle` block; placing it after
+	// causes Caddy to misparse it as a new site address (line-order matters).
 	return fmt.Sprintf(`%s {%s
 	handle_path /_next/static/* {
 		root * %s
@@ -102,16 +103,16 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 		file_server
 	}
 
+	log {
+		output file /var/log/caddy/access.log
+		format json
+	}
+
 	handle {
 		# Enable templates to use file.Read
 		templates
 		# Read port from file dynamically
 		reverse_proxy localhost:{file.Read "/opt/nextdeploy/apps/%s/port"}
-	}
-
-	log {
-		output file /var/log/caddy/access.log
-		format json
 	}
 }`, domainList, commonHeaders, sharedStaticDir, appName)
 }
