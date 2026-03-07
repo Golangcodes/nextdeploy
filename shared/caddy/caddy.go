@@ -93,6 +93,8 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	}
 
 	sharedStaticDir := filepath.Join(filepath.Dir(appDir), "shared_static")
+
+	// FIXED: Use templates and file.Read for dynamic port reading
 	return fmt.Sprintf(`%s {%s
 	handle_path /_next/static/* {
 		root * %s
@@ -101,7 +103,10 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	}
 
 	handle {
-		reverse_proxy localhost:{file /opt/nextdeploy/apps/%s/port}
+		# Enable templates to use file.Read
+		templates
+		# Read port from file dynamically
+		reverse_proxy localhost:{file.Read "/opt/nextdeploy/apps/%s/port"}
 	}
 
 	log {
