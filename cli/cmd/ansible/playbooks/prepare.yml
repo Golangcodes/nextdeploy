@@ -593,33 +593,35 @@
         - ansible_pkg_mgr == "yum"
         - install_caddy
 
-    - name: "Phase 2 | Caddy (yum) | Create config directory"
+    - name: "Phase 2 | Caddy | Ensure config directory exists"
       ansible.builtin.file:
-        path: /etc/caddy
+        path: /etc/caddy/nextdeploy.d
         state: directory
         owner: root
         group: root
-        mode: "0755"
+        mode: "0750"
       become: true
-      when: ansible_pkg_mgr == "yum"
 
-    - name: "Phase 2 | Caddy (yum) | Write default Caddyfile"
+    - name: "Phase 2 | Caddy | Initialize secure default Caddyfile"
       ansible.builtin.copy:
         dest: /etc/caddy/Caddyfile
-        content: ':80 { respond "OK" }'
-        force: false
-        mode: "0644"
-      become: true
-      when: ansible_pkg_mgr == "yum"
+        content: |
+          {
+          	order coraza_waf first
+          }
 
-    - name: "Phase 2 | Caddy (yum) | Reload daemon, enable and start"
+          import /etc/caddy/nextdeploy.d/*.caddy
+        mode: "0644"
+        force: true
+      become: true
+
+    - name: "Phase 2 | Caddy | Reload daemon, enable and start"
       ansible.builtin.systemd:
         name: caddy
         daemon_reload: true
         enabled: true
         state: started
       become: true
-      when: ansible_pkg_mgr == "yum"
 
     # ── final check ───────────────────────────────────────────────────────────
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/Golangcodes/nextdeploy/shared/caddy"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
@@ -52,20 +53,46 @@ func (cm *CaddyManager) EnsureMainCaddyfile() error {
 	}
 
 	contentStr := string(content)
+
+	// Surgically remove the default :80 block if it exists (Welcome to Caddy page)
+	if strings.Contains(contentStr, ":80 {") && strings.Contains(contentStr, "root * /usr/share/caddy") {
+		// This is a naive but effective way to strip the default block for common Caddy installs
+		lines := strings.Split(contentStr, "\n")
+		var newLines []string
+		inDefaultBlock := false
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == ":80 {" {
+				inDefaultBlock = true
+				continue
+			}
+			if inDefaultBlock {
+				if trimmed == "}" {
+					inDefaultBlock = false
+				}
+				continue
+			}
+			newLines = append(newLines, line)
+		}
+		contentStr = strings.Join(newLines, "\n")
+	}
+
 	newContent := contentStr
 
-	if !containsStr(newContent, "order coraza_waf") {
+	// Ensure global options block is at the top
+	if !strings.Contains(newContent, "order coraza_waf") {
 		newContent = corazaGlobal + newContent
 	}
 
-	if !containsStr(newContent, importDirective) {
+	// Ensure import directive is present
+	if !strings.Contains(newContent, importDirective) {
 		if len(newContent) > 0 && newContent[len(newContent)-1] != '\n' {
 			newContent += "\n"
 		}
 		newContent += importDirective
 	}
 
-	if newContent != contentStr {
+	if newContent != string(content) {
 		if err := os.WriteFile(mainCaddyfilePath, []byte(newContent), 0600); err != nil {
 			return fmt.Errorf("failed to update main Caddyfile: %w", err)
 		}
