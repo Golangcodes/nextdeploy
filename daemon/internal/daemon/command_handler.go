@@ -477,10 +477,14 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to rename atomic symlink: %v", err)}
 	}
 
+	if err := ch.caddyManager.EnsureMainCaddyfile(); err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to update main Caddyfile: %v", err)}
+	}
+
 	if err := ch.caddyManager.GenerateConfig(ctx.AppName, ctx.Domain, ctx.OutputMode, port, currentSymlink, ctx.DetectedFeatures, ctx.DistDir, ctx.ExportDir); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to configure Caddy: %v", err)}
 	}
-	_ = ch.caddyManager.EnsureMainCaddyfile()
+
 	if err := ch.caddyManager.Validate(); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("Caddy validation failed: %v", err)}
 	}

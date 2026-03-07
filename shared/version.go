@@ -1,3 +1,3 @@
 package shared
 
-var Version = "v0.7.10"
+var Version = "v0.7.11"
