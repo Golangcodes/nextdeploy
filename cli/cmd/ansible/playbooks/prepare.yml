@@ -409,6 +409,20 @@
       ansible.builtin.set_fact:
         install_caddy: "{{ not caddy_installed }}"
 
+    - name: "Phase 2 | Caddy | Check for Coraza WAF module"
+      ansible.builtin.shell: "caddy list-modules | grep -q coraza_waf"
+      register: caddy_has_coraza
+      changed_when: false
+      failed_when: false
+      when: caddy_installed
+
+    - name: "Phase 2 | Caddy | Force rebuild if Coraza missing"
+      ansible.builtin.set_fact:
+        install_caddy: true
+      when:
+        - caddy_installed
+        - caddy_has_coraza.rc != 0
+
     # ── apt path ─────────────────────────────────────────────────────────────
 
     - name: "Phase 2 | Caddy (apt) | Install transport prerequisites"
@@ -450,9 +464,23 @@
 
     - name: "Phase 2 | Caddy (apt) | Install package"
       ansible.builtin.apt:
-        name: caddy
+        name:
+          - caddy
+          - xcaddy
         update_cache: true
         state: present
+      become: true
+      when:
+        - ansible_pkg_mgr == "apt"
+        - install_caddy
+
+    - name: "Phase 2 | Caddy (apt) | Build custom Caddy with Coraza WAF"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        xcaddy build --with github.com/corazawaf/coraza-caddy/v2
+        sudo mv caddy /usr/bin/caddy
+      args:
+        executable: /bin/bash
       become: true
       when:
         - ansible_pkg_mgr == "apt"
