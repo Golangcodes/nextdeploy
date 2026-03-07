@@ -16,19 +16,19 @@ import (
 
 // Semantic color functions
 var (
-	title       = color.New(color.FgHiBlue, color.Bold).SprintFunc()
-	success     = color.New(color.FgHiGreen).SprintFunc()
-	warning     = color.New(color.FgHiYellow, color.Bold).SprintFunc()
-	errorMsg    = color.New(color.FgHiRed, color.Bold).SprintFunc()
-	command     = color.New(color.FgCyan).SprintFunc()
-	highlight   = color.New(color.Bold).SprintFunc()
-	versionFlag = false
+	title     = color.New(color.FgHiBlue, color.Bold).SprintFunc()
+	success   = color.New(color.FgHiGreen).SprintFunc()
+	warning   = color.New(color.FgHiYellow, color.Bold).SprintFunc()
+	errorMsg  = color.New(color.FgHiRed, color.Bold).SprintFunc()
+	command   = color.New(color.FgCyan).SprintFunc()
+	highlight = color.New(color.Bold).SprintFunc()
 )
 
 // rootCmd is the main command
 var rootCmd = &cobra.Command{
-	Use:   "nextdeploy",
-	Short: "CLI for automating Next.js deployments on any VPS with a custom daemon.",
+	Use:     "nextdeploy",
+	Version: shared.Version,
+	Short:   "CLI for automating Next.js deployments on any VPS with a custom daemon.",
 	Long: fmt.Sprintf(`%s %s
 
 %s
@@ -71,13 +71,6 @@ Deploy your Next.js app to *any* VPS — with SSL, logs, and zero downtime.
 }
 
 func Execute() {
-	fmt.Println()
-
-	if versionFlag {
-		fmt.Printf("nextdeploy %s\n", shared.Version)
-		os.Exit(0)
-	}
-
 	// Run a background update check — never blocks the CLI.
 	go updater.CheckAndPrint(shared.Version)
 
@@ -98,25 +91,26 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.SetHelpTemplate(fmt.Sprintf(`%s
-%s
 
+	rootCmd.SetHelpTemplate(fmt.Sprintf(`%s
 {{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`,
 		title("✨ NextDeploy CLI Toolkit"),
-		warning("Usage: {{.UseLine}}"),
 	))
 
-	rootCmd.SetUsageTemplate(`{{.UseLine}}
+	rootCmd.SetUsageTemplate(`
+` + warning("Usage:") + `
+  {{.UseLine}}
 
-  {{.Short}}
-
-{{if .HasAvailableFlags}}Options:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}
-
-{{if .HasAvailableSubCommands}}Commands:
+{{if .HasAvailableSubCommands}}` + highlight("Commands:") + `
 {{range .Commands}}{{if .IsAvailableCommand}}  {{rpad .Name .NamePadding }} {{.Short}}
 {{end}}{{end}}{{end}}
 
-Run '{{.CommandPath}} [command] --help' for more information about a command.
+{{if .HasAvailableLocalFlags}}` + highlight("Options:") + `
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}
+
+{{if .HasAvailableInheritedFlags}}` + highlight("Global Options:") + `
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.
 `)
 }

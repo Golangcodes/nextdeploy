@@ -19,27 +19,9 @@
 package main
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/Golangcodes/nextdeploy/cli/cmd"
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/updater"
 )
 
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "update":
-			if err := updater.SelfUpdate(shared.Version); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		case "version", "--version", "-v":
-			fmt.Printf("nextdeploy %s\n", shared.Version)
-			return
-		}
-	}
 	cmd.Execute()
 }
