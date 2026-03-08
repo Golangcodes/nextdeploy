@@ -61,6 +61,9 @@ CLI packages build -> Uploads tarball -> Daemon extracts -> Service starts -> He
 #### Serverless Flow
 CLI uploads to S3 -> Updates Lambda -> Configures CloudFront -> ACM/OAC Management.
 
+#### Secrets Injection
+Central JSON Vault -> `.env.nextdeploy` sync -> Systemd `EnvironmentFile` injection. See [SECRETS.md](file:///home/hersi/Music/workspace/nextdeploy/NextDeploy/SECRETS.md) for details.
+
 ---
 
 <a name="resource-mapping"></a>
@@ -72,6 +75,8 @@ CLI uploads to S3 -> Updates Lambda -> Configures CloudFront -> ACM/OAC Manageme
 - **`/opt/nextdeploy/apps/<app>/shared_static/`**: **Persistent** asset storage ([command_handler.go:L414-429](file:///home/hersi/Music/workspace/nextdeploy/NextDeploy/daemon/internal/daemon/command_handler.go#L414-429)).
 - **`/etc/systemd/system/nextdeploy-*.service`**: Process management ([process_manager.go:L25-110](file:///home/hersi/Music/workspace/nextdeploy/NextDeploy/daemon/internal/daemon/process_manager.go#L25-110)).
 - **`/etc/caddy/nextdeploy.d/<app>.caddy`**: Caddy config ([caddy_manager.go:L30-41](file:///home/hersi/Music/workspace/nextdeploy/NextDeploy/daemon/internal/daemon/caddy_manager.go#L30-41)).
+- **`/opt/nextdeploy/secrets/<app>.json`**: **Persistent** secret vault ([secrets_handler.go:144-161](file:///home/hersi/Music/workspace/nextdeploy/NextDeploy/daemon/internal/daemon/secrets_handler.go#L144-161)).
+- **`/opt/nextdeploy/apps/<app>/current/.env.nextdeploy`**: **Runtime** environment injection ([secrets_handler.go:177-196](file:///home/hersi/Music/workspace/nextdeploy/NextDeploy/daemon/internal/daemon/secrets_handler.go#L177-196)).
 
 ### 2. AWS (Serverless) Mapping
 - **Storage**: S3 Buckets for assets & packages ([aws_s3.go](file:///home/hersi/Music/workspace/nextdeploy/NextDeploy/cli/internal/serverless/aws_s3.go)).
