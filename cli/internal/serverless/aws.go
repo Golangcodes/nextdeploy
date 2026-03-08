@@ -172,11 +172,20 @@ type AWSProvider struct {
 	log       *shared.Logger
 	cfg       aws.Config
 	accountID string
+	verbose   bool
 }
 
-func NewAWSProvider() *AWSProvider {
+func NewAWSProvider(verbose bool) *AWSProvider {
 	return &AWSProvider{
-		log: shared.PackageLogger("aws_serverless", "☁️  AWS::"),
+		log:     shared.PackageLogger("aws_serverless", "☁️  AWS::"),
+		verbose: verbose,
+	}
+}
+
+// verboseLog logs a message only when --verbose is enabled.
+func (p *AWSProvider) verboseLog(msg string, args ...interface{}) {
+	if p.verbose {
+		p.log.Info(msg, args...)
 	}
 }
 

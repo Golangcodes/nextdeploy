@@ -455,7 +455,7 @@ func (p *AWSProvider) invalidateCloudFront(ctx context.Context, distributionId s
 	client := cloudfront.NewFromConfig(p.cfg)
 	callerRef := fmt.Sprintf("nextdeploy-%d", time.Now().UnixNano())
 
-	_, err := client.CreateInvalidation(ctx, &cloudfront.CreateInvalidationInput{
+	out, err := client.CreateInvalidation(ctx, &cloudfront.CreateInvalidationInput{
 		DistributionId: aws.String(distributionId),
 		InvalidationBatch: &cfTypes.InvalidationBatch{
 			CallerReference: aws.String(callerRef),
@@ -473,6 +473,9 @@ func (p *AWSProvider) invalidateCloudFront(ctx context.Context, distributionId s
 	}
 
 	p.log.Info("CloudFront invalidation triggered successfully.")
+	if out != nil && out.Invalidation != nil {
+		p.verboseLog("  Invalidation ID: %s (distribution: %s)", aws.ToString(out.Invalidation.Id), distributionId)
+	}
 	return nil
 }
 

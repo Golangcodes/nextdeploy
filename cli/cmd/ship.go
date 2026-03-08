@@ -73,7 +73,7 @@ var shipCmd = &cobra.Command{
 				}
 			}
 
-			if err := serverless.Deploy(context.Background(), cfg, &meta); err != nil {
+			if err := serverless.Deploy(context.Background(), cfg, &meta, shipVerbose); err != nil {
 				log.Error("Serverless deployment failed: %v", err)
 				os.Exit(1)
 			}
@@ -195,6 +195,9 @@ var shipCmd = &cobra.Command{
 	},
 }
 
+var shipVerbose bool
+
 func init() {
+	shipCmd.Flags().BoolVarP(&shipVerbose, "verbose", "v", false, "Print detailed deployment logs (S3 uploads, Lambda steps, CloudFront status)")
 	rootCmd.AddCommand(shipCmd)
 }
