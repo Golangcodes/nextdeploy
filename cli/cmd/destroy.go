@@ -54,7 +54,7 @@ var destroyCmd = &cobra.Command{
 			var p serverless.Provider
 			switch cfg.Serverless.Provider {
 			case "aws":
-				p = serverless.NewAWSProvider()
+				p = serverless.NewAWSProvider(false)
 			default:
 				log.Error("Unsupported serverless provider: %s", cfg.Serverless.Provider)
 				os.Exit(1)

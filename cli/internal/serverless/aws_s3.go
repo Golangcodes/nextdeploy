@@ -86,6 +86,10 @@ func (p *AWSProvider) DeployStatic(ctx context.Context, pkg *packaging.PackageRe
 		}
 		defer file.Close()
 
+		if info, statErr := file.Stat(); statErr == nil {
+			p.verboseLog("  Uploading s3://%s/%s (%s, %s)", bucketName, filepath.ToSlash(asset.S3Key), asset.ContentType, formatBytes(info.Size()))
+		}
+
 		_, err = uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
 			Bucket:       aws.String(bucketName),
 			Key:          aws.String(filepath.ToSlash(asset.S3Key)),
@@ -257,6 +261,17 @@ func (p *AWSProvider) updateS3BucketPolicyForOAC(ctx context.Context, bucketName
 
 	p.log.Info("S3 Bucket Policy updated to allow CloudFront OAC access.")
 	return nil
+}
+
+func formatBytes(n int64) string {
+	switch {
+	case n >= 1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+	case n >= 1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
 }
 
 func detectContentType(path string) string {

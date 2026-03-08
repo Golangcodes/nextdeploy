@@ -100,7 +100,7 @@ func runSecretAction(action string, args []string) {
 }
 
 func runServerlessSecretAction(action string, args []string, appName string, cfg *config.NextDeployConfig, log *shared.Logger) {
-	p, err := serverless.New("aws")
+	p, err := serverless.New("aws", false)
 	if err != nil {
 		log.Error("Failed to initialize serverless provider: %v", err)
 		os.Exit(1)
