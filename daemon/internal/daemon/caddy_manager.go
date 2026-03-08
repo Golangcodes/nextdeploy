@@ -22,6 +22,7 @@ func NewCaddyManager() *CaddyManager {
 	dir := "/etc/caddy/nextdeploy.d"
 	// #nosec G:u301
 	_ = os.MkdirAll(dir, 0755)
+	_ = os.Chmod(dir, 0755)
 	return &CaddyManager{
 		configDir: dir,
 	}
