@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Golangcodes/nextdeploy/internal/packaging"
 	"github.com/Golangcodes/nextdeploy/shared"
@@ -14,10 +15,10 @@ import (
 )
 
 // New returns a new serverless provider based on the provider name.
-func New(providerName string) (Provider, error) {
+func New(providerName string, verbose bool) (Provider, error) {
 	switch providerName {
 	case "aws":
-		return NewAWSProvider(), nil
+		return NewAWSProvider(verbose), nil
 	default:
 		return nil, fmt.Errorf("unsupported serverless provider: %s (supported: aws)", providerName)
 	}
@@ -29,11 +30,11 @@ func New(providerName string) (Provider, error) {
 //  3. Uploads static assets to CDN/Storage
 //  4. Deploys the compute layer (Lambda, Workers, etc.)
 //  5. Invalidates the CDN cache
-func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error {
+func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload, verbose bool) error {
 	log := shared.PackageLogger("serverless", "☁️  SERVERLESS")
 
 	// ── 1. Resolve provider ──────────────────────────────────────────────────
-	p, err := New(cfg.Serverless.Provider)
+	p, err := New(cfg.Serverless.Provider, verbose)
 	if err != nil {
 		return err
 	}
@@ -78,18 +79,29 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	}
 
 	// ── 4. Deploy static assets ──────────────────────────────────────────────
+	t0 := time.Now()
 	if err := p.DeployStatic(ctx, pkgResult, cfg, meta); err != nil {
 		return fmt.Errorf("failed to deploy static assets: %w", err)
 	}
+	if verbose {
+		log.Info("  Static upload completed in %s", time.Since(t0).Round(time.Millisecond))
+	}
 
 	// ── 5. Deploy compute layer ──────────────────────────────────────────────
+	t0 = time.Now()
 	if err := p.DeployCompute(ctx, pkgResult, cfg, meta); err != nil {
 		return fmt.Errorf("failed to deploy compute layer: %w", err)
 	}
+	if verbose {
+		log.Info("  Lambda deployment completed in %s", time.Since(t0).Round(time.Millisecond))
+	}
 
 	// ── 6. Invalidate CDN cache ──────────────────────────────────────────────
+	t0 = time.Now()
 	if err := p.InvalidateCache(ctx, cfg); err != nil {
 		log.Error("Cache invalidation failed (non-fatal): %v", err)
+	} else if verbose {
+		log.Info("  CloudFront invalidation completed in %s", time.Since(t0).Round(time.Millisecond))
 	}
 
 	log.Info("Serverless deployment complete! Application is live.")
@@ -123,7 +135,7 @@ func Rollback(ctx context.Context, cfg *config.NextDeployConfig) error {
 	log := shared.PackageLogger("serverless", "☁️  SERVERLESS")
 
 	// ── 1. Resolve provider ──────────────────────────────────────────────────
-	p, err := New(cfg.Serverless.Provider)
+	p, err := New(cfg.Serverless.Provider, false)
 	if err != nil {
 		return err
 	}

@@ -46,6 +46,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 
 	client := lambda.NewFromConfig(p.cfg)
 	functionName := p.getLambdaFunctionName(appCfg)
+	p.verboseLog("  Lambda function name: %s", functionName)
 
 	// Use pre-built zip from packager
 	zipPath := pkg.LambdaZipPath
@@ -53,6 +54,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	if err != nil {
 		return fmt.Errorf("failed to read lambda zip package: %w", err)
 	}
+	p.verboseLog("  Lambda zip size: %s (%s)", formatBytes(int64(len(zipContents))), zipPath)
 
 	// 3a. Save zip to S3 for rollback history (non-fatal)
 	bucketForHistory := p.getS3BucketName(appCfg)
@@ -87,6 +89,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	if err != nil {
 		p.log.Warn("Failed to ensure CloudFront Distribution: %v", err)
 	} else {
+		p.verboseLog("  CloudFront distribution ID: %s", distributionId)
 		// 7. Update S3 Bucket Policy for OAC
 		if err := p.updateS3BucketPolicyForOAC(ctx, bucketName, distributionId); err != nil {
 			p.log.Warn("Failed to update S3 Bucket Policy for OAC: %v", err)
@@ -370,7 +373,7 @@ func (p *AWSProvider) waitForLambdaStable(ctx context.Context, client *lambda.Cl
 		}
 
 		status := output.Configuration.LastUpdateStatus
-		p.log.Info("Lambda update status: %s", status)
+		p.verboseLog("  Lambda update status: %s", status)
 
 		if status == lambdaTypes.LastUpdateStatusSuccessful {
 			return nil
