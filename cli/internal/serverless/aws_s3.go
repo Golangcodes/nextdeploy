@@ -22,6 +22,15 @@ import (
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
+const (
+	s3UploadMaxAttempts = 4
+	s3UploadBaseDelay   = 500 * time.Millisecond
+)
+
+type s3ObjectUploader interface {
+	UploadObject(context.Context, *transfermanager.UploadObjectInput, ...func(*transfermanager.Options)) (*transfermanager.UploadObjectOutput, error)
+}
+
 func (p *AWSProvider) getS3BucketName(appCfg *cfgTypes.NextDeployConfig) string {
 	name := fmt.Sprintf("nextdeploy-%s-%s-assets", appCfg.App.Name, appCfg.App.Environment)
 	if p.accountID != "" {
@@ -60,6 +69,51 @@ func (p *AWSProvider) ensureBucketExists(ctx context.Context, client *s3.Client,
 	return nil
 }
 
+func (p *AWSProvider) uploadAssetWithRetry(ctx context.Context, uploader s3ObjectUploader, bucketName string, asset packaging.S3Asset) error {
+	var lastErr error
+
+	for attempt := 1; attempt <= s3UploadMaxAttempts; attempt++ {
+		file, err := os.Open(asset.LocalPath)
+		if err != nil {
+			return fmt.Errorf("failed to open local asset %s: %w", asset.LocalPath, err)
+		}
+
+		_, err = uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
+			Bucket:       aws.String(bucketName),
+			Key:          aws.String(filepath.ToSlash(asset.S3Key)),
+			Body:         file,
+			ContentType:  aws.String(asset.ContentType),
+			CacheControl: aws.String(asset.CacheControl),
+		})
+		closeErr := file.Close()
+		if err == nil {
+			if closeErr != nil {
+				return fmt.Errorf("uploaded %s but failed to close local file: %w", asset.S3Key, closeErr)
+			}
+			return nil
+		}
+		if closeErr != nil {
+			p.log.Warn("Failed to close local asset %s after upload attempt %d: %v", asset.LocalPath, attempt, closeErr)
+		}
+
+		lastErr = err
+		if attempt == s3UploadMaxAttempts {
+			break
+		}
+
+		delay := s3UploadBaseDelay * time.Duration(1<<(attempt-1))
+		p.log.Warn("Failed to upload %s to S3 (attempt %d/%d): %v. Retrying in %s...", asset.S3Key, attempt, s3UploadMaxAttempts, err, delay)
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("upload canceled for %s: %w", asset.S3Key, ctx.Err())
+		case <-time.After(delay):
+		}
+	}
+
+	return fmt.Errorf("failed to upload %s after %d attempts: %w", asset.S3Key, s3UploadMaxAttempts, lastErr)
+}
+
 func (p *AWSProvider) DeployStatic(ctx context.Context, pkg *packaging.PackageResult, appCfg *cfgTypes.NextDeployConfig, meta *nextcore.NextCorePayload) error {
 	bucketName := p.getS3BucketName(appCfg)
 	p.log.Info("Syncing static assets to S3 Bucket (%s)...", bucketName)
@@ -79,27 +133,12 @@ func (p *AWSProvider) DeployStatic(ctx context.Context, pkg *packaging.PackageRe
 	uploader := transfermanager.New(client)
 
 	for _, asset := range pkg.S3Assets {
-		file, err := os.Open(asset.LocalPath)
-		if err != nil {
-			p.log.Warn("Failed to open local asset %s: %v", asset.LocalPath, err)
-			continue
-		}
-		defer file.Close()
-
-		if info, statErr := file.Stat(); statErr == nil {
+		if info, statErr := os.Stat(asset.LocalPath); statErr == nil {
 			p.verboseLog("  Uploading s3://%s/%s (%s, %s)", bucketName, filepath.ToSlash(asset.S3Key), asset.ContentType, formatBytes(info.Size()))
 		}
 
-		_, err = uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
-			Bucket:       aws.String(bucketName),
-			Key:          aws.String(filepath.ToSlash(asset.S3Key)),
-			Body:         file,
-			ContentType:  aws.String(asset.ContentType),
-			CacheControl: aws.String(asset.CacheControl),
-		})
-
-		if err != nil {
-			p.log.Warn("Failed to upload %s to S3: %v", asset.S3Key, err)
+		if err := p.uploadAssetWithRetry(ctx, uploader, bucketName, asset); err != nil {
+			p.log.Warn("%v", err)
 		}
 	}
 
