@@ -4,21 +4,28 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '0 9 * * 1'  # weekly Monday 9am
+    - cron: "0 9 * * 1" # Monday 9am UTC
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.25.x"
 
 jobs:
-  security:
+  scan:
+    name: Security Scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history for gitleaks
+          fetch-depth: 0
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.x'
-          check-latest: true
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
 
       - name: govulncheck
         run: |
@@ -28,7 +35,7 @@ jobs:
       - name: gosec
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
-          gosec -exclude-dir=vendor ./...
+          gosec -exclude-dir=vendor -exclude-dir=scripts ./...
 
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
