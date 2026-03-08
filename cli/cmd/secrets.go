@@ -56,6 +56,20 @@ var secretsUnsetCmd = &cobra.Command{
 	},
 }
 
+var secretsLoadCmd = &cobra.Command{
+	Use:   "load [FILENAME]",
+	Short: "Load secrets from a .env file",
+	Long:  "Reads a local .env file and uploads all key-value pairs to the daemon. Defaults to '.env' if no filename is provided.",
+	Args:  cobra.MaximumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		filename := ".env"
+		if len(args) > 0 {
+			filename = args[0]
+		}
+		runSecretsLoad(filename)
+	},
+}
+
 func runSecretAction(action string, args []string) {
 	log := shared.PackageLogger("secrets", "🔐 SECRETS")
 	cfg, err := config.Load()
@@ -213,10 +227,42 @@ func runVPSSecretAction(action string, args []string, appName string, log *share
 	}
 }
 
+func runSecretsLoad(filename string) {
+	log := shared.PackageLogger("secrets", "🔐 SECRETS")
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		log.Error("Failed to read file %s: %v", filename, err)
+		os.Exit(1)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var secrets []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Handle basic KEY=VALUE parsing
+		if strings.Contains(line, "=") {
+			secrets = append(secrets, line)
+		}
+	}
+
+	if len(secrets) == 0 {
+		log.Warn("No valid secrets found in %s", filename)
+		return
+	}
+
+	log.Info("Loading %d secrets from %s...", len(secrets), filename)
+	runSecretAction("set", secrets)
+}
+
 func init() {
 	secretsCmd.AddCommand(secretsSetCmd)
 	secretsCmd.AddCommand(secretsGetCmd)
 	secretsCmd.AddCommand(secretsListCmd)
 	secretsCmd.AddCommand(secretsUnsetCmd)
+	secretsCmd.AddCommand(secretsLoadCmd)
 	rootCmd.AddCommand(secretsCmd)
 }
