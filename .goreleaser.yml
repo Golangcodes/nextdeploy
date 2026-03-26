@@ -8,6 +8,8 @@ env:
 before:
   hooks:
     - go mod tidy
+    - env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o assets/lambda/revalidator/bootstrap ./cmd/revalidator
+    - env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o assets/lambda/imgopt/bootstrap ./cmd/imgopt
     - go generate ./...
 
 builds:

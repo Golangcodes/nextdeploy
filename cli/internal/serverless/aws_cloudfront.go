@@ -22,11 +22,12 @@ func isPlaceholderDistributionID(id string) bool {
 	return id == "E1234567890ABC" || !cfDistributionIDPattern.MatchString(id)
 }
 
-func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sCfg *cfgTypes.ServerlessConfig, bucketName, functionUrl, domain string) (string, error) {
+func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sCfg *cfgTypes.ServerlessConfig, bucketName, functionUrl, imgOptUrl, domain string) (string, error) {
 	client := cloudfront.NewFromConfig(p.cfg)
 	callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
 
 	needsLambdaOrigin := functionUrl != ""
+	needsImgOptOrigin := imgOptUrl != ""
 
 	// 1. Ensure Origin Access Control (OAC) for S3
 	oacId, err := p.ensureS3OACExists(ctx, client)
@@ -36,7 +37,7 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 
 	// 1.5 Ensure Origin Access Control (OAC) for Lambda
 	var lambdaOacId string
-	if needsLambdaOrigin {
+	if needsLambdaOrigin || needsImgOptOrigin {
 		lambdaOacId, err = p.ensureLambdaOACExists(ctx, client)
 		if err != nil {
 			return "", fmt.Errorf("failed to ensure Lambda OAC exists: %w", err)
@@ -73,6 +74,11 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 		return "", fmt.Errorf("failed to discover Managed-AllViewerExceptHostHeader: %w", err)
 	}
 
+	securityHeadersPolicyId, err := p.ensureSecurityResponseHeadersPolicy(ctx, client)
+	if err != nil {
+		p.log.Warn("Failed to ensure Security Response Headers Policy, continuing without it: %v", err)
+	}
+
 	p.log.Info("Checking for existing CloudFront distribution...")
 	var existingDistID string
 	dists, err := p.findManagedDistributions(ctx, client, callerRef, domain)
@@ -95,7 +101,7 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 		}
 
 		distConfig := getConfig.DistributionConfig
-		needsUpdate := p.applyDistributionConfig(ctx, distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl)
+		needsUpdate := p.applyDistributionConfig(ctx, distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, securityHeadersPolicyId, bucketName, functionUrl, imgOptUrl)
 
 		if needsUpdate {
 			p.log.Info("CloudFront configuration update required, applying changes...")
@@ -118,7 +124,7 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 	p.log.Info("CloudFront distribution not found, creating one (this may take a few minutes to be fully active)...")
 
 	distConfig := &cfTypes.DistributionConfig{}
-	p.applyDistributionConfig(ctx, distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl)
+	p.applyDistributionConfig(ctx, distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, securityHeadersPolicyId, bucketName, functionUrl, imgOptUrl)
 
 	createOutput, err := client.CreateDistribution(ctx, &cloudfront.CreateDistributionInput{
 		DistributionConfig: distConfig,
@@ -151,9 +157,7 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 	return *createOutput.Distribution.Id, nil
 }
 
-// applyDistributionConfig centralizes the logic for both creating and updating a distribution.
-// It returns true if any changes were made (for updates).
-func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.DistributionConfig, callerRef, domain, certARN, s3OacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, bucketName, functionUrl string) bool {
+func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.DistributionConfig, callerRef, domain, certARN, s3OacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, securityHeadersPolicyId, bucketName, functionUrl, imgOptUrl string) bool {
 	changed := false
 
 	if dc.CallerReference == nil || *dc.CallerReference == "" {
@@ -221,6 +225,7 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 	// 3. Handle Origins
 	s3OriginId := "S3Assets"
 	lambdaOriginId := "LambdaCompute"
+	imgOptOriginId := "LambdaImgOpt"
 	s3Domain := fmt.Sprintf("%s.s3.%s.amazonaws.com", bucketName, p.cfg.Region)
 
 	var lambdaHost string
@@ -229,11 +234,19 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 		lambdaHost = strings.TrimSuffix(lambdaHost, "/")
 	}
 
+	var imgOptHost string
+	if imgOptUrl != "" {
+		imgOptHost = strings.TrimPrefix(imgOptUrl, "https://")
+		imgOptHost = strings.TrimSuffix(imgOptHost, "/")
+	}
+
 	expectedOrigins := []cfTypes.Origin{
 		{
 			Id:                    aws.String(s3OriginId),
 			DomainName:            aws.String(s3Domain),
+			OriginPath:            aws.String(""),
 			OriginAccessControlId: aws.String(s3OacId),
+			CustomHeaders:         &cfTypes.CustomHeaders{Quantity: aws.Int32(0)},
 			S3OriginConfig: &cfTypes.S3OriginConfig{
 				OriginAccessIdentity: aws.String(""),
 			},
@@ -243,7 +256,27 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 		expectedOrigins = append(expectedOrigins, cfTypes.Origin{
 			Id:                    aws.String(lambdaOriginId),
 			DomainName:            aws.String(lambdaHost),
+			OriginPath:            aws.String(""),
 			OriginAccessControlId: aws.String(lambdaOacId),
+			CustomHeaders:         &cfTypes.CustomHeaders{Quantity: aws.Int32(0)},
+			CustomOriginConfig: &cfTypes.CustomOriginConfig{
+				HTTPPort:               aws.Int32(80),
+				HTTPSPort:              aws.Int32(443),
+				OriginProtocolPolicy:   cfTypes.OriginProtocolPolicyHttpsOnly,
+				OriginSslProtocols:     &cfTypes.OriginSslProtocols{Quantity: aws.Int32(1), Items: []cfTypes.SslProtocol{cfTypes.SslProtocolTLSv12}},
+				OriginReadTimeout:      aws.Int32(30),
+				OriginKeepaliveTimeout: aws.Int32(5),
+			},
+		})
+	}
+
+	if imgOptHost != "" {
+		expectedOrigins = append(expectedOrigins, cfTypes.Origin{
+			Id:                    aws.String(imgOptOriginId),
+			DomainName:            aws.String(imgOptHost),
+			OriginPath:            aws.String(""),
+			OriginAccessControlId: aws.String(lambdaOacId),
+			CustomHeaders:         &cfTypes.CustomHeaders{Quantity: aws.Int32(0)},
 			CustomOriginConfig: &cfTypes.CustomOriginConfig{
 				HTTPPort:               aws.Int32(80),
 				HTTPSPort:              aws.Int32(443),
@@ -276,7 +309,7 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 						changed = true
 					}
 					// Ensure CustomOriginConfig for Lambda if missing
-					if *origin.Id == lambdaOriginId && origin.CustomOriginConfig == nil {
+					if (*origin.Id == lambdaOriginId || *origin.Id == imgOptOriginId) && origin.CustomOriginConfig == nil {
 						origin.CustomOriginConfig = expected.CustomOriginConfig
 						changed = true
 					}
@@ -303,11 +336,19 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 	allowedMethods := &cfTypes.AllowedMethods{
 		Quantity: aws.Int32(2),
 		Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+		CachedMethods: &cfTypes.CachedMethods{
+			Quantity: aws.Int32(2),
+			Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+		},
 	}
 	if lambdaHost != "" {
 		allowedMethods = &cfTypes.AllowedMethods{
 			Quantity: aws.Int32(7),
 			Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead, cfTypes.MethodOptions, cfTypes.MethodPut, cfTypes.MethodPatch, cfTypes.MethodPost, cfTypes.MethodDelete},
+			CachedMethods: &cfTypes.CachedMethods{
+				Quantity: aws.Int32(2),
+				Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+			},
 		}
 	}
 
@@ -318,9 +359,14 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 			CachePolicyId:         aws.String(cachePolicy),
 			OriginRequestPolicyId: orpId,
 			AllowedMethods:        allowedMethods,
+			FieldLevelEncryptionId: aws.String(""),
+			LambdaFunctionAssociations: &cfTypes.LambdaFunctionAssociations{Quantity: aws.Int32(0)},
+			FunctionAssociations:       &cfTypes.FunctionAssociations{Quantity: aws.Int32(0)},
+			ResponseHeadersPolicyId: aws.String(securityHeadersPolicyId),
 		}
 		changed = true
 	} else {
+
 		dcb := dc.DefaultCacheBehavior
 		if *dcb.TargetOriginId != targetOrigin {
 			dcb.TargetOriginId = aws.String(targetOrigin)
@@ -328,6 +374,10 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 		}
 		if *dcb.CachePolicyId != cachePolicy {
 			dcb.CachePolicyId = aws.String(cachePolicy)
+			changed = true
+		}
+		if aws.ToString(dcb.ResponseHeadersPolicyId) != securityHeadersPolicyId {
+			dcb.ResponseHeadersPolicyId = aws.String(securityHeadersPolicyId)
 			changed = true
 		}
 		if aws.ToString(dcb.OriginRequestPolicyId) != aws.ToString(orpId) {
@@ -342,20 +392,80 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 
 	// 5. Handle Cache Behaviors (for static assets when Lambda is active)
 	if lambdaHost != "" {
+		imageTargetOrigin := s3OriginId
+		if imgOptHost != "" {
+			imageTargetOrigin = imgOptOriginId
+		}
+
 		expectedBehaviors := []cfTypes.CacheBehavior{
 			{
-				PathPattern:          aws.String("/_next/*"),
-				TargetOriginId:       aws.String(s3OriginId),
+				PathPattern:          aws.String("/_next/image*"),
+				TargetOriginId:       aws.String(imageTargetOrigin),
 				ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
 				CachePolicyId:        aws.String(cachingOptimizedId),
+				OriginRequestPolicyId: orpId,
+				SmoothStreaming:      aws.Bool(false),
+				Compress:             aws.Bool(true),
+				AllowedMethods: &cfTypes.AllowedMethods{
+					Quantity: aws.Int32(2),
+					Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+					CachedMethods: &cfTypes.CachedMethods{
+						Quantity: aws.Int32(2),
+						Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+					},
+				},
+				FieldLevelEncryptionId:  aws.String(""),
+				LambdaFunctionAssociations: &cfTypes.LambdaFunctionAssociations{Quantity: aws.Int32(0)},
+				FunctionAssociations:       &cfTypes.FunctionAssociations{Quantity: aws.Int32(0)},
+				ResponseHeadersPolicyId: aws.String(securityHeadersPolicyId),
 			},
 			{
-				PathPattern:          aws.String("/assets/*"),
-				TargetOriginId:       aws.String(s3OriginId),
-				ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
-				CachePolicyId:        aws.String(cachingOptimizedId),
+				PathPattern:             aws.String("/_next/*"),
+				TargetOriginId:          aws.String(s3OriginId),
+				ViewerProtocolPolicy:    cfTypes.ViewerProtocolPolicyRedirectToHttps,
+				CachePolicyId:           aws.String(cachingOptimizedId),
+				SmoothStreaming:         aws.Bool(false),
+				Compress:                aws.Bool(true),
+				AllowedMethods: &cfTypes.AllowedMethods{
+					Quantity: aws.Int32(2),
+					Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+					CachedMethods: &cfTypes.CachedMethods{
+						Quantity: aws.Int32(2),
+						Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+					},
+				},
+				FieldLevelEncryptionId:  aws.String(""),
+				LambdaFunctionAssociations: &cfTypes.LambdaFunctionAssociations{Quantity: aws.Int32(0)},
+				FunctionAssociations:       &cfTypes.FunctionAssociations{Quantity: aws.Int32(0)},
+				ResponseHeadersPolicyId: aws.String(securityHeadersPolicyId),
+			},
+			{
+				PathPattern:             aws.String("/assets/*"),
+				TargetOriginId:          aws.String(s3OriginId),
+				ViewerProtocolPolicy:    cfTypes.ViewerProtocolPolicyRedirectToHttps,
+				CachePolicyId:           aws.String(cachingOptimizedId),
+				SmoothStreaming:         aws.Bool(false),
+				Compress:                aws.Bool(true),
+				AllowedMethods: &cfTypes.AllowedMethods{
+					Quantity: aws.Int32(2),
+					Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+					CachedMethods: &cfTypes.CachedMethods{
+						Quantity: aws.Int32(2),
+						Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+					},
+				},
+				FieldLevelEncryptionId:  aws.String(""),
+				LambdaFunctionAssociations: &cfTypes.LambdaFunctionAssociations{Quantity: aws.Int32(0)},
+				FunctionAssociations:       &cfTypes.FunctionAssociations{Quantity: aws.Int32(0)},
+				ResponseHeadersPolicyId: aws.String(securityHeadersPolicyId),
 			},
 		}
+		
+		if imgOptHost == "" {
+			// If no imgOpt URL, we don't intercept /_next/image*
+			expectedBehaviors = expectedBehaviors[1:]
+		}
+
 		updateBehaviors := false
 		if dc.CacheBehaviors == nil || int(aws.ToInt32(dc.CacheBehaviors.Quantity)) != len(expectedBehaviors) {
 			updateBehaviors = true
@@ -364,7 +474,8 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 				ab := dc.CacheBehaviors.Items[i]
 				if aws.ToString(ab.PathPattern) != aws.ToString(eb.PathPattern) ||
 					aws.ToString(ab.TargetOriginId) != aws.ToString(eb.TargetOriginId) ||
-					aws.ToString(ab.CachePolicyId) != aws.ToString(eb.CachePolicyId) {
+					aws.ToString(ab.CachePolicyId) != aws.ToString(eb.CachePolicyId) ||
+					aws.ToString(ab.ResponseHeadersPolicyId) != aws.ToString(eb.ResponseHeadersPolicyId) {
 					updateBehaviors = true
 					break
 				}
@@ -592,4 +703,62 @@ func (p *AWSProvider) ensureS3OACExists(ctx context.Context, client *cloudfront.
 	}
 
 	return *createOutput.OriginAccessControl.Id, nil
+}
+
+func (p *AWSProvider) ensureSecurityResponseHeadersPolicy(ctx context.Context, client *cloudfront.Client) (string, error) {
+	policyName := "NextDeploy-Strict-Security-Headers-v2"
+	p.log.Info("Ensuring CloudFront Response Headers Policy exists: %s", policyName)
+
+	// 1. Check if it exists
+	res, err := client.ListResponseHeadersPolicies(ctx, &cloudfront.ListResponseHeadersPoliciesInput{})
+	if err == nil && res.ResponseHeadersPolicyList != nil {
+		for _, item := range res.ResponseHeadersPolicyList.Items {
+			if item.ResponseHeadersPolicy != nil && item.ResponseHeadersPolicy.ResponseHeadersPolicyConfig != nil && *item.ResponseHeadersPolicy.ResponseHeadersPolicyConfig.Name == policyName {
+				return *item.ResponseHeadersPolicy.Id, nil
+			}
+		}
+	}
+
+	// 2. Create it
+	p.log.Info("Creating new strict Response Headers Policy...")
+	createRes, err := client.CreateResponseHeadersPolicy(ctx, &cloudfront.CreateResponseHeadersPolicyInput{
+		ResponseHeadersPolicyConfig: &cfTypes.ResponseHeadersPolicyConfig{
+			Name:    aws.String(policyName),
+			Comment: aws.String("NextDeploy strict security headers policy"),
+			SecurityHeadersConfig: &cfTypes.ResponseHeadersPolicySecurityHeadersConfig{
+				ContentSecurityPolicy: &cfTypes.ResponseHeadersPolicyContentSecurityPolicy{
+					ContentSecurityPolicy: aws.String("default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https:;"),
+					Override:              aws.Bool(true),
+				},
+				ContentTypeOptions: &cfTypes.ResponseHeadersPolicyContentTypeOptions{
+					Override: aws.Bool(true),
+				},
+				FrameOptions: &cfTypes.ResponseHeadersPolicyFrameOptions{
+					FrameOption: cfTypes.FrameOptionsListDeny,
+					Override:    aws.Bool(true),
+				},
+				ReferrerPolicy: &cfTypes.ResponseHeadersPolicyReferrerPolicy{
+					ReferrerPolicy: "strict-origin-when-cross-origin",
+					Override:       aws.Bool(true),
+				},
+				StrictTransportSecurity: &cfTypes.ResponseHeadersPolicyStrictTransportSecurity{
+					AccessControlMaxAgeSec: aws.Int32(31536000),
+					IncludeSubdomains:      aws.Bool(true),
+					Preload:                aws.Bool(true),
+					Override:               aws.Bool(true),
+				},
+				XSSProtection: &cfTypes.ResponseHeadersPolicyXSSProtection{
+					Protection: aws.Bool(true),
+					ModeBlock:  aws.Bool(true),
+					Override:   aws.Bool(true),
+				},
+			},
+		},
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("failed to create response headers policy: %w", err)
+	}
+
+	return *createRes.ResponseHeadersPolicy.Id, nil
 }

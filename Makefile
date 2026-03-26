@@ -173,6 +173,20 @@ dev-daemon: ## Watch daemon code, rebuild and restart on changes
 	@command -v air >/dev/null 2>&1 || { echo "Installing air..."; go install github.com/air-verse/air@latest; }
 	@air -c .air.daemon.toml
 
+loc: ## Count lines of code (requires scc: go install github.com/boyter/scc/v3@latest)
+	@scc --format wide --exclude-dir vendor,test-serverless-app,.next
+
+bench: ## Run benchmarks
+	@go test -bench=. -benchmem -run=^$$ ./...
+
+coverage: ## Run tests and open HTML coverage report
+	@go test -race -coverprofile=coverage.out -covermode=atomic ./...
+	@go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
+	@go tool cover -func=coverage.out | tail -1
+
+quality: lint security-scan coverage loc ## Run full quality suite (lint + security + coverage + LOC)
+
 dev-check: deps lint test security-scan ## Run all development checks
 
 # Release preparation

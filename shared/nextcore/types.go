@@ -249,7 +249,8 @@ type RouteInfo struct {
 	DynamicRoutes    []string          `json:"dynamic_routes"`
 	SSGRoutes        map[string]string `json:"ssg_routes"`
 	SSRRoutes        []string          `json:"ssr_routes"`
-	ISRRoutes        map[string]string `json:"isr_routes"`
+	ISRRoutes        map[string]string `json:"isr_routes"` // Route -> HTML File Path
+	ISRDetail        []ISRRoute        `json:"isr_detail"` // Extended tagging info for ISR
 	APIRoutes        []string          `json:"api_routes"`
 	FallbackRoutes   map[string]string `json:"fallback_routes"`
 	MiddlewareRoutes []string          `json:"middleware_routes"`

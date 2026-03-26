@@ -42,8 +42,17 @@ jobs:
       - name: Build Daemon
         run: go build -o /dev/null ./daemon/cmd/nextdeployd
 
-      - name: Test
-        run: go test -race -timeout 5m ./...
+      - name: Test with coverage
+        run: go test -race -timeout 5m -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -1
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
 
   lint:
     name: Lint
@@ -77,3 +86,27 @@ jobs:
         with:
           go-version-input: ${{ env.GO_VERSION }}
           check-latest: true
+
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Install scc (LOC counter)
+        run: go install github.com/boyter/scc/v3@latest
+
+      - name: Lines of code report
+        run: scc --format wide --exclude-dir vendor,test-serverless-app,.next
+
+      - name: Benchmark
+        run: |
+          go test -bench=. -benchmem -run='^$' ./... 2>/dev/null || echo "No benchmarks found"

@@ -123,6 +123,9 @@ serverless:
   provider: aws
   region: us-east-1
   profile: "default"           # AWS CLI profile name
+  isrRevalidation: true        # Enable ISR cache listener Lambda via SQS
+  imageOptimization: true      # Enable on-the-fly Image Resization Lambda via CloudFront
+  warmer: true                 # Keep the Lambda warm
   cloudfront_id: "" # [OPTIONAL] If provided, NextDeploy will trigger an invalidation after deploy
   # iam_role: "arn:aws:iam::ACCOUNT_ID:role/nextdeploy-serverless-role" # [OPTIONAL] Created automatically if not provided
   # handler: "server.handler" # [OPTIONAL] Lambda handler (defaults to server.handler)

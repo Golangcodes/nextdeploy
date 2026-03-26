@@ -2,6 +2,7 @@ package serverless
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	cwTypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdaTypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -19,6 +23,34 @@ import (
 	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
+
+type ImageOptConfig struct {
+	AllowedDomains []string                      `json:"allowed_domains"`
+	RemotePatterns []nextcore.ImageRemotePattern `json:"remote_patterns"`
+	DeviceSizes    []int                         `json:"device_sizes"`
+	ImageSizes     []int                         `json:"image_sizes"`
+	Formats        []string                      `json:"formats"`
+}
+
+func (p *AWSProvider) extractImageConfig(meta *nextcore.NextCorePayload) string {
+	config := ImageOptConfig{
+		AllowedDomains: []string{},
+		RemotePatterns: []nextcore.ImageRemotePattern{},
+		DeviceSizes:    []int{640, 750, 828, 1080, 1200, 1920, 2048, 3840},
+		ImageSizes:     []int{16, 32, 48, 64, 96, 128, 256, 384},
+		Formats:        []string{"image/webp"},
+	}
+
+	// Extract from detected features (external image domains)
+	if meta.DetectedFeatures != nil {
+		if len(meta.DetectedFeatures.HasExternalImages) > 0 {
+			config.AllowedDomains = meta.DetectedFeatures.HasExternalImages
+		}
+	}
+
+	jsonBytes, _ := json.Marshal(config)
+	return string(jsonBytes)
+}
 
 func (p *AWSProvider) getLambdaFunctionName(appCfg *cfgTypes.NextDeployConfig) string {
 	return strings.ToLower(fmt.Sprintf("%s-%s", appCfg.App.Name, appCfg.App.Environment))
@@ -35,7 +67,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 			domain = appCfg.App.Domain
 		}
 
-		_, err := p.ensureCloudFrontDistributionExists(ctx, appCfg.Serverless, bucketName, "", domain)
+		_, err := p.ensureCloudFrontDistributionExists(ctx, appCfg.Serverless, bucketName, "", "", domain)
 		if err != nil {
 			p.log.Warn("Failed to ensure CloudFront Distribution for static site: %v", err)
 		}
@@ -43,6 +75,14 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	}
 
 	p.log.Info("Deploying Compute Layer to AWS Lambda for app: %s...", appCfg.App.Name)
+
+	if appCfg.Serverless == nil || appCfg.Serverless.IAMRole == "" || strings.Contains(appCfg.Serverless.IAMRole, "role-name") {
+		p.log.Info("Ensuring managed 'nextdeploy-serverless-role' policies are up to date...")
+		_, roleErr := p.ensureExecutionRoleExists(ctx)
+		if roleErr != nil {
+			p.log.Warn("Failed to update IAM execution role, permissions may be stale: %v", roleErr)
+		}
+	}
 
 	client := lambda.NewFromConfig(p.cfg)
 	functionName := p.getLambdaFunctionName(appCfg)
@@ -63,8 +103,15 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	} else {
 		p.log.Info("Deployment zip saved for rollback: %s", s3ZipKey)
 	}
+	// 4. Ensure Log Group and Alarms exist for observability
+	if err := p.ensureLogGroupExists(ctx, functionName); err != nil {
+		p.log.Warn("Failed to ensure Log Group: %v", err)
+	}
+	if err := p.ensureLambdaErrorAlarm(ctx, functionName); err != nil {
+		p.log.Warn("Failed to ensure CloudWatch Alarm: %v", err)
+	}
 
-	// 4. Ensure Lambda function exists (provision if missing).
+	// 5. Ensure Lambda function exists (provision if missing).
 	functionJustCreated, err := p.ensureLambdaFunctionExists(ctx, client, functionName, appCfg.App.Name, appCfg.Serverless, zipContents)
 	if err != nil {
 		return err
@@ -76,7 +123,67 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 		p.log.Warn("Failed to ensure Lambda Function URL (distribution might fail): %v", err)
 	}
 
-	// 6. Ensure CloudFront Distribution exists
+	// 6. Ensure Auxiliary Lambdas
+	p.log.Info("Ensuring Auxiliary Lambdas exist (ISR: %v, ImgOpt: %v)...", appCfg.Serverless.IsrRevalidation, appCfg.Serverless.ImageOptimization)
+	var imgOptUrl string
+	if appCfg.Serverless != nil && appCfg.Serverless.ImageOptimization {
+		imgOptName := functionName + "-imgopt"
+		p.verboseLog("  Image Optimization Lambda name: %s", imgOptName)
+		zipBytes, err := getEmbeddedLambdaZip("imgopt")
+		if err != nil {
+			p.log.Warn("Failed to load embedded imgopt lambda (is it built?): %v", err)
+		} else {
+			// Extract image config from metadata
+			imageConfigJSON := p.extractImageConfig(meta)
+
+			envVars := map[string]string{
+				"DISTRIBUTION_ID":   appCfg.Serverless.CloudFrontId,
+				"SOURCE_BUCKET":     p.getS3BucketName(appCfg),
+				"IMAGE_CONFIG_JSON": imageConfigJSON,
+			}
+			_, err = p.ensureAuxiliaryLambdaExists(ctx, client, imgOptName, zipBytes, envVars)
+			if err != nil {
+				p.log.Warn("Failed to ensure Image Optimization Lambda: %v", err)
+			} else {
+				imgOptUrl, err = p.ensureLambdaFunctionURLExists(ctx, client, imgOptName)
+				if err != nil {
+					p.log.Warn("Failed to ensure Function URL for Image Optimization Lambda: %v", err)
+				}
+			}
+		}
+	}
+
+	if appCfg.Serverless != nil && appCfg.Serverless.IsrRevalidation {
+		// Ensure SQS Queue Exists
+		queueUrl, queueArn, err := p.ensureRevalidationQueueExists(ctx, appCfg.App.Name)
+		if err != nil {
+			p.log.Warn("Failed to ensure Revalidation SQS Queue: %v", err)
+		} else {
+			revalName := functionName + "-reval"
+			p.verboseLog("  ISR Revalidation Lambda name: %s", revalName)
+			zipBytes, err := getEmbeddedLambdaZip("revalidator")
+			if err != nil {
+				p.log.Warn("Failed to load embedded revalidator lambda (is it built?): %v", err)
+			} else {
+				envVars := map[string]string{
+					"DISTRIBUTION_ID": appCfg.Serverless.CloudFrontId,
+					"CACHE_BUCKET":    p.getS3BucketName(appCfg),
+					"QUEUE_URL":       queueUrl,
+				}
+				_, err = p.ensureAuxiliaryLambdaExists(ctx, client, revalName, zipBytes, envVars)
+				if err != nil {
+					p.log.Warn("Failed to ensure Revalidation Lambda: %v", err)
+				} else {
+					err = p.ensureLambdaSQSTrigger(ctx, client, revalName, queueArn)
+					if err != nil {
+						p.log.Warn("Failed to ensure SQS mapping for Revalidation Lambda: %v", err)
+					}
+				}
+			}
+		}
+	}
+
+	// 7. Ensure CloudFront Distribution exists
 	bucketName := p.getS3BucketName(appCfg)
 	// Determine domain
 	domain := meta.Domain
@@ -85,12 +192,12 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	}
 
 	p.log.Info("Ensuring CloudFront distribution exists for Lambda origin (Domain: %s)...", domain)
-	distributionId, err := p.ensureCloudFrontDistributionExists(ctx, appCfg.Serverless, bucketName, functionUrl, domain)
+	distributionId, err := p.ensureCloudFrontDistributionExists(ctx, appCfg.Serverless, bucketName, functionUrl, imgOptUrl, domain)
 	if err != nil {
 		p.log.Warn("Failed to ensure CloudFront Distribution: %v", err)
 	} else {
 		p.verboseLog("  CloudFront distribution ID: %s", distributionId)
-		// 7. Update S3 Bucket Policy for OAC
+		// 8. Update S3 Bucket Policy for OAC
 		if err := p.updateS3BucketPolicyForOAC(ctx, bucketName, distributionId); err != nil {
 			p.log.Warn("Failed to update S3 Bucket Policy for OAC: %v", err)
 		}
@@ -135,18 +242,48 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	region := p.cfg.Region
 	secretsExtensionLayer := fmt.Sprintf("arn:aws:lambda:%s:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:11", region)
 
+	// Get revalidation queue URL if ISR is enabled
+	var queueUrl string
+	if appCfg.Serverless != nil && appCfg.Serverless.IsrRevalidation {
+		qUrl, _, err := p.ensureRevalidationQueueExists(ctx, appCfg.App.Name)
+		if err == nil {
+			queueUrl = qUrl
+		}
+	}
+
+	envVars := map[string]string{
+		"ND_SECRET_NAME":  secretName,
+		"NODE_ENV":        "production",
+		"ND_CACHE_BUCKET": fmt.Sprintf("nextdeploy-%s-%s-assets-%s", appCfg.App.Name, appCfg.App.Environment, p.accountID),
+	}
+
+	if queueUrl != "" {
+		envVars["ND_REVALIDATION_QUEUE"] = queueUrl
+	}
+
 	maxRetries := 5
 	layersToApply := []string{secretsExtensionLayer}
 	layerFallbackApplied := false
 	for i := 0; i < maxRetries; i++ {
+		// If we're in fallback mode, we need to manually fetch and merge secrets into the environment
+		if layerFallbackApplied {
+			p.log.Info("Fallback mode active: Fetching and merging secrets into Lambda environment...")
+			cloudSecrets, err := p.GetSecrets(ctx, appCfg.App.Name)
+			if err != nil {
+				p.log.Warn("Failed to fetch cloud secrets for environment injection: %v", err)
+			} else {
+				for k, v := range cloudSecrets {
+					envVars[k] = v
+				}
+				p.log.Success("Injected %d secrets directly into Lambda environment.", len(cloudSecrets))
+			}
+		}
+
 		_, err := client.UpdateFunctionConfiguration(ctx, &lambda.UpdateFunctionConfigurationInput{
 			FunctionName: aws.String(functionName),
 			Handler:      aws.String(handler),
 			Environment: &lambdaTypes.Environment{
-				Variables: map[string]string{
-					"ND_SECRET_NAME": secretName,
-					"NODE_ENV":       "production",
-				},
+				Variables: envVars,
 			},
 			Layers: layersToApply,
 		})
@@ -513,4 +650,135 @@ func (p *AWSProvider) ensureLambdaFunctionURLExists(ctx context.Context, client 
 	}
 
 	return functionUrl, nil
+}
+
+func (p *AWSProvider) ensureAuxiliaryLambdaExists(ctx context.Context, client *lambda.Client, name string, zipContents []byte, envVars map[string]string) (bool, error) {
+	_, err := client.GetFunction(ctx, &lambda.GetFunctionInput{
+		FunctionName: aws.String(name),
+	})
+	if err == nil {
+		// Update code directly since it exists
+		p.verboseLog("Updating Auxiliary Lambda %s code...", name)
+		_, err := client.UpdateFunctionCode(ctx, &lambda.UpdateFunctionCodeInput{
+			FunctionName: aws.String(name),
+			ZipFile:      zipContents,
+		})
+		if err != nil {
+			return false, fmt.Errorf("failed to update Auxiliary Lambda code: %w", err)
+		}
+
+		err = p.waitForLambdaStable(ctx, client, name)
+
+		// Update env vars
+		_, err = client.UpdateFunctionConfiguration(ctx, &lambda.UpdateFunctionConfigurationInput{
+			FunctionName: aws.String(name),
+			Environment: &lambdaTypes.Environment{
+				Variables: envVars,
+			},
+		})
+		if err != nil {
+			p.log.Warn("Failed to update config for auxiliary lambda %s: %v", name, err)
+		}
+
+		return false, nil
+	}
+
+	var notFound *lambdaTypes.ResourceNotFoundException
+	if !errors.As(err, &notFound) {
+		return false, fmt.Errorf("failed to check Auxiliary Lambda status: %w", err)
+	}
+
+	roleArn, err := p.ensureExecutionRoleExists(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to ensure IAM execution role for lambda exists: %w", err)
+	}
+
+	p.log.Info("Creating Auxiliary Lambda function %s...", name)
+
+	createInput := &lambda.CreateFunctionInput{
+		Code:         &lambdaTypes.FunctionCode{ZipFile: zipContents},
+		FunctionName: aws.String(name),
+		Role:         aws.String(roleArn),
+		Handler:      aws.String("bootstrap"),
+		Runtime:      lambdaTypes.RuntimeProvidedal2023,
+		Environment: &lambdaTypes.Environment{
+			Variables: envVars,
+		},
+		Timeout:    aws.Int32(30),
+		MemorySize: aws.Int32(512),
+	}
+
+	maxRetries := 10
+	retryDelay := 5 * time.Second
+	for i := 0; i < maxRetries; i++ {
+		_, err := client.CreateFunction(ctx, createInput)
+		if err == nil {
+			p.log.Info("Auxiliary Lambda function %s created successfully.", name)
+			return true, nil
+		}
+
+		var invalidParam *lambdaTypes.InvalidParameterValueException
+		if errors.As(err, &invalidParam) && strings.Contains(err.Error(), "role") && i < maxRetries-1 {
+			p.log.Warn("IAM role not yet propagated, retrying CreateFunction (%d/%d)...", i+1, maxRetries)
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		return false, fmt.Errorf("failed to create Auxiliary Lambda %s: %w", name, err)
+	}
+
+	return false, fmt.Errorf("failed to create Auxiliary Lambda %s after retries", name)
+}
+
+func (p *AWSProvider) ensureLogGroupExists(ctx context.Context, functionName string) error {
+	p.log.Info("Ensuring CloudWatch Log Group exists with 30-day retention for %s...", functionName)
+	logGroupName := "/aws/lambda/" + functionName
+	client := cloudwatchlogs.NewFromConfig(p.cfg)
+
+	_, err := client.CreateLogGroup(ctx, &cloudwatchlogs.CreateLogGroupInput{
+		LogGroupName: aws.String(logGroupName),
+	})
+	if err != nil {
+		if !strings.Contains(err.Error(), "AlreadyExists") {
+			return fmt.Errorf("failed to create log group: %w", err)
+		}
+	}
+
+	_, err = client.PutRetentionPolicy(ctx, &cloudwatchlogs.PutRetentionPolicyInput{
+		LogGroupName:    aws.String(logGroupName),
+		RetentionInDays: aws.Int32(30),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set log retention policy: %w", err)
+	}
+
+	return nil
+}
+
+func (p *AWSProvider) ensureLambdaErrorAlarm(ctx context.Context, functionName string) error {
+	p.log.Info("Ensuring CloudWatch Alarm (Error Rate > 1%%) exists for %s...", functionName)
+	client := cloudwatch.NewFromConfig(p.cfg)
+
+	alarmName := fmt.Sprintf("%s-error-rate", functionName)
+	_, err := client.PutMetricAlarm(ctx, &cloudwatch.PutMetricAlarmInput{
+		AlarmName:          aws.String(alarmName),
+		AlarmDescription:   aws.String("Alarm if Lambda error rate exceeds 1% over 5 minutes"),
+		MetricName:         aws.String("Errors"),
+		Namespace:          aws.String("AWS/Lambda"),
+		Statistic:          "Sum",
+		Period:             aws.Int32(300), // 5 minutes
+		EvaluationPeriods:  aws.Int32(1),
+		Threshold:          aws.Float64(1.0),
+		ComparisonOperator: "GreaterThanOrEqualToThreshold",
+		Dimensions: []cwTypes.Dimension{
+			{
+				Name:  aws.String("FunctionName"),
+				Value: aws.String(functionName),
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create cloudwatch alarm: %w", err)
+	}
+	return nil
 }

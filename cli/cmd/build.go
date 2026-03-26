@@ -142,6 +142,16 @@ var buildCmd = &cobra.Command{
 		log.Info("Export directory: %s", payload.ExportDir)
 
 		// --- PRE-BUILD VALIDATIONS ---
+		// Guide users to the best build mode for their target type
+		if payload.Config.TargetType == "serverless" && payload.OutputMode != nextcore.OutputModeStandalone {
+			log.Error("✗ Serverless deployments REQUIRE 'output: \"standalone\"' in your next.config configuration.")
+			log.Error("  Please add it to your Next.js config and run 'nextdeploy build' again.")
+			os.Exit(1)
+		} else if payload.Config.TargetType == "vps" && payload.OutputMode == nextcore.OutputModeStandalone {
+			log.Warn("! You are targeting 'vps' but your output mode is 'standalone'.")
+			log.Warn("  While this works, the default output mode is often recommended for standard VPS deployments.")
+		}
+
 		if payload.DetectedFeatures.HasServerActions && payload.OutputMode == nextcore.OutputModeExport {
 			log.Error("✗ Server Actions detected, but OutputMode is 'export'. Server Actions require a runtime.")
 			log.Error("  Please change your Next.js config or target to a runtime-enabled mode.")

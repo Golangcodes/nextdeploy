@@ -138,6 +138,17 @@ func (p *Packager) collectS3Assets() ([]S3Asset, error) {
 		p.addPrerenderedAsset(&assets, route)
 	}
 
+	// 4. ISR Tag Map (if enabled/built)
+	tagMapPath := filepath.Join(p.projectRoot, ".nextdeploy", "assets", "isr-tag-map.json")
+	if _, err := os.Stat(tagMapPath); err == nil {
+		assets = append(assets, S3Asset{
+			LocalPath:    tagMapPath,
+			S3Key:        "isr-tag-map.json",
+			CacheControl: "public, max-age=0, must-revalidate",
+			ContentType:  "application/json",
+		})
+	}
+
 	return assets, nil
 }
 
@@ -148,10 +159,12 @@ func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
 		s3KeyBase = "index"
 	}
 
-	// Check for HTML and RSC in .next/server/app/ or .next/server/pages/
+	// Standalone output structure: .next/standalone/.next/server/
+	standaloneNext := filepath.Join(p.standaloneDir, ".next")
+	
 	prefixes := []string{
-		filepath.Join(p.buildDir, "server", "app"),
-		filepath.Join(p.buildDir, "server", "pages"),
+		filepath.Join(standaloneNext, "server", "app"),
+		filepath.Join(standaloneNext, "server", "pages"),
 	}
 
 	for _, prefix := range prefixes {
@@ -219,12 +232,22 @@ const serverPath = path.join(__dirname, 'server.js');
 const fetchSecrets = async () => {
     const secretName = process.env.ND_SECRET_NAME;
     if (!secretName) return {};
+    
+    // Check if we already have secrets in env (injected via fallback)
+    if (process.env.TEST_SECRET_KEY) {
+        console.log('[bridge] Using secrets injected via environment variables (fallback mode)');
+        return {}; // Already in process.env
+    }
+
     const options = {
         hostname: 'localhost',
         port: 2773,
         path: '/secretsmanager/get?secretId=' + encodeURIComponent(secretName),
-        headers: { 'X-Aws-Parameters-Secrets-Token': process.env.AWS_SESSION_TOKEN }
+        headers: { 'X-Aws-Parameters-Secrets-Token': process.env.AWS_SESSION_TOKEN || '' },
+        timeout: 1000
     };
+
+    console.log('[bridge] Attempting to fetch secrets from AWS Extension...');
     return new Promise((resolve) => {
         const req = http.get(options, (res) => {
             let data = '';
@@ -232,12 +255,29 @@ const fetchSecrets = async () => {
             res.on('end', () => {
                 try {
                     const parsed = JSON.parse(data);
-                    const secrets = JSON.parse(parsed.SecretString);
-                    resolve(secrets);
-                } catch (e) { resolve({}); }
+                    if (parsed.SecretString) {
+                        const secrets = JSON.parse(parsed.SecretString);
+                        console.log('[bridge] Successfully fetched secrets from extension');
+                        resolve(secrets);
+                    } else {
+                        console.error('[bridge] Extension returned no SecretString');
+                        resolve({});
+                    }
+                } catch (e) { 
+                    console.error('[bridge] Failed to parse secrets from extension');
+                    resolve({}); 
+                }
             });
         });
-        req.on('error', () => resolve({}));
+        req.on('error', (err) => {
+            console.log('[bridge] Secrets Extension unreachable (expected if layer is missing):', err.message);
+            resolve({});
+        });
+        req.on('timeout', () => {
+            req.destroy();
+            console.log('[bridge] Secrets Extension request timed out');
+            resolve({});
+        });
         req.end();
     });
 };
@@ -278,12 +318,45 @@ exports.handler = async (event) => {
         const method = (event.requestContext && event.requestContext.http) ? event.requestContext.http.method : event.httpMethod;
         const rawPath = event.rawPath || event.path || '/';
         const queryString = event.rawQueryString || '';
+        
+        const incomingHeaders = event.headers || {};
+        const getHeader = (name) => {
+            const lowerName = name.toLowerCase();
+            for (const key in incomingHeaders) {
+                if (key.toLowerCase() === lowerName) return incomingHeaders[key];
+            }
+            return null;
+        };
+        
+        // Recover original Host for Server Action CSRF bypass
+        const cfDomain = process.env.ND_CF_DOMAIN;
+        const customDomain = process.env.ND_CUSTOM_DOMAIN;
+        const origin = getHeader('origin');
+        const incomingProto = getHeader('x-forwarded-proto') || 'https';
+        let fwHost = getHeader('x-forwarded-host') || getHeader('host') || 'localhost';
+
+        if (origin) {
+            fwHost = origin.replace(/^https?:\/\//, '');
+        } else if (customDomain) {
+            fwHost = customDomain;
+        } else if (cfDomain) {
+            fwHost = cfDomain;
+        }
+
+        const headers = {
+            ...incomingHeaders,
+            'x-forwarded-proto': incomingProto,
+            'x-forwarded-port': '3000',
+            'x-forwarded-host': fwHost,
+            'host': fwHost, 
+        };
+
         const options = {
             hostname: '127.0.0.1',
             port: serverPort,
             path: rawPath + (queryString ? '?' + queryString : ''),
             method: method,
-            headers: event.headers || {},
+            headers: headers,
         };
         const req = http.request(options, (res) => {
             const chunks = [];

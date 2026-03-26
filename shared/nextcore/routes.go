@@ -40,6 +40,24 @@ func getRoutesFromManifests(buildMeta *NextBuildMetadata, distDir string) (*Rout
 					if initialRevalidate, ok := detailMap["initialRevalidateSeconds"].(float64); ok {
 						if initialRevalidate > 0 {
 							info.ISRRoutes[route] = filepath.Join(distDir, "server", detailMap["dataRoute"].(string))
+
+							// Extract extended ISR metadata
+							isrRoute := ISRRoute{
+								Path:       route,
+								Revalidate: int(initialRevalidate),
+								Tags:       []string{route}, // Default to the route itself as a tag
+							}
+
+							// If next.js suddenly adds tags to the prerender manifest, grab them
+							if routeTagsIfc, hasTags := detailMap["tags"].([]interface{}); hasTags {
+								for _, t := range routeTagsIfc {
+									if tagStr, isStr := t.(string); isStr {
+										isrRoute.Tags = append(isrRoute.Tags, tagStr)
+									}
+								}
+							}
+
+							info.ISRDetail = append(info.ISRDetail, isrRoute)
 						} else {
 							info.SSGRoutes[route] = filepath.Join(distDir, "server", "pages", route+".html")
 						}

@@ -20,39 +20,41 @@ func (p *AWSProvider) ensureExecutionRoleExists(ctx context.Context) (string, er
 		RoleName: aws.String(roleName),
 	})
 
+	var roleArn string
 	if err == nil {
-		p.log.Info("IAM execution role found: %s", *getOutput.Role.Arn)
-		return *getOutput.Role.Arn, nil
-	}
+		p.log.Info("IAM execution role found: %s, verifying policies...", *getOutput.Role.Arn)
+		roleArn = *getOutput.Role.Arn
+	} else {
+		var noSuchEntity *types.NoSuchEntityException
+		if !errors.As(err, &noSuchEntity) {
+			return "", fmt.Errorf("failed to check for IAM role: %w", err)
+		}
 
-	var noSuchEntity *types.NoSuchEntityException
-	if !errors.As(err, &noSuchEntity) {
-		return "", fmt.Errorf("failed to check for IAM role: %w", err)
-	}
+		p.log.Info("IAM role %s not found, creating one...", roleName)
 
-	p.log.Info("IAM role %s not found, creating one...", roleName)
-
-	trustPolicy := map[string]interface{}{
-		"Version": "2012-10-17",
-		"Statement": []map[string]interface{}{
-			{
-				"Effect": "Allow",
-				"Principal": map[string]interface{}{
-					"Service": "lambda.amazonaws.com",
+		trustPolicy := map[string]interface{}{
+			"Version": "2012-10-17",
+			"Statement": []map[string]interface{}{
+				{
+					"Effect": "Allow",
+					"Principal": map[string]interface{}{
+						"Service": "lambda.amazonaws.com",
+					},
+					"Action": "sts:AssumeRole",
 				},
-				"Action": "sts:AssumeRole",
 			},
-		},
-	}
-	policyJSON, _ := json.Marshal(trustPolicy)
+		}
+		policyJSON, _ := json.Marshal(trustPolicy)
 
-	createOutput, err := client.CreateRole(ctx, &iam.CreateRoleInput{
-		RoleName:                 aws.String(roleName),
-		AssumeRolePolicyDocument: aws.String(string(policyJSON)),
-		Description:              aws.String("Managed by NextDeploy for Serverless Lambda execution"),
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create IAM role: %w", err)
+		createOutput, err := client.CreateRole(ctx, &iam.CreateRoleInput{
+			RoleName:                 aws.String(roleName),
+			AssumeRolePolicyDocument: aws.String(string(policyJSON)),
+			Description:              aws.String("Managed by NextDeploy for Serverless Lambda execution"),
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to create IAM role: %w", err)
+		}
+		roleArn = *createOutput.Role.Arn
 	}
 
 	p.log.Info("Attaching managed policies to role %s...", roleName)
@@ -91,6 +93,23 @@ func (p *AWSProvider) ensureExecutionRoleExists(ctx context.Context) (string, er
 				},
 				"Resource": fmt.Sprintf("arn:aws:secretsmanager:*:%s:secret:nextdeploy/*", p.accountID),
 			},
+			{
+				"Effect": "Allow",
+				"Action": []string{
+					"sqs:ReceiveMessage",
+					"sqs:DeleteMessage",
+					"sqs:GetQueueAttributes",
+					"sqs:SendMessage",
+				},
+				"Resource": fmt.Sprintf("arn:aws:sqs:*:%s:nextdeploy-*", p.accountID),
+			},
+			{
+				"Effect": "Allow",
+				"Action": []string{
+					"cloudfront:CreateInvalidation",
+				},
+				"Resource": "*",
+			},
 		},
 	}
 	inlinePolicyJSON, _ := json.Marshal(inlinePolicy)
@@ -103,6 +122,6 @@ func (p *AWSProvider) ensureExecutionRoleExists(ctx context.Context) (string, er
 		p.log.Warn("Failed to attach scoped inline policy: %v", err)
 	}
 
-	p.log.Info("IAM role created successfully: %s", *createOutput.Role.Arn)
-	return *createOutput.Role.Arn, nil
+	p.log.Info("IAM role ready: %s", roleArn)
+	return roleArn, nil
 }

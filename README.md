@@ -54,7 +54,7 @@ curl -fsSL https://nextdeploy.one/daemon.sh | bash
 ```
 ### 3. Bash Install Script (Linux Servers)
 
-For a quick setup on a Linux server, you can use our installation script to fetch the latest daemon and CLI securely:
+For a quick setup on a Linux machine, you can use our installation script to fetch the latest daemon and CLI securely:
 
 ```bash
 curl -fsSL https://nextdeploy.one/install.sh | bash
@@ -71,6 +71,7 @@ nextdeploy prepare    # Provision a fresh VPS with security hardening
 nextdeploy ship       # Deploy to your server
 nextdeploy status     # Check app PID, memory, and health
 nextdeploy logs       # Stream real-time logs from the daemon
+nextdeploy load       # load env vars from .env to vps 
 nextdeploy secrets set KEY=VALUE # Manage secrets remotely
 ```
 

@@ -36,15 +36,18 @@ type SafeConfig struct {
 }
 
 type ServerlessConfig struct {
-	Provider     string `yaml:"provider"` // e.g., "aws"
-	Region       string `yaml:"region"`
-	CloudFrontId string `yaml:"cloudfront_id,omitempty"`
-	IAMRole      string `yaml:"iam_role,omitempty"`    // IAM Role ARN for Lambda
-	Handler      string `yaml:"handler,omitempty"`     // Lambda handler (defaults to server.handler)
-	Runtime      string `yaml:"runtime,omitempty"`     // Lambda runtime (defaults to nodejs20.x)
-	MemorySize   int32  `yaml:"memory_size,omitempty"` // Lambda memory size in MB (defaults to 1024)
-	Timeout      int32  `yaml:"timeout,omitempty"`     // Lambda timeout in seconds (defaults to 30)
-	Profile      string `yaml:"profile,omitempty"`     // AWS CLI profile name
+	Provider          string `yaml:"provider"` // e.g., "aws"
+	Region            string `yaml:"region"`
+	CloudFrontId      string `yaml:"cloudfront_id,omitempty"`
+	IAMRole           string `yaml:"iam_role,omitempty"`           // IAM Role ARN for Lambda
+	Handler           string `yaml:"handler,omitempty"`            // Lambda handler (defaults to server.handler)
+	Runtime           string `yaml:"runtime,omitempty"`            // Lambda runtime (defaults to nodejs20.x)
+	MemorySize        int32  `yaml:"memory_size,omitempty"`        // Lambda memory size in MB (defaults to 1024)
+	Timeout           int32  `yaml:"timeout,omitempty"`            // Lambda timeout in seconds (defaults to 30)
+	Profile           string `yaml:"profile,omitempty"`            // AWS CLI profile name
+	IsrRevalidation   bool   `yaml:"isr_revalidation,omitempty"`   // Deploy ISR Revalidation Lambda + SQS
+	ImageOptimization bool   `yaml:"image_optimization,omitempty"` // Deploy Image Optimizer Lambda + CF Behavior
+	Warmer            bool   `yaml:"warmer,omitempty"`             // Deploy EventBridge warmer cron
 }
 
 type WebServer struct {
@@ -75,7 +78,8 @@ type CloudProviderStruct struct {
 	// #nosec G117
 	AccessKey string `yaml:"access_key,omitempty"`
 	SecretKey string `yaml:"secret_key,omitempty"`
-	Profile   string `yaml:"profile,omitempty"` // AWS CLI profile name
+	Profile   string `yaml:"profile,omitempty"`   // AWS CLI profile name
+	AccountID string `yaml:"account_id,omitempty"` // Cloudflare Account ID
 }
 type ServerConfig struct {
 	WebServer *WebServer `yaml:"web_server,omitempty"`

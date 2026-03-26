@@ -23,9 +23,14 @@ import (
 	"github.com/Golangcodes/nextdeploy/cli/internal/dns"
 	"github.com/Golangcodes/nextdeploy/shared"
 	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/Golangcodes/nextdeploy/assets"
+
+	"archive/zip"
+	"bytes"
 )
 
 const bridgeJS = `const http = require('http');
+const https = require('https');
 const path = require('path');
 const { spawn } = require('child_process');
 
@@ -74,6 +79,29 @@ const fetchSecrets = async () => {
     });
 };
 
+const sendToSQS = async (message) => {
+    const queueUrl = process.env.ND_REVALIDATION_QUEUE;
+    if (!queueUrl) {
+        console.warn('No revalidation queue configured, skipping');
+        return;
+    }
+
+    const AWS = require('aws-sdk');
+    const sqs = new AWS.SQS({ region: process.env.AWS_REGION || 'us-east-1' });
+    
+    try {
+        await sqs.sendMessage({
+            QueueUrl: queueUrl,
+            MessageBody: JSON.stringify(message),
+            MessageGroupId: 'revalidation',
+            MessageDeduplicationId: Date.now().toString() + Math.random().toString()
+        }).promise();
+        console.log('Sent revalidation message to SQS:', message);
+    } catch (err) {
+        console.error('Failed to send to SQS:', err);
+    }
+};
+
 const waitForServer = async () => {
     for (let i = 0; i < 50; i++) {
         try {
@@ -98,12 +126,22 @@ const waitForServer = async () => {
 
 // Start the server in the background
 const startServer = async () => {
-    console.log('Warming up secrets...');
-    cachedSecrets = await fetchSecrets();
+    const secretName = process.env.ND_SECRET_NAME;
+    if (secretName) {
+        console.log('[bridge] Critical: App requires secrets from ' + secretName);
+        console.log('[bridge] Warming up secrets...');
+        cachedSecrets = await fetchSecrets();
+        
+        // Validation: If we have NO secrets and we expected them, fail loudly
+        if (!cachedSecrets || Object.keys(cachedSecrets).length === 0) {
+            console.error('[bridge] FATAL: Failed to fetch required secrets from AWS. Application cannot start safely.');
+            process.exit(1);
+        }
+    }
 
     const env = {
         ...process.env,
-        ...cachedSecrets,
+        ...(cachedSecrets || {}),
         PORT: serverPort,
         HOSTNAME: '127.0.0.1',
         NODE_ENV: 'production'
@@ -130,17 +168,74 @@ const warmup = startServer();
 exports.handler = async (event) => {
     await warmup;
 
+    const method = (event.requestContext && event.requestContext.http) ? event.requestContext.http.method : event.httpMethod;
+    const rawPath = event.rawPath || event.path || '/';
+    const queryString = event.rawQueryString || '';
+
+    // Handle revalidation endpoint
+    if (rawPath === '/_nextdeploy/revalidate' && method === 'POST') {
+        try {
+            const body = event.isBase64Encoded 
+                ? Buffer.from(event.body, 'base64').toString('utf-8')
+                : event.body;
+            const payload = JSON.parse(body);
+            
+            await sendToSQS({
+                tag: payload.tag,
+                path: payload.path
+            });
+            
+            return {
+                statusCode: 200,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ revalidated: true })
+            };
+        } catch (err) {
+            console.error('Revalidation error:', err);
+            return {
+                statusCode: 500,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: err.message })
+            };
+        }
+    }
+
     return new Promise((resolve, reject) => {
-        const method = (event.requestContext && event.requestContext.http) ? event.requestContext.http.method : event.httpMethod;
-        const rawPath = event.rawPath || event.path || '/';
-        const queryString = event.rawQueryString || '';
+        const incomingHeaders = event.headers || {};
+        
+        // 1. Recover the original user-facing Host to prevent Server Action CSRF errors
+        const cfDomain = process.env.ND_CF_DOMAIN;
+        const customDomain = process.env.ND_CUSTOM_DOMAIN;
+        let fwHost = incomingHeaders['x-forwarded-host'] || incomingHeaders['host'] || 'localhost';
+
+        if (incomingHeaders['origin']) {
+            fwHost = incomingHeaders['origin'].replace(/^https?:\/\//, '');
+        } else if (customDomain) {
+            fwHost = customDomain;
+        } else if (cfDomain) {
+            fwHost = cfDomain;
+        }
+
+        // 2. Override headers to forcefully convince Next.js it is operating securely yet locally 
+        // using HTTP, avoiding EPROTO errors in middleware proxies.
+        const headers = {
+            ...incomingHeaders,
+            'x-forwarded-proto': 'https',
+            'x-forwarded-port': '443',
+            'x-forwarded-host': fwHost,
+            'host': '127.0.0.1:3000',
+        };
+        
+        // Remove any headers that might confuse Next.js about the protocol
+        delete headers['x-forwarded-ssl'];
+        delete headers['cloudfront-forwarded-proto'];
 
         const options = {
             hostname: '127.0.0.1',
             port: serverPort,
             path: rawPath + (queryString ? '?' + queryString : ''),
             method: method,
-            headers: event.headers || {},
+            headers: headers,
         };
 
         const req = http.request(options, (res) => {
@@ -187,6 +282,40 @@ func (p *AWSProvider) verboseLog(msg string, args ...interface{}) {
 	if p.verbose {
 		p.log.Info(msg, args...)
 	}
+}
+
+func getEmbeddedLambdaZip(name string) ([]byte, error) {
+	binPath := fmt.Sprintf("lambda/%s/bootstrap", name)
+	content, err := assets.LambdaBinaries.ReadFile(binPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read embedded lambda %s: %w", name, err)
+	}
+
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+
+	header := &zip.FileHeader{
+		Name:   "bootstrap",
+		Method: zip.Deflate,
+	}
+	header.SetMode(0755)
+
+	f, err := w.CreateHeader(header)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = f.Write(content)
+	if err != nil {
+		return nil, err
+	}
+
+	err = w.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
 
 func (p *AWSProvider) Initialize(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
@@ -241,6 +370,11 @@ func (p *AWSProvider) Initialize(ctx context.Context, appCfg *cfgTypes.NextDeplo
 		p.log.Warn("Unable to fetch AWS Account ID (some auto-naming may fail): %v", err)
 	} else if identity.Account != nil {
 		p.accountID = *identity.Account
+	}
+
+	// 4. Check Service Quotas (CloudFront distributions limit)
+	if err := p.CheckServiceQuotas(ctx); err != nil {
+		p.log.Warn("Quota check: %v", err)
 	}
 
 	return nil
@@ -482,4 +616,29 @@ func (p *AWSProvider) findManagedDistributions(ctx context.Context, client *clou
 	}
 
 	return distIDs, nil
+}
+
+func (p *AWSProvider) CheckServiceQuotas(ctx context.Context) error {
+	p.log.Info("Checking AWS service quotas (CloudFront distribution limit)...")
+	client := cloudfront.NewFromConfig(p.cfg)
+
+	listRes, err := client.ListDistributions(ctx, &cloudfront.ListDistributionsInput{})
+	if err != nil {
+		return fmt.Errorf("failed to list distributions for quota check: %w", err)
+	}
+
+	currentCount := int32(0)
+	if listRes.DistributionList != nil {
+		currentCount = aws.ToInt32(listRes.DistributionList.Quantity)
+	}
+
+	limit := int32(200) // Default CloudFront distribution limit
+
+	if currentCount >= limit {
+		p.log.Warn("⚠️ CloudFront distribution limit reached (%d/%d used). Deploys may fail.", currentCount, limit)
+		return fmt.Errorf("CloudFront distribution limit reached (%d/%d)", currentCount, limit)
+	}
+
+	p.log.Info("CloudFront quota check passed (%d/%d used).", currentCount, limit)
+	return nil
 }

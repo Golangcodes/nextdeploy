@@ -1,4 +1,3 @@
-// NOTE: cross compile safe
 package cmd
 
 import (

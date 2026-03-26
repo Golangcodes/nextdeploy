@@ -28,7 +28,6 @@ var (
 )
 
 func GenerateMetadata() (metadata NextCorePayload, err error) {
-	NextCoreLogger.Info("Generating metadata for Next.js application...")
 	cfg, err := config.Load()
 	if err != nil {
 		NextCoreLogger.Error("Failed to load configuration: %v", err)
@@ -41,7 +40,6 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		NextCoreLogger.Error("Failed to get Next.js version: %v", err)
 		return NextCorePayload{}, err
 	}
-	NextCoreLogger.Info("Next.js version: %s", NextJsVersion)
 	cwd, err := os.Getwd()
 	if err != nil {
 		NextCoreLogger.Error("Error getting current working directory")
@@ -55,7 +53,6 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 	}
 	features := DetectFeatures(nextConfig)
 
-	NextCoreLogger.Info("Collecting build metadata...")
 	buildMeta, err := CollectBuildMetadata()
 	if err != nil {
 		NextCoreLogger.Error("Failed to collect build metadata: %v", err)
@@ -88,7 +85,6 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		return NextCorePayload{}, err
 	}
 	if len(imagesAssets.PublicImages) == 0 && len(imagesAssets.OptimizedImages) == 0 && len(imagesAssets.StaticImports) == 0 {
-		NextCoreLogger.Info("No image assets found in the Next.js build")
 	} else {
 		HasImageAssets = true
 	}
@@ -187,6 +183,17 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 				OutputMode:  buildMeta.OutputMode,
 			},
 		},
+	}
+
+	// Emit ISR tag map
+	if len(metadata.RouteInfo.ISRDetail) > 0 {
+		tagMap := BuildTagMap(metadata.RouteInfo.ISRDetail)
+		tagMapData, err := json.MarshalIndent(tagMap, "", "  ")
+		if err == nil {
+			_ = os.MkdirAll(AssetsOutputDir, 0750)
+			tagMapPath := filepath.Join(AssetsOutputDir, "isr-tag-map.json")
+			_ = os.WriteFile(tagMapPath, tagMapData, 0600)
+		}
 	}
 
 	if err := createBuildLock(&metadata); err != nil {
@@ -361,8 +368,6 @@ func ValidateBuildState() error {
 		return fmt.Errorf("failed to get current git commit: %w", err)
 	}
 	//TODO: use this data to avoid unnecessary builds
-	NextCoreLogger.Info("Current git commit: %s", currentCommit)
-	NextCoreLogger.Info("Expected git commit: %s", lock.GitCommit)
 	if currentCommit != lock.GitCommit {
 		NextCoreLogger.Error("Git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
 		return fmt.Errorf("git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
@@ -567,6 +572,8 @@ func ParseMiddleware(projectDir string) (*MiddlewareConfig, error) {
 	middlewarePaths := []string{
 		filepath.Join(projectDir, "middleware.ts"),
 		filepath.Join(projectDir, "middleware.js"),
+		filepath.Join(projectDir, "proxy.ts"),
+		filepath.Join(projectDir, "proxy.js"),
 	}
 
 	var middlewareFile string
@@ -620,11 +627,20 @@ func parseMiddlewareMatchers(content string) ([]MiddlewareRoute, error) {
 	var matchers []MiddlewareRoute
 
 	// First try to parse config object style
-	configObjRegex := regexp.MustCompile(`config\s*=\s*{([^}]*)}`)
+	configObjRegex := regexp.MustCompile(`(?:export\s+const\s+)?config\s*=\s*{([^}]*)}`)
 	configMatches := configObjRegex.FindStringSubmatch(content)
 	if len(configMatches) > 1 {
-		// Try to parse as JSON (with some cleaning)
-		cleaned := strings.ReplaceAll(configMatches[1], "'", `"`)
+		// Clean the content for pseudo-JSON parsing
+		body := configMatches[1]
+		// Convert ' to "
+		cleaned := strings.ReplaceAll(body, "'", `"`)
+		// Add quotes to keys if missing
+		keyRegex := regexp.MustCompile(`(\s*)([a-zA-Z0-9_]+):`)
+		cleaned = keyRegex.ReplaceAllString(cleaned, `$1"$2":`)
+		// Remove trailing commas before closing braces/brackets
+		trailingCommaRegex := regexp.MustCompile(`,(\s*[}\]])`)
+		cleaned = trailingCommaRegex.ReplaceAllString(cleaned, `$1`)
+		
 		cleaned = strings.ReplaceAll(cleaned, "\n", "")
 		cleaned = fmt.Sprintf("{%s}", cleaned)
 
@@ -675,7 +691,7 @@ func parseMiddlewareMatchers(content string) ([]MiddlewareRoute, error) {
 	}
 
 	// Fallback to parsing individual matchers
-	matcherRegex := regexp.MustCompile(`matcher:\s*(\[[^\]]+\]|{[^}]+})`)
+	matcherRegex := regexp.MustCompile(`matcher:\s*(\[[^\]]+\]|{[^}]+}|"[^"]+"|'[^']+')`)
 	matcherMatches := matcherRegex.FindStringSubmatch(content)
 	if len(matcherMatches) > 1 {
 		cleaned := strings.ReplaceAll(matcherMatches[1], "'", `"`)
@@ -692,6 +708,15 @@ func parseMiddlewareMatchers(content string) ([]MiddlewareRoute, error) {
 				}
 				return matchers, nil
 			}
+		}
+
+		// Handle single path string
+		if strings.HasPrefix(cleaned, `"`) {
+			path := strings.Trim(cleaned, `"`)
+			matchers = append(matchers, MiddlewareRoute{
+				Pathname: path,
+			})
+			return matchers, nil
 		}
 
 		// Handle object matcher

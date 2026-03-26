@@ -19,8 +19,10 @@ func New(providerName string, verbose bool) (Provider, error) {
 	switch providerName {
 	case "aws":
 		return NewAWSProvider(verbose), nil
+	case "cloudflare":
+		return NewCloudflareProvider(), nil
 	default:
-		return nil, fmt.Errorf("unsupported serverless provider: %s (supported: aws)", providerName)
+		return nil, fmt.Errorf("unsupported serverless provider: %s (supported: aws, cloudflare)", providerName)
 	}
 }
 
@@ -67,6 +69,7 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	log.Info("Package split: %dMB Lambda zip, %d S3 assets", pkgResult.LambdaZipSize/(1024*1024), len(pkgResult.S3Assets))
 
 	// ── 3. Push secrets ──────────────────────────────────────────────────────
+	//FIX: the load secrets is just nextdeploy.yml
 	appSecrets, err := loadLocalSecrets(cfg)
 	if err != nil {
 		// Non-fatal: warn but proceed with empty secrets if none are configured
