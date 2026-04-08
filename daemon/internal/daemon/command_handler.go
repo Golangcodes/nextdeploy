@@ -310,8 +310,14 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 
 	log.Printf("[ship] App=%s domain=%s mode=%s pkg=%s", appName, domain, outputMode, meta.PackageManager)
 
+	// Release IDs are {unix-timestamp}-{shortSha}. The leading timestamp keeps
+	// lexicographic ordering aligned with chronological ordering (so the existing
+	// sort.Strings rollback walk still works), while the trailing short SHA gives
+	// a human-readable identity for operators and lets --toCommit lookups avoid
+	// reading every metadata.json. Falls back to "nogit" when the build had no
+	// git context (e.g. CI without a checkout).
 	timestamp := time.Now().Unix()
-	releaseID := fmt.Sprintf("%d", timestamp)
+	releaseID := fmt.Sprintf("%d-%s", timestamp, shortSha(meta.GitCommit))
 	releaseDir := filepath.Join(appsDir, appName, "releases", releaseID)
 
 	// #nosec G301 G703
@@ -529,6 +535,16 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 		return types.Response{Success: false, Message: err.Error()}
 	}
 
+	// Optional rollback selectors. JSON-over-socket decodes numbers as float64.
+	steps := 1
+	if v, ok := args["steps"].(float64); ok && v > 0 {
+		steps = int(v)
+	}
+	toCommit, _ := StringArg(args, "toCommit")
+	if toCommit != "" && steps != 1 {
+		return types.Response{Success: false, Message: "--toCommit and --steps are mutually exclusive"}
+	}
+
 	releasesDir := filepath.Join(appsDir, appName, "releases")
 	entries, err := os.ReadDir(releasesDir)
 	if err != nil {
@@ -546,8 +562,16 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 		return types.Response{Success: false, Message: "not enough releases to rollback"}
 	}
 
+	// Lex sort works because releaseID is {unix-ts}-{shortSha}; the timestamp
+	// prefix preserves chronological order. Legacy bare-timestamp release dirs
+	// from older daemon versions still sort correctly because they share the
+	// same numeric leading segment.
 	sort.Strings(releases)
-	previousReleaseID := releases[len(releases)-2]
+
+	previousReleaseID, err := resolveRollbackTarget(releasesDir, releases, steps, toCommit)
+	if err != nil {
+		return types.Response{Success: false, Message: err.Error()}
+	}
 	previousReleaseDir := filepath.Join(releasesDir, previousReleaseID)
 
 	meta, err := readMetadata(previousReleaseDir)
@@ -575,6 +599,64 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 		ExportDir:        meta.ExportDir,
 	}
 	return ch.activateRelease(ctx)
+}
+
+// shortSha returns a 7-char prefix of a git commit hash, or "nogit" when the
+// commit is unavailable. Kept identical in spirit to the AWS-side helper so
+// release identifiers are consistent across deploy targets.
+func shortSha(full string) string {
+	if len(full) >= 7 {
+		return full[:7]
+	}
+	if full == "" {
+		return "nogit"
+	}
+	return full
+}
+
+// resolveRollbackTarget picks the release directory to roll back to. The
+// `releases` slice must already be sorted oldest-first. The active deployment
+// is the last entry; it is never returned.
+//
+//   - toCommit (full or short SHA): walks releases newest-first, matching by
+//     release-dir suffix first (cheap, no I/O), then by reading each
+//     metadata.json (covers legacy releases). Errors if not found within the
+//     retention window.
+//   - steps (default 1): returns the entry `steps` positions before the active
+//     one. Errors if `steps` exceeds available history.
+func resolveRollbackTarget(releasesDir string, releases []string, steps int, toCommit string) (string, error) {
+	if len(releases) < 2 {
+		return "", fmt.Errorf("not enough releases to rollback (found %d, need at least 2)", len(releases))
+	}
+
+	if toCommit != "" {
+		needle := strings.ToLower(strings.TrimSpace(toCommit))
+		// Walk newest-first, skipping the active deployment (last entry).
+		for i := len(releases) - 2; i >= 0; i-- {
+			id := releases[i]
+			// Fast path: releaseID is "{ts}-{shortSha}" since the rename, so a
+			// suffix prefix-match avoids touching disk.
+			if dash := strings.LastIndex(id, "-"); dash >= 0 {
+				if strings.HasPrefix(strings.ToLower(id[dash+1:]), needle) {
+					return id, nil
+				}
+			}
+			// Fallback: legacy bare-timestamp releases — read metadata.json.
+			meta, err := readMetadata(filepath.Join(releasesDir, id))
+			if err == nil && strings.HasPrefix(strings.ToLower(meta.GitCommit), needle) {
+				return id, nil
+			}
+		}
+		return "", fmt.Errorf("commit %q not found in release history (retention window may have pruned it)", toCommit)
+	}
+
+	if steps <= 0 {
+		steps = 1
+	}
+	if len(releases) < steps+1 {
+		return "", fmt.Errorf("not enough releases to rollback %d step(s) (found %d, need at least %d)", steps, len(releases), steps+1)
+	}
+	return releases[len(releases)-1-steps], nil
 }
 
 // ExtractTarGz is now handled universally by shared.ExtractTarGz

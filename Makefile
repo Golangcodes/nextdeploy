@@ -38,10 +38,17 @@ help: ## Display this help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # Clean build artifacts
-clean: ## Clean build artifacts
+clean: ## Clean build artifacts, coverage reports, and stray test outputs
 	@echo "Cleaning build artifacts..."
-	@rm -rf $(BIN_DIR)/* $(DIST_DIR)/*
+	@rm -rf $(BIN_DIR)/* $(DIST_DIR)/* coverage.out coverage.html
+	@find . -type f -name "*.test" -delete 2>/dev/null || true
+	@find . -type f -name "*.out" -not -path "./vendor/*" -delete 2>/dev/null || true
 	@echo "Clean complete"
+
+# Deep clean — also wipes the dev install in ~/.nextdeploy/bin
+clean-all: clean ## clean + remove ~/.nextdeploy/bin dev binaries
+	@rm -f $(HOME)/.nextdeploy/bin/nextdeploy $(HOME)/.nextdeploy/bin/nextdeployd
+	@echo "Dev binaries removed"
 
 # Install dependencies
 deps: ## Install build dependencies
@@ -50,21 +57,71 @@ deps: ## Install build dependencies
 	@go mod verify
 	@echo "Dependencies installed"
 
-# Run tests
-test: ## Run tests with coverage
-	@echo "Running tests..."
-	@go test -race -coverprofile=coverage.out -covermode=atomic -v ./...
-	@go tool cover -html=coverage.out -o coverage.html
-	@echo "Tests complete - coverage report: coverage.html"
+# Run unit tests (default — fast, no integration build tag)
+test: test-unit ## Run unit tests with coverage (alias for test-unit)
+
+# Test packages — excludes test-serverless-app fixture and vendor.
+TEST_PKGS := $(shell go list ./... 2>/dev/null | grep -v '/test-serverless-app/' | grep -v '/vendor/')
+
+test-unit: ## Run unit tests only (skips //go:build integration)
+	@echo "Running unit tests..."
+	@go test -race $(TEST_PKGS)
+	@echo "Unit tests complete"
+
+test-cover: ## Run unit tests with coverage (single package each — works around covdata issue in go1.25)
+	@echo "Running unit tests with coverage..."
+	@rm -f coverage.out
+	@echo "mode: atomic" > coverage.out
+	@for pkg in $(TEST_PKGS); do \
+		go test -race -covermode=atomic -coverprofile=cover.tmp $$pkg 2>&1 | grep -v "^ok\|^---\|^?" || true; \
+		if [ -f cover.tmp ]; then tail -n +2 cover.tmp >> coverage.out; rm cover.tmp; fi; \
+	done
+	@go tool cover -func=coverage.out | tail -1
+
+test-integration: ## Run integration tests (//go:build integration; needs AWS creds)
+	@echo "Running integration tests..."
+	@go test -race -tags=integration -timeout=10m $(TEST_PKGS)
+	@echo "Integration tests complete"
+
+test-verbose: ## Run unit tests with verbose output
+	@go test -race -v -coverprofile=coverage.out -covermode=atomic $(TEST_PKGS)
+
+test-pkg: ## Run tests for a single package: make test-pkg PKG=./cli/internal/serverless
+	@go test -race -v $(PKG)
+
+bench-startup: build-cli ## Benchmark CLI startup time (10 runs, reports min/median/mean) and compare with vercel/sst if installed
+	@./scripts/bench-startup.sh
 
 # Run linting
-lint: ## Run linting and formatting checks
-	@echo "Running linting..."
-	@command -v golangci-lint >/dev/null 2>&1 || { echo "Installing golangci-lint..."; go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; }
+lint: ## Run linters
+	@echo "Running golangci-lint..."
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "Installing golangci-lint..."; go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; }
 	@golangci-lint run --timeout=5m
-	@echo "Checking formatting..."
-	@if [ "$$(gofmt -s -l . | wc -l)" -gt 0 ]; then echo "Files need formatting:"; gofmt -s -l .; exit 1; fi
 	@echo "Linting complete"
+
+fmt: ## Format all Go files (gofmt + goimports)
+	@echo "Formatting Go files..."
+	@gofmt -s -w .
+	@command -v goimports >/dev/null 2>&1 || go install golang.org/x/tools/cmd/goimports@latest
+	@goimports -w .
+	@echo "Formatting complete"
+
+fmt-check: ## Check formatting without writing (CI-friendly)
+	@if [ "$$(gofmt -s -l . | grep -v vendor | wc -l)" -gt 0 ]; then \
+		echo "Files need formatting:"; gofmt -s -l . | grep -v vendor; exit 1; \
+	fi
+	@echo "Formatting OK"
+
+stats: loc ## Alias for `loc` — show lines of code stats
+
+# Install the project's git pre-commit hook
+pre-commit-install: ## Install .githooks/pre-commit as the active git hook
+	@if [ ! -f .githooks/pre-commit ]; then \
+		echo ".githooks/pre-commit not found"; exit 1; \
+	fi
+	@git config core.hooksPath .githooks
+	@chmod +x .githooks/pre-commit
+	@echo "Pre-commit hook installed (git core.hooksPath = .githooks)"
 
 # Security scanning
 security-scan: ## Run security scans

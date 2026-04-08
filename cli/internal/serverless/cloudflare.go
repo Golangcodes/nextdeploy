@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/Golangcodes/nextdeploy/internal/packaging"
@@ -19,12 +20,32 @@ import (
 
 const cfAPIBase = "https://api.cloudflare.com/client/v4"
 
-// CloudflareProvider implements Provider for Cloudflare Workers + R2 + Pages.
+// CloudflareProvider implements Provider for Cloudflare Workers + R2.
+//
+// IMPORTANT — Next.js compatibility status:
+//
+// Cloudflare Workers do not run vanilla Node.js, so a Next.js standalone
+// build cannot be uploaded as-is. Production deployments require the
+// `@opennextjs/cloudflare` adapter (https://opennext.js.org/cloudflare),
+// which transforms the standalone output into a Worker-compatible bundle.
+//
+// This provider currently:
+//   - Uploads whatever the packager produces as `pkg.LambdaZipPath`
+//   - Provisions R2 buckets, Worker scripts, secrets, and routes
+//   - Does NOT yet invoke the OpenNext adapter — assumes the user has
+//     already adapted their build (or is shipping a static-export site)
+//
+// TODO: integrate the OpenNext adapter into the packager so users can run
+// `nextdeploy deploy --provider cloudflare` end-to-end without manual steps.
+// Track the adapter releases — Cloudflare Workers and Next.js both move
+// fast (e.g. Next 15 renamed `middleware.ts` → `proxy.ts`), so the
+// adapter version pinning matters.
 type CloudflareProvider struct {
-	log       *shared.Logger
-	accountID string
-	apiToken  string
-	client    *http.Client
+	log         *shared.Logger
+	accountID   string
+	apiToken    string
+	environment string // populated in Initialize
+	client      *http.Client
 }
 
 func NewCloudflareProvider() *CloudflareProvider {
@@ -34,9 +55,30 @@ func NewCloudflareProvider() *CloudflareProvider {
 	}
 }
 
+// workerName returns the canonical Cloudflare Worker name for an app.
+// Environment-scoped so staging/production never collide on the same Worker.
+func (p *CloudflareProvider) workerName(appName string) string {
+	env := p.environment
+	if env == "" {
+		env = "production"
+	}
+	return fmt.Sprintf("%s-%s", appName, env)
+}
+
+// bucketName returns the canonical R2 bucket name for an app.
+func (p *CloudflareProvider) bucketNameFromApp(appName string) string {
+	env := p.environment
+	if env == "" {
+		env = "production"
+	}
+	return fmt.Sprintf("nextdeploy-%s-%s-assets", appName, env)
+}
+
 // Initialize validates the Cloudflare API token and resolves the account ID.
 func (p *CloudflareProvider) Initialize(ctx context.Context, cfg *config.NextDeployConfig) error {
 	p.log.Info("Initializing Cloudflare deployment session...")
+
+	p.environment = cfg.App.Environment
 
 	p.apiToken = os.Getenv("CLOUDFLARE_API_TOKEN")
 	if p.apiToken == "" && cfg.CloudProvider != nil {
@@ -70,6 +112,9 @@ func (p *CloudflareProvider) Initialize(ctx context.Context, cfg *config.NextDep
 }
 
 // DeployStatic uploads static assets to an R2 bucket.
+//
+// Concurrency is bounded by `cfR2UploadConcurrency` to avoid hitting CF
+// rate limits on accounts with thousands of small assets.
 func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.PackageResult, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error {
 	p.log.Info("Uploading %d static assets to R2...", len(pkg.S3Assets))
 
@@ -78,9 +123,29 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 		return fmt.Errorf("failed to ensure R2 bucket: %w", err)
 	}
 
+	const cfR2UploadConcurrency = 8
+	sem := make(chan struct{}, cfR2UploadConcurrency)
+	errs := make(chan error, len(pkg.S3Assets))
+	var wg sync.WaitGroup
+
 	for _, asset := range pkg.S3Assets {
-		if err := p.uploadToR2(ctx, bucketName, asset.S3Key, asset.LocalPath, asset.ContentType); err != nil {
-			return fmt.Errorf("failed to upload %s: %w", asset.S3Key, err)
+		asset := asset
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := p.uploadToR2(ctx, bucketName, asset.S3Key, asset.LocalPath, asset.ContentType); err != nil {
+				errs <- fmt.Errorf("upload %s: %w", asset.S3Key, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			return err // first error wins; the others are likely the same root cause
 		}
 	}
 
@@ -89,8 +154,22 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 }
 
 // DeployCompute deploys the Next.js app as a Cloudflare Worker.
+//
+// PRECONDITION: pkg.LambdaZipPath must already be Worker-compatible. For
+// Next.js apps that means running the @opennextjs/cloudflare adapter against
+// the standalone build before this point. We log a loud warning every deploy
+// until the packager wires the adapter in automatically.
 func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageResult, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error {
 	p.log.Info("Deploying compute layer to Cloudflare Workers...")
+
+	if meta != nil && meta.OutputMode != nextcore.OutputModeExport {
+		p.log.Warn("════════════════════ CLOUDFLARE COMPATIBILITY ════════════════════")
+		p.log.Warn("Cloudflare Workers do not run vanilla Node.js. For SSR Next.js apps,")
+		p.log.Warn("you must adapt the build with @opennextjs/cloudflare BEFORE deploy.")
+		p.log.Warn("Static-export sites (output: 'export') deploy as-is via R2.")
+		p.log.Warn("Tracking issue: integrate the adapter into the packager.")
+		p.log.Warn("══════════════════════════════════════════════════════════════════")
+	}
 
 	workerName := p.getWorkerName(cfg)
 	zipContents, err := os.ReadFile(pkg.LambdaZipPath)
@@ -128,7 +207,7 @@ func (p *CloudflareProvider) UpdateSecrets(ctx context.Context, appName string, 
 	}
 	p.log.Info("Pushing %d secrets to Cloudflare Workers...", len(secrets))
 
-	workerName := p.getWorkerNameFromApp(appName)
+	workerName := p.workerName(appName)
 	for key, value := range secrets {
 		if err := p.putWorkerSecret(ctx, workerName, key, value); err != nil {
 			return fmt.Errorf("failed to set secret %s: %w", key, err)
@@ -139,7 +218,7 @@ func (p *CloudflareProvider) UpdateSecrets(ctx context.Context, appName string, 
 
 // GetSecrets retrieves secret names (values are write-only in CF API).
 func (p *CloudflareProvider) GetSecrets(ctx context.Context, appName string) (map[string]string, error) {
-	workerName := p.getWorkerNameFromApp(appName)
+	workerName := p.workerName(appName)
 	url := fmt.Sprintf("/accounts/%s/workers/scripts/%s/secrets", p.accountID, workerName)
 
 	var result struct {
@@ -161,12 +240,12 @@ func (p *CloudflareProvider) GetSecrets(ctx context.Context, appName string) (ma
 
 // SetSecret sets a single Worker secret.
 func (p *CloudflareProvider) SetSecret(ctx context.Context, appName, key, value string) error {
-	return p.putWorkerSecret(ctx, p.getWorkerNameFromApp(appName), key, value)
+	return p.putWorkerSecret(ctx, p.workerName(appName), key, value)
 }
 
 // UnsetSecret deletes a single Worker secret.
 func (p *CloudflareProvider) UnsetSecret(ctx context.Context, appName, key string) error {
-	workerName := p.getWorkerNameFromApp(appName)
+	workerName := p.workerName(appName)
 	url := fmt.Sprintf("/accounts/%s/workers/scripts/%s/secrets/%s", p.accountID, workerName, key)
 	return p.cfRequest(ctx, "DELETE", url, nil, nil)
 }
@@ -193,8 +272,17 @@ func (p *CloudflareProvider) InvalidateCache(ctx context.Context, cfg *config.Ne
 	return nil
 }
 
-// Rollback reverts the Worker to the previous deployment version.
-func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeployConfig) error {
+// Rollback reverts the Worker to a previous deployment version.
+// Cloudflare currently supports Steps-based rollback only; ToCommit is best-effort
+// and ignored for Workers since the CF API does not expose commit metadata.
+func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeployConfig, opts RollbackOptions) error {
+	if opts.ToCommit != "" {
+		p.log.Warn("Cloudflare rollback does not support --to <commit>; using step-based rollback instead")
+	}
+	steps := opts.Steps
+	if steps <= 0 {
+		steps = 1
+	}
 	workerName := p.getWorkerName(cfg)
 	p.log.Info("Fetching deployment history for worker: %s...", workerName)
 
@@ -217,12 +305,12 @@ func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeplo
 	}
 
 	deployments := listResult.Result.Deployments
-	if len(deployments) < 2 {
-		return fmt.Errorf("not enough deployment history to rollback (found %d, need at least 2)", len(deployments))
+	if len(deployments) < steps+1 {
+		return fmt.Errorf("not enough deployment history to rollback %d step(s) (found %d, need at least %d)", steps, len(deployments), steps+1)
 	}
 
-	// Index 0 is the active deployment, index 1 is the previous one
-	previousVersionID := deployments[1].Versions[0].VersionID
+	// Index 0 is the active deployment; index `steps` is the target
+	previousVersionID := deployments[steps].Versions[0].VersionID
 	p.log.Info("Rolling back to version: %s", previousVersionID)
 
 	body := map[string]interface{}{
@@ -268,16 +356,15 @@ func (p *CloudflareProvider) GetResourceMap(ctx context.Context, cfg *config.Nex
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// getWorkerName / getBucketName resolve names from a full config object;
+// the methods on the receiver (workerName, bucketNameFromApp) are used in
+// secret/cmd code paths that only have an appName.
 func (p *CloudflareProvider) getWorkerName(cfg *config.NextDeployConfig) string {
-	return fmt.Sprintf("%s-%s", cfg.App.Name, cfg.App.Environment)
-}
-
-func (p *CloudflareProvider) getWorkerNameFromApp(appName string) string {
-	return fmt.Sprintf("%s-production", appName)
+	return p.workerName(cfg.App.Name)
 }
 
 func (p *CloudflareProvider) getBucketName(cfg *config.NextDeployConfig) string {
-	return fmt.Sprintf("nextdeploy-%s-%s-assets", cfg.App.Name, cfg.App.Environment)
+	return p.bucketNameFromApp(cfg.App.Name)
 }
 
 func (p *CloudflareProvider) cfRequest(ctx context.Context, method, path string, body interface{}, out interface{}) error {

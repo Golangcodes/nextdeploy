@@ -10,6 +10,7 @@ import (
 	"github.com/Golangcodes/nextdeploy/internal/packaging"
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/Golangcodes/nextdeploy/shared/envstore"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 	"github.com/Golangcodes/nextdeploy/shared/secrets"
 )
@@ -100,11 +101,18 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	}
 
 	// ── 6. Invalidate CDN cache ──────────────────────────────────────────────
-	t0 = time.Now()
-	if err := p.InvalidateCache(ctx, cfg); err != nil {
-		log.Error("Cache invalidation failed (non-fatal): %v", err)
-	} else if verbose {
-		log.Info("  CloudFront invalidation completed in %s", time.Since(t0).Round(time.Millisecond))
+	// AWS DeployCompute already triggers an invalidation immediately after the
+	// distribution is created/updated. Skip the redundant orchestration-level
+	// call for AWS to avoid double-billing and double latency. Other providers
+	// (Cloudflare) still need this hop because their compute deploy doesn't
+	// touch the CDN cache.
+	if cfg.Serverless.Provider != "aws" {
+		t0 = time.Now()
+		if err := p.InvalidateCache(ctx, cfg); err != nil {
+			log.Error("Cache invalidation failed (non-fatal): %v", err)
+		} else if verbose {
+			log.Info("  CDN invalidation completed in %s", time.Since(t0).Round(time.Millisecond))
+		}
 	}
 
 	log.Info("Serverless deployment complete! Application is live.")
@@ -133,8 +141,9 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	return nil
 }
 
-// Rollback orchestrates the serverless rollback process.
-func Rollback(ctx context.Context, cfg *config.NextDeployConfig) error {
+// Rollback orchestrates the serverless rollback process. Opts forwards
+// --steps / --to <commit> from the CLI down to the provider implementation.
+func Rollback(ctx context.Context, cfg *config.NextDeployConfig, opts RollbackOptions) error {
 	log := shared.PackageLogger("serverless", "☁️  SERVERLESS")
 
 	// ── 1. Resolve provider ──────────────────────────────────────────────────
@@ -148,7 +157,7 @@ func Rollback(ctx context.Context, cfg *config.NextDeployConfig) error {
 	}
 
 	// ── 2. Trigger Rollback ──────────────────────────────────────────────────
-	if err := p.Rollback(ctx, cfg); err != nil {
+	if err := p.Rollback(ctx, cfg, opts); err != nil {
 		return fmt.Errorf("serverless rollback failed: %w", err)
 	}
 
@@ -156,20 +165,65 @@ func Rollback(ctx context.Context, cfg *config.NextDeployConfig) error {
 	return nil
 }
 
+// loadLocalSecrets merges secrets from every supported source for the current
+// project. Precedence (lowest → highest):
+//
+//  1. Auto-detected dotenv file at project root (`.env`)
+//  2. Files declared in `nextdeploy.yml` under `secrets.files[]` (in order)
+//  3. The managed JSON store at `.nextdeploy/.env`, populated by
+//     `nextdeploy secrets set/load`
+//
+// Higher-precedence sources override lower ones. The managed store wins
+// because it represents explicit user intent via the CLI.
 func loadLocalSecrets(cfg *config.NextDeployConfig) (map[string]string, error) {
-	sm, err := secrets.NewSecretManager(
-		secrets.WithConfig(cfg),
-	)
+	log := shared.PackageLogger("serverless", "🔐 SECRETS")
+	merged := map[string]string{}
+
+	// 1. Project-root .env (dotenv format) — silently skipped if missing.
+	if env, err := envstore.ReadEnvFile(".env"); err == nil {
+		mergeInto(merged, env)
+		log.Info("Loaded %d secrets from .env", len(env))
+	} else if !os.IsNotExist(err) {
+		log.Warn("Failed to read .env (non-fatal): %v", err)
+	}
+
+	// 2. YAML-declared files (cfg.Secrets.Files). Each file is parsed as
+	// dotenv. We do not silently swallow parse errors here — a misconfigured
+	// secrets file should be loud.
+	for _, sf := range cfg.Secrets.Files {
+		if sf.Path == "" {
+			continue
+		}
+		env, err := envstore.ReadEnvFile(sf.Path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read secrets file %s: %w", sf.Path, err)
+		}
+		mergeInto(merged, env)
+		log.Info("Loaded %d secrets from %s", len(env), sf.Path)
+	}
+
+	// 3. Managed JSON store (.nextdeploy/.env). Highest precedence.
+	sm, err := secrets.NewSecretManager(secrets.WithConfig(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("failed to init secret manager: %w", err)
 	}
-
-	envFilePath := filepath.Join(".nextdeploy", ".env")
-	if _, statErr := os.Stat(envFilePath); statErr == nil {
-		if err := sm.ImportSecrets(envFilePath); err != nil {
-			return nil, fmt.Errorf("failed to load secrets from %s: %w", envFilePath, err)
+	managedPath := filepath.Join(".nextdeploy", ".env")
+	if _, statErr := os.Stat(managedPath); statErr == nil {
+		if err := sm.ImportSecrets(managedPath); err != nil {
+			return nil, fmt.Errorf("failed to load secrets from %s: %w", managedPath, err)
 		}
+		managed := sm.FlattenSecrets()
+		mergeInto(merged, managed)
+		log.Info("Loaded %d secrets from managed store", len(managed))
 	}
 
-	return sm.FlattenSecrets(), nil
+	log.Info("Total secrets to sync: %d", len(merged))
+	return merged, nil
+}
+
+// mergeInto copies src into dst, overwriting existing keys.
+func mergeInto(dst, src map[string]string) {
+	for k, v := range src {
+		dst[k] = v
+	}
 }

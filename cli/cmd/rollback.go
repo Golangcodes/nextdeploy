@@ -12,13 +12,32 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	rollbackSteps    int
+	rollbackToCommit string
+)
+
 var rollbackCmd = &cobra.Command{
 	Use:   "rollback",
-	Short: "Rollback to the previous deployment instantly",
-	Long:  "Swaps the active symlink to the previous release and restarts the application via the daemon.",
+	Short: "Rollback to a previous deployment instantly",
+	Long: `Roll back to a previous deployment.
+
+By default, rolls back one step (the deployment immediately before the active one).
+Use --steps N to walk further back (up to the retention limit, currently 5).
+Use --to <commit> to roll back to a specific git commit (full or short SHA prefix);
+the commit must still be within the retention window.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		log := shared.PackageLogger("rollback", "⏪ ROLLBACK")
 		log.Info("Starting NextDeploy rollback process...")
+
+		if rollbackSteps < 0 {
+			log.Error("--steps must be >= 0")
+			os.Exit(1)
+		}
+		if rollbackToCommit != "" && rollbackSteps > 1 {
+			log.Error("--to and --steps are mutually exclusive")
+			os.Exit(1)
+		}
 
 		cfg, err := config.Load()
 		if err != nil {
@@ -34,7 +53,11 @@ var rollbackCmd = &cobra.Command{
 				os.Exit(1)
 			}
 
-			if err := serverless.Rollback(context.Background(), cfg); err != nil {
+			opts := serverless.RollbackOptions{
+				Steps:    rollbackSteps,
+				ToCommit: rollbackToCommit,
+			}
+			if err := serverless.Rollback(context.Background(), cfg, opts); err != nil {
 				log.Error("Serverless rollback failed: %v", err)
 				os.Exit(1)
 			}
@@ -62,7 +85,12 @@ var rollbackCmd = &cobra.Command{
 			}
 
 			log.Info("Triggering daemon to rollback %s on %s...", cfg.App.Name, deploymentServer)
-			daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd rollback --appName=\"%s\"", cfg.App.Name)
+			daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd rollback --appName=%q", cfg.App.Name)
+			if rollbackToCommit != "" {
+				daemonCmd += fmt.Sprintf(" --toCommit=%q", rollbackToCommit)
+			} else if rollbackSteps > 0 {
+				daemonCmd += fmt.Sprintf(" --steps=%d", rollbackSteps)
+			}
 			output, err := srv.ExecuteCommand(context.Background(), deploymentServer, daemonCmd, os.Stdout)
 			if err != nil {
 				log.Error("Rollback failed: %v\nOutput: %s", err, output)
@@ -80,5 +108,7 @@ var rollbackCmd = &cobra.Command{
 }
 
 func init() {
+	rollbackCmd.Flags().IntVar(&rollbackSteps, "steps", 1, "number of deployments to walk back from the active one (max = retention, currently 5)")
+	rollbackCmd.Flags().StringVar(&rollbackToCommit, "to", "", "git commit (full or short SHA prefix) to roll back to; must be within the retention window")
 	rootCmd.AddCommand(rollbackCmd)
 }

@@ -72,8 +72,13 @@ func (p *AWSProvider) ensureExecutionRoleExists(ctx context.Context) (string, er
 		}
 	}
 
-	// Build and attach scoped inline policy
-	// TODO: Verify this policy covers all access paths Lambda needs in different regions/contexts
+	// Build and attach scoped inline policy.
+	// Bucket names follow the pattern produced by getS3BucketName:
+	//   nextdeploy-{app}-{env}-assets-{accountID}
+	// so the resource ARN must wildcard the {app}-{env}-assets segment in the
+	// middle and pin the account ID as the suffix. The previous pattern
+	// (`nextdeploy-{accountID}-*`) never matched any real bucket and silently
+	// 403'd every S3 read from imgopt and the revalidator.
 	inlinePolicy := map[string]interface{}{
 		"Version": "2012-10-17",
 		"Statement": []map[string]interface{}{
@@ -81,8 +86,8 @@ func (p *AWSProvider) ensureExecutionRoleExists(ctx context.Context) (string, er
 				"Effect": "Allow",
 				"Action": []string{"s3:GetObject", "s3:ListBucket"},
 				"Resource": []string{
-					fmt.Sprintf("arn:aws:s3:::nextdeploy-%s-*", p.accountID),
-					fmt.Sprintf("arn:aws:s3:::nextdeploy-%s-*/*", p.accountID),
+					fmt.Sprintf("arn:aws:s3:::nextdeploy-*-%s", p.accountID),
+					fmt.Sprintf("arn:aws:s3:::nextdeploy-*-%s/*", p.accountID),
 				},
 			},
 			{

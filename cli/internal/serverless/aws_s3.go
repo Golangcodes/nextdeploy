@@ -352,20 +352,106 @@ func detectContentType(path string) string {
 	return "application/octet-stream"
 }
 
-// deploymentManifest tracks a list of deployed S3 zip keys for a function.
-type deploymentManifest struct {
-	Deployments []string `json:"deployments"`
+// DeploymentEntry records a single Lambda deployment with the git commit
+// it was built from, so rollbacks can be addressed by commit hash rather than
+// opaque S3 keys.
+type DeploymentEntry struct {
+	S3Key       string `json:"s3_key"`
+	GitCommit   string `json:"git_commit,omitempty"`
+	GitDirty    bool   `json:"git_dirty,omitempty"`
+	GeneratedAt string `json:"generated_at,omitempty"`
 }
 
-const manifestMaxHistory = 10
+// deploymentManifest tracks the history of deployed Lambda zips for a function.
+// SchemaVersion 2 uses Entries; SchemaVersion 1 (or absent) uses Deployments
+// (legacy []string of S3 keys). The reader normalizes both into Entries.
+type deploymentManifest struct {
+	SchemaVersion int               `json:"schema_version,omitempty"`
+	Entries       []DeploymentEntry `json:"entries,omitempty"`
+	// Deployments is the legacy v1 field. It is read for backwards compatibility
+	// and dropped on the next write.
+	Deployments []string `json:"deployments,omitempty"`
+}
 
-// saveLambdaZipToS3 uploads the lambda zip under a versioned key and appends it
-// to the deployment history manifest. Returns the S3 key of the uploaded zip.
-func (p *AWSProvider) saveLambdaZipToS3(ctx context.Context, bucketName, functionName string, zipContents []byte) (string, error) {
+// normalize promotes legacy v1 entries into the v2 Entries slice and clears
+// the legacy field. After normalization, only Entries should be consulted.
+func (m *deploymentManifest) normalize() {
+	if len(m.Entries) == 0 && len(m.Deployments) > 0 {
+		for _, key := range m.Deployments {
+			m.Entries = append(m.Entries, DeploymentEntry{S3Key: key})
+		}
+	}
+	m.Deployments = nil
+	m.SchemaVersion = 2
+}
+
+// manifestMaxHistory caps deployment retention. Matches the VPS daemon's
+// pruneReleases keep value (5) so rollback semantics are uniform across targets.
+const manifestMaxHistory = 5
+
+// selectRollbackTarget picks a deployment from `history` (oldest-first) based on
+// the rollback options. ToCommit takes precedence over Steps; ToCommit matches
+// any entry whose GitCommit has the given hex prefix. With Steps=N (default 1),
+// the target is the entry N positions before the most recent one. The current
+// (last) entry is never returned, since rolling back to the active deployment
+// is a no-op.
+func selectRollbackTarget(history []DeploymentEntry, opts RollbackOptions) (DeploymentEntry, error) {
+	if len(history) == 0 {
+		return DeploymentEntry{}, fmt.Errorf("no deployment history available; ship your app first")
+	}
+
+	if opts.ToCommit != "" {
+		needle := strings.ToLower(strings.TrimSpace(opts.ToCommit))
+		// Walk newest-first so a prefix collision picks the most recent build of that commit.
+		for i := len(history) - 1; i >= 0; i-- {
+			if i == len(history)-1 {
+				continue // skip the active deployment
+			}
+			if strings.HasPrefix(strings.ToLower(history[i].GitCommit), needle) {
+				return history[i], nil
+			}
+		}
+		return DeploymentEntry{}, fmt.Errorf("commit %q not found in deployment history (retention=%d). Older deployments may have been pruned", opts.ToCommit, manifestMaxHistory)
+	}
+
+	steps := opts.Steps
+	if steps <= 0 {
+		steps = 1
+	}
+	if len(history) < steps+1 {
+		return DeploymentEntry{}, fmt.Errorf("not enough deployment history to rollback %d step(s) (found %d, need at least %d). Ship your app more times or use a smaller --steps", steps, len(history), steps+1)
+	}
+	return history[len(history)-1-steps], nil
+}
+
+// shortCommit returns a 7-char prefix of a git commit hash, or "nogit" when
+// the commit is unavailable. Used for human-readable S3 zip keys.
+func shortCommit(full string) string {
+	if len(full) >= 7 {
+		return full[:7]
+	}
+	if full == "" {
+		return "nogit"
+	}
+	return full
+}
+
+// saveLambdaZipToS3 uploads the lambda zip under a versioned key and appends a
+// DeploymentEntry to the history manifest. The S3 key embeds the short git
+// commit so deployments are recognizable in the bucket listing. Returns the
+// S3 key of the uploaded zip.
+func (p *AWSProvider) saveLambdaZipToS3(ctx context.Context, bucketName, functionName string, zipContents []byte, meta *nextcore.NextCorePayload) (string, error) {
 	client := s3.NewFromConfig(p.cfg)
 
 	timestamp := time.Now().UTC().Format("20060102T150405Z")
-	zipKey := fmt.Sprintf("deployments/%s/%s.zip", functionName, timestamp)
+	var commit, generatedAt string
+	var dirty bool
+	if meta != nil {
+		commit = meta.GitCommit
+		dirty = meta.GitDirty
+		generatedAt = meta.GeneratedAt
+	}
+	zipKey := fmt.Sprintf("deployments/%s/%s-%s.zip", functionName, timestamp, shortCommit(commit))
 
 	_, err := client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(bucketName),
@@ -393,11 +479,17 @@ func (p *AWSProvider) saveLambdaZipToS3(ctx context.Context, bucketName, functio
 		}
 		getOut.Body.Close()
 	}
+	manifest.normalize()
 
-	manifest.Deployments = append(manifest.Deployments, zipKey)
+	manifest.Entries = append(manifest.Entries, DeploymentEntry{
+		S3Key:       zipKey,
+		GitCommit:   commit,
+		GitDirty:    dirty,
+		GeneratedAt: generatedAt,
+	})
 	// Trim to max history
-	if len(manifest.Deployments) > manifestMaxHistory {
-		manifest.Deployments = manifest.Deployments[len(manifest.Deployments)-manifestMaxHistory:]
+	if len(manifest.Entries) > manifestMaxHistory {
+		manifest.Entries = manifest.Entries[len(manifest.Entries)-manifestMaxHistory:]
 	}
 
 	manifestBytes, _ := json.Marshal(manifest)
@@ -414,8 +506,10 @@ func (p *AWSProvider) saveLambdaZipToS3(ctx context.Context, bucketName, functio
 	return zipKey, nil
 }
 
-// getLambdaDeploymentHistory returns the list of S3 zip keys from the manifest.
-func (p *AWSProvider) getLambdaDeploymentHistory(ctx context.Context, bucketName, functionName string) ([]string, error) {
+// getLambdaDeploymentHistory returns the deployment entries from the manifest,
+// oldest-first. Legacy v1 manifests (bare []string) are normalized into entries
+// with empty git metadata so callers always see a uniform shape.
+func (p *AWSProvider) getLambdaDeploymentHistory(ctx context.Context, bucketName, functionName string) ([]DeploymentEntry, error) {
 	client := s3.NewFromConfig(p.cfg)
 	manifestKey := fmt.Sprintf("deployments/%s/history.json", functionName)
 
@@ -432,5 +526,6 @@ func (p *AWSProvider) getLambdaDeploymentHistory(ctx context.Context, bucketName
 	if err := json.NewDecoder(out.Body).Decode(&manifest); err != nil {
 		return nil, fmt.Errorf("failed to parse deployment manifest: %w", err)
 	}
-	return manifest.Deployments, nil
+	manifest.normalize()
+	return manifest.Entries, nil
 }

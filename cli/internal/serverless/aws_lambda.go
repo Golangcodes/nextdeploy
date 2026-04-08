@@ -24,31 +24,31 @@ import (
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
+// ImageOptConfig is the JSON contract consumed by the imgopt Lambda binary.
+// AllowedDomains is the flattened list of every Next.js image source — both
+// the legacy `images.domains[]` and the hostnames extracted from
+// `images.remotePatterns[]`. The nextcore feature detector merges both into
+// HasExternalImages, so the imgopt lambda only needs the flat list.
 type ImageOptConfig struct {
-	AllowedDomains []string                      `json:"allowed_domains"`
-	RemotePatterns []nextcore.ImageRemotePattern `json:"remote_patterns"`
-	DeviceSizes    []int                         `json:"device_sizes"`
-	ImageSizes     []int                         `json:"image_sizes"`
-	Formats        []string                      `json:"formats"`
+	AllowedDomains []string `json:"allowed_domains"`
+	DeviceSizes    []int    `json:"device_sizes"`
+	ImageSizes     []int    `json:"image_sizes"`
+	Formats        []string `json:"formats"`
 }
 
 func (p *AWSProvider) extractImageConfig(meta *nextcore.NextCorePayload) string {
-	config := ImageOptConfig{
+	cfg := ImageOptConfig{
 		AllowedDomains: []string{},
-		RemotePatterns: []nextcore.ImageRemotePattern{},
 		DeviceSizes:    []int{640, 750, 828, 1080, 1200, 1920, 2048, 3840},
 		ImageSizes:     []int{16, 32, 48, 64, 96, 128, 256, 384},
 		Formats:        []string{"image/webp"},
 	}
 
-	// Extract from detected features (external image domains)
-	if meta.DetectedFeatures != nil {
-		if len(meta.DetectedFeatures.HasExternalImages) > 0 {
-			config.AllowedDomains = meta.DetectedFeatures.HasExternalImages
-		}
+	if meta.DetectedFeatures != nil && len(meta.DetectedFeatures.HasExternalImages) > 0 {
+		cfg.AllowedDomains = meta.DetectedFeatures.HasExternalImages
 	}
 
-	jsonBytes, _ := json.Marshal(config)
+	jsonBytes, _ := json.Marshal(cfg)
 	return string(jsonBytes)
 }
 
@@ -98,7 +98,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 
 	// 3a. Save zip to S3 for rollback history (non-fatal)
 	bucketForHistory := p.getS3BucketName(appCfg)
-	if s3ZipKey, saveErr := p.saveLambdaZipToS3(ctx, bucketForHistory, functionName, zipContents); saveErr != nil {
+	if s3ZipKey, saveErr := p.saveLambdaZipToS3(ctx, bucketForHistory, functionName, zipContents, meta); saveErr != nil {
 		p.log.Warn("Could not save deployment zip to S3 history (rollback may not work): %v", saveErr)
 	} else {
 		p.log.Info("Deployment zip saved for rollback: %s", s3ZipKey)
@@ -123,8 +123,33 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 		p.log.Warn("Failed to ensure Lambda Function URL (distribution might fail): %v", err)
 	}
 
-	// 6. Ensure Auxiliary Lambdas
+	// 6. Provision auxiliary infrastructure that CloudFront depends on (or is
+	// independent of) BEFORE creating the distribution.
+	//
+	// Ordering rules:
+	//   1. SQS queue (cached for reuse — see C1 in REVIEW.md).
+	//   2. Image-optimization Lambda + URL (CloudFront needs its origin URL).
+	//   3. CloudFront distribution → backfill discovered ID into config.
+	//   4. ISR revalidation Lambda LAST, so it sees a real DISTRIBUTION_ID
+	//      (see C2 in REVIEW.md — first-deploy bug where reval booted with "").
 	p.log.Info("Ensuring Auxiliary Lambdas exist (ISR: %v, ImgOpt: %v)...", appCfg.Serverless.IsrRevalidation, appCfg.Serverless.ImageOptimization)
+
+	// 6a. SQS queue (single source of truth for queueUrl/queueArn)
+	var (
+		revalQueueUrl string
+		revalQueueArn string
+	)
+	if appCfg.Serverless != nil && appCfg.Serverless.IsrRevalidation {
+		qUrl, qArn, qErr := p.ensureRevalidationQueueExists(ctx, appCfg.App.Name)
+		if qErr != nil {
+			p.log.Warn("Failed to ensure Revalidation SQS Queue: %v", qErr)
+		} else {
+			revalQueueUrl = qUrl
+			revalQueueArn = qArn
+		}
+	}
+
+	// 6b. Image-optimization Lambda (CloudFront origin)
 	var imgOptUrl string
 	if appCfg.Serverless != nil && appCfg.Serverless.ImageOptimization {
 		imgOptName := functionName + "-imgopt"
@@ -153,39 +178,8 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 		}
 	}
 
-	if appCfg.Serverless != nil && appCfg.Serverless.IsrRevalidation {
-		// Ensure SQS Queue Exists
-		queueUrl, queueArn, err := p.ensureRevalidationQueueExists(ctx, appCfg.App.Name)
-		if err != nil {
-			p.log.Warn("Failed to ensure Revalidation SQS Queue: %v", err)
-		} else {
-			revalName := functionName + "-reval"
-			p.verboseLog("  ISR Revalidation Lambda name: %s", revalName)
-			zipBytes, err := getEmbeddedLambdaZip("revalidator")
-			if err != nil {
-				p.log.Warn("Failed to load embedded revalidator lambda (is it built?): %v", err)
-			} else {
-				envVars := map[string]string{
-					"DISTRIBUTION_ID": appCfg.Serverless.CloudFrontId,
-					"CACHE_BUCKET":    p.getS3BucketName(appCfg),
-					"QUEUE_URL":       queueUrl,
-				}
-				_, err = p.ensureAuxiliaryLambdaExists(ctx, client, revalName, zipBytes, envVars)
-				if err != nil {
-					p.log.Warn("Failed to ensure Revalidation Lambda: %v", err)
-				} else {
-					err = p.ensureLambdaSQSTrigger(ctx, client, revalName, queueArn)
-					if err != nil {
-						p.log.Warn("Failed to ensure SQS mapping for Revalidation Lambda: %v", err)
-					}
-				}
-			}
-		}
-	}
-
-	// 7. Ensure CloudFront Distribution exists
+	// 6c. CloudFront distribution
 	bucketName := p.getS3BucketName(appCfg)
-	// Determine domain
 	domain := meta.Domain
 	if domain == "" {
 		domain = appCfg.App.Domain
@@ -197,7 +191,14 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 		p.log.Warn("Failed to ensure CloudFront Distribution: %v", err)
 	} else {
 		p.verboseLog("  CloudFront distribution ID: %s", distributionId)
-		// 8. Update S3 Bucket Policy for OAC
+
+		// Backfill so downstream consumers (reval lambda env, resource map)
+		// see the discovered ID even on first deploy. See C2 in REVIEW.md.
+		if appCfg.Serverless != nil {
+			appCfg.Serverless.CloudFrontId = distributionId
+		}
+
+		// 7. Update S3 Bucket Policy for OAC
 		if err := p.updateS3BucketPolicyForOAC(ctx, bucketName, distributionId); err != nil {
 			p.log.Warn("Failed to update S3 Bucket Policy for OAC: %v", err)
 		}
@@ -212,6 +213,28 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 		// Trigger invalidation for the newly managed distribution
 		if err := p.invalidateCloudFront(ctx, distributionId); err != nil {
 			p.log.Warn("Cache invalidation failed (non-fatal): %v", err)
+		}
+	}
+
+	// 6d. ISR revalidation Lambda — created AFTER CloudFront so DISTRIBUTION_ID
+	// is real, and reuses the cached queueUrl/queueArn from 6a.
+	if appCfg.Serverless != nil && appCfg.Serverless.IsrRevalidation && revalQueueUrl != "" {
+		revalName := functionName + "-reval"
+		p.verboseLog("  ISR Revalidation Lambda name: %s", revalName)
+		zipBytes, zipErr := getEmbeddedLambdaZip("revalidator")
+		if zipErr != nil {
+			p.log.Warn("Failed to load embedded revalidator lambda (is it built?): %v", zipErr)
+		} else {
+			envVars := map[string]string{
+				"DISTRIBUTION_ID": appCfg.Serverless.CloudFrontId,
+				"CACHE_BUCKET":    p.getS3BucketName(appCfg),
+				"QUEUE_URL":       revalQueueUrl,
+			}
+			if _, auxErr := p.ensureAuxiliaryLambdaExists(ctx, client, revalName, zipBytes, envVars); auxErr != nil {
+				p.log.Warn("Failed to ensure Revalidation Lambda: %v", auxErr)
+			} else if trigErr := p.ensureLambdaSQSTrigger(ctx, client, revalName, revalQueueArn); trigErr != nil {
+				p.log.Warn("Failed to ensure SQS mapping for Revalidation Lambda: %v", trigErr)
+			}
 		}
 	}
 
@@ -231,7 +254,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 		}
 	}
 
-	secretName := fmt.Sprintf("nextdeploy/apps/%s/production", appCfg.App.Name)
+	secretName := p.secretName(appCfg.App.Name)
 
 	handler := "bridge.handler"
 	if appCfg.Serverless != nil && appCfg.Serverless.Handler != "" {
@@ -242,23 +265,16 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	region := p.cfg.Region
 	secretsExtensionLayer := fmt.Sprintf("arn:aws:lambda:%s:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:11", region)
 
-	// Get revalidation queue URL if ISR is enabled
-	var queueUrl string
-	if appCfg.Serverless != nil && appCfg.Serverless.IsrRevalidation {
-		qUrl, _, err := p.ensureRevalidationQueueExists(ctx, appCfg.App.Name)
-		if err == nil {
-			queueUrl = qUrl
-		}
-	}
-
+	// Reuse the queue URL cached in 6a — avoids a second AWS API call and
+	// ensures we never silently drop ND_REVALIDATION_QUEUE on transient errors.
 	envVars := map[string]string{
 		"ND_SECRET_NAME":  secretName,
 		"NODE_ENV":        "production",
 		"ND_CACHE_BUCKET": fmt.Sprintf("nextdeploy-%s-%s-assets-%s", appCfg.App.Name, appCfg.App.Environment, p.accountID),
 	}
 
-	if queueUrl != "" {
-		envVars["ND_REVALIDATION_QUEUE"] = queueUrl
+	if revalQueueUrl != "" {
+		envVars["ND_REVALIDATION_QUEUE"] = revalQueueUrl
 	}
 
 	maxRetries := 5
@@ -291,13 +307,38 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 			break
 		}
 
-		// Fallback if they lack permissions to grab the AWS-managed Secrets Extension layer
+		// Insecure fallback: only triggered when the IAM principal lacks
+		// lambda:GetLayerVersion AND the user has explicitly opted in via
+		// `serverless.allow_secrets_in_env`. Without opt-in we fail loudly so
+		// secrets are never silently leaked into Lambda env vars / console /
+		// CloudTrail / version history.
 		var apiErr smithy.APIError
 		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException" && strings.Contains(err.Error(), "lambda:GetLayerVersion") && len(layersToApply) > 0 {
+			if !appCfg.Serverless.AllowSecretsInEnv {
+				p.log.Error("════════════════════ DEPLOYMENT BLOCKED ════════════════════")
+				p.log.Error("IAM user lacks 'lambda:GetLayerVersion' for the AWS Secrets Extension Layer.")
+				p.log.Error("")
+				p.log.Error("Recommended fix: add this permission to your IAM policy:")
+				p.log.Error("    {")
+				p.log.Error("      \"Effect\": \"Allow\",")
+				p.log.Error("      \"Action\": \"lambda:GetLayerVersion\",")
+				p.log.Error("      \"Resource\": \"arn:aws:lambda:*:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:*\"")
+				p.log.Error("    }")
+				p.log.Error("")
+				p.log.Error("Insecure escape hatch (NOT RECOMMENDED): set `serverless.allow_secrets_in_env: true`")
+				p.log.Error("in nextdeploy.yml. This injects every secret directly into Lambda environment")
+				p.log.Error("variables, where they are visible in the AWS console, CloudTrail, and persist")
+				p.log.Error("in every published Lambda version forever (you cannot redact a published version).")
+				p.log.Error("════════════════════════════════════════════════════════════")
+				return fmt.Errorf("missing lambda:GetLayerVersion IAM permission; refusing to leak secrets into Lambda env (set serverless.allow_secrets_in_env to override)")
+			}
 			if !layerFallbackApplied {
-				p.log.Warn("IAM user lacks lambda:GetLayerVersion permissions for the Secrets Extension Layer.")
-				p.log.Warn("ACTION REQUIRED: To enable secure cloud secrets, add the 'lambda:GetLayerVersion' permission to your IAM policy.")
-				p.log.Warn("Falling back to standard environment variables for secret injection.")
+				p.log.Warn("════════════════════ INSECURE FALLBACK ════════════════════")
+				p.log.Warn("`serverless.allow_secrets_in_env` is enabled.")
+				p.log.Warn("Injecting secrets directly into Lambda env vars.")
+				p.log.Warn("These will be visible in the AWS console and persist in every Lambda version.")
+				p.log.Warn("Add lambda:GetLayerVersion to IAM and unset this flag as soon as possible.")
+				p.log.Warn("════════════════════════════════════════════════════════════")
 				layersToApply = nil // remove the layer and retry immediately
 				layerFallbackApplied = true
 				i-- // safe: only happens once, guarded by flag
@@ -334,9 +375,14 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	return nil
 }
 
-// Rollback reverts the Lambda function to the previous deployed zip using the S3 deployment history.
+// Rollback reverts the Lambda function to a previous deployed zip using the S3
+// deployment history. Target selection:
+//   - opts.ToCommit: prefix-match against history GitCommit (errors if not found
+//     within retention).
+//   - opts.Steps (default 1): walk N entries back from the current (last) one.
+//
 // This is instant — no HTTP download required.
-func (p *AWSProvider) Rollback(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
+func (p *AWSProvider) Rollback(ctx context.Context, appCfg *cfgTypes.NextDeployConfig, opts RollbackOptions) error {
 	client := lambda.NewFromConfig(p.cfg)
 	functionName := p.getLambdaFunctionName(appCfg)
 	bucketName := p.getS3BucketName(appCfg)
@@ -349,19 +395,26 @@ func (p *AWSProvider) Rollback(ctx context.Context, appCfg *cfgTypes.NextDeployC
 		return fmt.Errorf("rollback failed: %w", err)
 	}
 
-	if len(history) < 2 {
-		return fmt.Errorf("not enough deployment history to rollback (found %d, need at least 2). Ship your app at least once more first", len(history))
+	target, err := selectRollbackTarget(history, opts)
+	if err != nil {
+		return err
 	}
 
-	// Current = last, previous = second-to-last
-	previousKey := history[len(history)-2]
-	p.log.Info("Rolling back to previous deployment: %s", previousKey)
+	if target.GitDirty {
+		p.log.Warn("Target deployment %s was built from a dirty working tree", shortCommit(target.GitCommit))
+	}
+
+	label := target.S3Key
+	if target.GitCommit != "" {
+		label = fmt.Sprintf("%s (commit %s)", target.S3Key, shortCommit(target.GitCommit))
+	}
+	p.log.Info("Rolling back to: %s", label)
 
 	// Update Lambda code directly from S3 — no download needed
 	_, err = client.UpdateFunctionCode(ctx, &lambda.UpdateFunctionCodeInput{
 		FunctionName: aws.String(functionName),
 		S3Bucket:     aws.String(bucketName),
-		S3Key:        aws.String(previousKey),
+		S3Key:        aws.String(target.S3Key),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to restore Lambda code from S3: %w", err)
@@ -372,10 +425,15 @@ func (p *AWSProvider) Rollback(ctx context.Context, appCfg *cfgTypes.NextDeployC
 		p.log.Warn("Timed out waiting for Lambda stability after rollback: %v", err)
 	}
 
-	// Publish the rollback as a new version
+	// Publish the rollback as a new version, tagged with the target commit so
+	// the Lambda console shows what is actually running.
+	pubDesc := fmt.Sprintf("nextdeploy rollback at %s", time.Now().Format(time.RFC3339))
+	if target.GitCommit != "" {
+		pubDesc = fmt.Sprintf("nextdeploy rollback to %s at %s", shortCommit(target.GitCommit), time.Now().Format(time.RFC3339))
+	}
 	_, _ = client.PublishVersion(ctx, &lambda.PublishVersionInput{
 		FunctionName: aws.String(functionName),
-		Description:  aws.String(fmt.Sprintf("nextdeploy rollback at %s", time.Now().Format(time.RFC3339))),
+		Description:  aws.String(pubDesc),
 	})
 
 	// Invalidate CloudFront cache
@@ -455,7 +513,7 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 		Environment: &lambdaTypes.Environment{
 			Variables: map[string]string{
 				"NODE_ENV":       "production",
-				"ND_SECRET_NAME": fmt.Sprintf("nextdeploy/apps/%s/production", appName),
+				"ND_SECRET_NAME": p.secretName(appName),
 			},
 		},
 		Timeout:    aws.Int32(timeout),
@@ -473,12 +531,14 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 			return true, nil
 		}
 
+		// See UpdateFunctionConfiguration block above for the security rationale.
 		var apiErr smithy.APIError
 		if errors.As(createErr, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException" && strings.Contains(createErr.Error(), "lambda:GetLayerVersion") && len(createInput.Layers) > 0 {
+			if !sCfg.AllowSecretsInEnv {
+				return false, fmt.Errorf("missing lambda:GetLayerVersion IAM permission; refusing to leak secrets into Lambda env (set serverless.allow_secrets_in_env to override). underlying: %w", createErr)
+			}
 			if !layerFallbackApplied {
-				p.log.Warn("IAM user lacks lambda:GetLayerVersion permissions for the Secrets Extension Layer.")
-				p.log.Warn("ACTION REQUIRED: To enable secure cloud secrets, add the 'lambda:GetLayerVersion' permission to your IAM policy.")
-				p.log.Warn("Falling back to standard environment variables for secret injection.")
+				p.log.Warn("INSECURE FALLBACK: allow_secrets_in_env enabled, dropping Secrets Extension layer for CreateFunction.")
 				createInput.Layers = nil // remove the layer and retry immediately
 				layerFallbackApplied = true
 				i-- // safe: only happens once, guarded by flag

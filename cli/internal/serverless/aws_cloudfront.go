@@ -79,6 +79,22 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 		p.log.Warn("Failed to ensure Security Response Headers Policy, continuing without it: %v", err)
 	}
 
+	// Custom cache policy for /_next/image* — keys on url/w/q query strings
+	// to avoid size collisions (see C7 in REVIEW.md).
+	imageCachePolicyId, err := p.ensureImageCachePolicy(ctx, client)
+	if err != nil {
+		p.log.Warn("Failed to ensure Image Cache Policy, falling back to CachingOptimized (sizes may collide): %v", err)
+		imageCachePolicyId = cachingOptimizedId
+	}
+
+	// Custom SSR cache policy that honors origin Cache-Control headers
+	// instead of disabling all SSR caching wholesale (see C18 in REVIEW.md).
+	ssrCachePolicyId, err := p.ensureSSRCachePolicy(ctx, client)
+	if err != nil {
+		p.log.Warn("Failed to ensure SSR Cache Policy, falling back to CachingDisabled (no SSR cache): %v", err)
+		ssrCachePolicyId = cachingDisabledId
+	}
+
 	p.log.Info("Checking for existing CloudFront distribution...")
 	var existingDistID string
 	dists, err := p.findManagedDistributions(ctx, client, callerRef, domain)
@@ -101,7 +117,7 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 		}
 
 		distConfig := getConfig.DistributionConfig
-		needsUpdate := p.applyDistributionConfig(ctx, distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, securityHeadersPolicyId, bucketName, functionUrl, imgOptUrl)
+		needsUpdate := p.applyDistributionConfig(ctx, distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, ssrCachePolicyId, imageCachePolicyId, allViewerPolicyId, securityHeadersPolicyId, bucketName, functionUrl, imgOptUrl)
 
 		if needsUpdate {
 			p.log.Info("CloudFront configuration update required, applying changes...")
@@ -118,13 +134,19 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 			p.log.Info("CloudFront configuration is already up to date.")
 		}
 
+		// Re-emit DNS guidance even on update branch so users who re-run
+		// `nextdeploy deploy` while their cert is still pending validation
+		// continue to see what records they need to add. See C13 in REVIEW.md.
+		cfDomain := p.lookupDistributionDomain(ctx, client, existingDistID)
+		p.emitDNSGuide(ctx, domain, certARN, cfDomain, certIssued)
+
 		return existingDistID, nil
 	}
 
 	p.log.Info("CloudFront distribution not found, creating one (this may take a few minutes to be fully active)...")
 
 	distConfig := &cfTypes.DistributionConfig{}
-	p.applyDistributionConfig(ctx, distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, securityHeadersPolicyId, bucketName, functionUrl, imgOptUrl)
+	p.applyDistributionConfig(ctx, distConfig, callerRef, domain, certARN, oacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, ssrCachePolicyId, imageCachePolicyId, allViewerPolicyId, securityHeadersPolicyId, bucketName, functionUrl, imgOptUrl)
 
 	createOutput, err := client.CreateDistribution(ctx, &cloudfront.CreateDistributionInput{
 		DistributionConfig: distConfig,
@@ -140,24 +162,46 @@ func (p *AWSProvider) ensureCloudFrontDistributionExists(ctx context.Context, sC
 
 	cfDomain := *createOutput.Distribution.DomainName
 	p.log.Info("CloudFront distribution created: %s (%s)", *createOutput.Distribution.Id, cfDomain)
-
-	// Emit full DNS guide (CloudFront CNAME + ACM validation)
-	if domain != "" && certARN != "" {
-		acmCfg, acmErr := awsConfig.LoadDefaultConfig(ctx, awsConfig.WithRegion("us-east-1"))
-		if acmErr == nil {
-			acmClient := acm.NewFromConfig(acmCfg)
-			if !certIssued {
-				p.printDNSValidationRecordsWithCF(ctx, acmClient, certARN, domain, cfDomain)
-			} else {
-				p.writeDNSFileCloudFrontOnly(domain, cfDomain)
-			}
-		}
-	}
+	p.emitDNSGuide(ctx, domain, certARN, cfDomain, certIssued)
 
 	return *createOutput.Distribution.Id, nil
 }
 
-func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.DistributionConfig, callerRef, domain, certARN, s3OacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, allViewerPolicyId, securityHeadersPolicyId, bucketName, functionUrl, imgOptUrl string) bool {
+// lookupDistributionDomain fetches the *.cloudfront.net domain for an
+// existing distribution. Returns "" on any failure (caller treats it as
+// "we couldn't enrich the DNS guide with the CF host").
+func (p *AWSProvider) lookupDistributionDomain(ctx context.Context, client *cloudfront.Client, distID string) string {
+	out, err := client.GetDistribution(ctx, &cloudfront.GetDistributionInput{
+		Id: aws.String(distID),
+	})
+	if err != nil || out.Distribution == nil || out.Distribution.DomainName == nil {
+		return ""
+	}
+	return *out.Distribution.DomainName
+}
+
+// emitDNSGuide writes/refreshes dns.md and prints the action-required banner.
+// Safe to call from both the create and update branches; no-ops if there is
+// no domain or no cert (i.e. the user is on the default cloudfront.net host).
+func (p *AWSProvider) emitDNSGuide(ctx context.Context, domain, certARN, cfDomain string, certIssued bool) {
+	if domain == "" || certARN == "" {
+		return
+	}
+	acmCfg, err := awsConfig.LoadDefaultConfig(ctx, awsConfig.WithRegion("us-east-1"))
+	if err != nil {
+		p.log.Warn("Could not load us-east-1 config for DNS guide: %v", err)
+		return
+	}
+	acmClient := acm.NewFromConfig(acmCfg)
+	if certIssued {
+		p.writeDNSFileCloudFrontOnly(domain, cfDomain)
+		return
+	}
+	p.printDNSValidationRecordsWithCF(ctx, acmClient, certARN, domain, cfDomain)
+}
+
+func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.DistributionConfig, callerRef, domain, certARN, s3OacId, lambdaOacId, cachingOptimizedId, cachingDisabledId, ssrCachePolicyId, imageCachePolicyId, allViewerPolicyId, securityHeadersPolicyId, bucketName, functionUrl, imgOptUrl string) bool {
+	_ = cachingDisabledId // discovered by caller for legacy paths; SSR uses ssrCachePolicyId
 	changed := false
 
 	if dc.CallerReference == nil || *dc.CallerReference == "" {
@@ -264,7 +308,7 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 				HTTPSPort:              aws.Int32(443),
 				OriginProtocolPolicy:   cfTypes.OriginProtocolPolicyHttpsOnly,
 				OriginSslProtocols:     &cfTypes.OriginSslProtocols{Quantity: aws.Int32(1), Items: []cfTypes.SslProtocol{cfTypes.SslProtocolTLSv12}},
-				OriginReadTimeout:      aws.Int32(30),
+				OriginReadTimeout:      aws.Int32(p.originReadTimeout()),
 				OriginKeepaliveTimeout: aws.Int32(5),
 			},
 		})
@@ -282,7 +326,7 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 				HTTPSPort:              aws.Int32(443),
 				OriginProtocolPolicy:   cfTypes.OriginProtocolPolicyHttpsOnly,
 				OriginSslProtocols:     &cfTypes.OriginSslProtocols{Quantity: aws.Int32(1), Items: []cfTypes.SslProtocol{cfTypes.SslProtocolTLSv12}},
-				OriginReadTimeout:      aws.Int32(30),
+				OriginReadTimeout:      aws.Int32(p.originReadTimeout()),
 				OriginKeepaliveTimeout: aws.Int32(5),
 			},
 		})
@@ -319,13 +363,18 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 	}
 
 	// 4. Handle Default Cache Behavior
+	//
+	// For Lambda-backed SSR we use the custom SSR cache policy which honors
+	// origin Cache-Control headers (so the app can opt cacheable responses
+	// into edge caching) instead of CachingDisabled which forces every
+	// request to hit Lambda. See C18 in REVIEW.md.
 	targetOrigin := s3OriginId
 	if lambdaHost != "" {
 		targetOrigin = lambdaOriginId
 	}
 	cachePolicy := cachingOptimizedId
 	if lambdaHost != "" {
-		cachePolicy = cachingDisabledId
+		cachePolicy = ssrCachePolicyId
 	}
 
 	var orpId *string
@@ -402,7 +451,9 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 				PathPattern:          aws.String("/_next/image*"),
 				TargetOriginId:       aws.String(imageTargetOrigin),
 				ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
-				CachePolicyId:        aws.String(cachingOptimizedId),
+				// Custom policy keys on url/w/q so different sizes don't collide
+				// (see C7 in REVIEW.md).
+				CachePolicyId:        aws.String(imageCachePolicyId),
 				OriginRequestPolicyId: orpId,
 				SmoothStreaming:      aws.Bool(false),
 				Compress:             aws.Bool(true),
@@ -703,6 +754,137 @@ func (p *AWSProvider) ensureS3OACExists(ctx context.Context, client *cloudfront.
 	}
 
 	return *createOutput.OriginAccessControl.Id, nil
+}
+
+// ensureSSRCachePolicy returns the ID of a custom cache policy used as the
+// default behavior when a Lambda origin is active. Unlike the AWS-managed
+// `Managed-CachingDisabled` policy, this one honors the origin's
+// `Cache-Control` headers — so an SSR response with `Cache-Control: public,
+// max-age=60` is actually cached at the edge for 60 seconds, while
+// uncacheable responses (`no-store`, `private`) still bypass the cache.
+//
+// Cache key includes all query strings and a small set of headers needed for
+// SSR variation (Accept-Language, Cookie). See C18 in REVIEW.md.
+func (p *AWSProvider) ensureSSRCachePolicy(ctx context.Context, client *cloudfront.Client) (string, error) {
+	const policyName = "NextDeploy-SSR-RespectOriginCC-v1"
+
+	var marker *string
+	for {
+		list, err := client.ListCachePolicies(ctx, &cloudfront.ListCachePoliciesInput{Marker: marker})
+		if err != nil {
+			return "", fmt.Errorf("list cache policies: %w", err)
+		}
+		if list.CachePolicyList != nil {
+			for _, item := range list.CachePolicyList.Items {
+				if item.CachePolicy != nil && item.CachePolicy.CachePolicyConfig != nil &&
+					aws.ToString(item.CachePolicy.CachePolicyConfig.Name) == policyName {
+					return aws.ToString(item.CachePolicy.Id), nil
+				}
+			}
+			if list.CachePolicyList.NextMarker == nil || *list.CachePolicyList.NextMarker == "" {
+				break
+			}
+			marker = list.CachePolicyList.NextMarker
+		} else {
+			break
+		}
+	}
+
+	p.log.Info("Creating CloudFront cache policy: %s", policyName)
+	out, err := client.CreateCachePolicy(ctx, &cloudfront.CreateCachePolicyInput{
+		CachePolicyConfig: &cfTypes.CachePolicyConfig{
+			Name:       aws.String(policyName),
+			Comment:    aws.String("NextDeploy: respects origin Cache-Control for SSR responses"),
+			MinTTL:     aws.Int64(0),
+			DefaultTTL: aws.Int64(0),        // origin headers decide
+			MaxTTL:     aws.Int64(31536000), // 1 year ceiling
+			ParametersInCacheKeyAndForwardedToOrigin: &cfTypes.ParametersInCacheKeyAndForwardedToOrigin{
+				EnableAcceptEncodingGzip:   aws.Bool(true),
+				EnableAcceptEncodingBrotli: aws.Bool(true),
+				HeadersConfig: &cfTypes.CachePolicyHeadersConfig{
+					HeaderBehavior: cfTypes.CachePolicyHeaderBehaviorWhitelist,
+					Headers: &cfTypes.Headers{
+						Quantity: aws.Int32(2),
+						Items:    []string{"Accept-Language", "Authorization"},
+					},
+				},
+				CookiesConfig: &cfTypes.CachePolicyCookiesConfig{
+					CookieBehavior: cfTypes.CachePolicyCookieBehaviorAll,
+				},
+				QueryStringsConfig: &cfTypes.CachePolicyQueryStringsConfig{
+					QueryStringBehavior: cfTypes.CachePolicyQueryStringBehaviorAll,
+				},
+			},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("create cache policy %s: %w", policyName, err)
+	}
+	return aws.ToString(out.CachePolicy.Id), nil
+}
+
+// ensureImageCachePolicy returns the ID of a custom cache policy that keys
+// cached responses on the query strings Next.js uses for the image loader
+// (`url`, `w`, `q`). Without this, all sizes of the same source image collide
+// on a single cached response (see C7 in REVIEW.md).
+func (p *AWSProvider) ensureImageCachePolicy(ctx context.Context, client *cloudfront.Client) (string, error) {
+	const policyName = "NextDeploy-NextImage-Cache-v1"
+
+	// 1. Look for existing
+	var marker *string
+	for {
+		list, err := client.ListCachePolicies(ctx, &cloudfront.ListCachePoliciesInput{Marker: marker})
+		if err != nil {
+			return "", fmt.Errorf("list cache policies: %w", err)
+		}
+		if list.CachePolicyList != nil {
+			for _, item := range list.CachePolicyList.Items {
+				if item.CachePolicy != nil && item.CachePolicy.CachePolicyConfig != nil &&
+					aws.ToString(item.CachePolicy.CachePolicyConfig.Name) == policyName {
+					return aws.ToString(item.CachePolicy.Id), nil
+				}
+			}
+			if list.CachePolicyList.NextMarker == nil || *list.CachePolicyList.NextMarker == "" {
+				break
+			}
+			marker = list.CachePolicyList.NextMarker
+		} else {
+			break
+		}
+	}
+
+	// 2. Create
+	p.log.Info("Creating CloudFront cache policy: %s", policyName)
+	out, err := client.CreateCachePolicy(ctx, &cloudfront.CreateCachePolicyInput{
+		CachePolicyConfig: &cfTypes.CachePolicyConfig{
+			Name:       aws.String(policyName),
+			Comment:    aws.String("NextDeploy: cache key includes Next.js image loader query strings (url, w, q)"),
+			MinTTL:     aws.Int64(0),
+			DefaultTTL: aws.Int64(86400),    // 1 day
+			MaxTTL:     aws.Int64(31536000), // 1 year
+			ParametersInCacheKeyAndForwardedToOrigin: &cfTypes.ParametersInCacheKeyAndForwardedToOrigin{
+				EnableAcceptEncodingGzip:   aws.Bool(true),
+				EnableAcceptEncodingBrotli: aws.Bool(true),
+				HeadersConfig: &cfTypes.CachePolicyHeadersConfig{
+					HeaderBehavior: cfTypes.CachePolicyHeaderBehaviorNone,
+				},
+				CookiesConfig: &cfTypes.CachePolicyCookiesConfig{
+					CookieBehavior: cfTypes.CachePolicyCookieBehaviorNone,
+				},
+				QueryStringsConfig: &cfTypes.CachePolicyQueryStringsConfig{
+					QueryStringBehavior: cfTypes.CachePolicyQueryStringBehaviorWhitelist,
+					QueryStrings: &cfTypes.QueryStringNames{
+						Quantity: aws.Int32(3),
+						Items:    []string{"url", "w", "q"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("create cache policy %s: %w", policyName, err)
+	}
+	return aws.ToString(out.CachePolicy.Id), nil
 }
 
 func (p *AWSProvider) ensureSecurityResponseHeadersPolicy(ctx context.Context, client *cloudfront.Client) (string, error) {

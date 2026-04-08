@@ -264,10 +264,37 @@ exports.handler = async (event) => {
 };`
 
 type AWSProvider struct {
-	log       *shared.Logger
-	cfg       aws.Config
-	accountID string
-	verbose   bool
+	log           *shared.Logger
+	cfg           aws.Config
+	accountID     string
+	environment   string // populated in Initialize from appCfg.App.Environment
+	lambdaTimeout int32  // configured Lambda timeout in seconds, used to size CloudFront OriginReadTimeout
+	verbose       bool
+}
+
+// originReadTimeout returns the CloudFront OriginReadTimeout value to use for
+// the Lambda origin. CloudFront caps this at 60 seconds for non-Enterprise
+// distributions, so we clamp to that ceiling. See C19 in REVIEW.md.
+func (p *AWSProvider) originReadTimeout() int32 {
+	t := p.lambdaTimeout
+	if t <= 0 {
+		t = 30
+	}
+	if t > 60 {
+		t = 60
+	}
+	return t
+}
+
+// secretName returns the canonical AWS Secrets Manager name for an app.
+// It is environment-scoped so that staging and production never share secrets.
+// Falls back to "production" only when Environment is unset (legacy configs).
+func (p *AWSProvider) secretName(appName string) string {
+	env := p.environment
+	if env == "" {
+		env = "production"
+	}
+	return fmt.Sprintf("nextdeploy/apps/%s/%s", appName, env)
 }
 
 func NewAWSProvider(verbose bool) *AWSProvider {
@@ -320,6 +347,11 @@ func getEmbeddedLambdaZip(name string) ([]byte, error) {
 
 func (p *AWSProvider) Initialize(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
 	p.log.Info("Initializing AWS Serverless Deployment session...")
+
+	p.environment = appCfg.App.Environment
+	if appCfg.Serverless != nil {
+		p.lambdaTimeout = appCfg.Serverless.Timeout
+	}
 
 	var opts []func(*config.LoadOptions) error
 
@@ -385,7 +417,7 @@ func (p *AWSProvider) Destroy(ctx context.Context, appCfg *cfgTypes.NextDeployCo
 
 	functionName := p.getLambdaFunctionName(appCfg)
 	bucketName := p.getS3BucketName(appCfg)
-	secretName := fmt.Sprintf("nextdeploy/apps/%s/production", appCfg.App.Name)
+	secretName := p.secretName(appCfg.App.Name)
 
 	// 1. CloudFront Distribution (Paginated discovery by comment or CNAME)
 	clientCF := cloudfront.NewFromConfig(p.cfg)

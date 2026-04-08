@@ -161,10 +161,24 @@ func (p *AWSProvider) writeDNSFileCloudFrontOnly(domain, cfDomain string) {
 		p.log.Warn("Could not generate dns.md: %v", err)
 	}
 
+	// Apex (zone root) records cannot be CNAMEs per RFC 1034 §3.6.2; most
+	// authoritative DNS providers reject them. The user needs ALIAS, ANAME,
+	// or a Route53 alias record at the apex. We emit instructions for both
+	// the apex and the www subdomain (which IS allowed to be a CNAME).
+	isApex := !strings.Contains(domain, ".") || strings.Count(domain, ".") == 1
+
 	p.log.Info("════ ACTION REQUIRED: POINT DOMAIN AT CLOUDFRONT ════")
-	p.log.Info("SSL cert is ready! Now add these DNS records:")
-	p.log.Info("  CNAME  @    →  %s", cfDomain)
-	p.log.Info("  CNAME  www  →  %s", cfDomain)
+	p.log.Info("SSL cert is ready. Add the following DNS records:")
+	if isApex {
+		p.log.Info("  ⚠ %s is an apex (zone root) — CNAMEs at the apex are NOT valid per RFC 1034.", domain)
+		p.log.Info("  Use one of:")
+		p.log.Info("    • Route53:  ALIAS A  @    →  %s   (free, recommended if you use Route53)", cfDomain)
+		p.log.Info("    • Cloudflare: CNAME  @    →  %s   (their flattening makes this work)", cfDomain)
+		p.log.Info("    • Other providers: ALIAS / ANAME @ → %s", cfDomain)
+		p.log.Info("  CNAME  www  →  %s   (subdomains can use plain CNAMEs)", cfDomain)
+	} else {
+		p.log.Info("  CNAME  %s  →  %s", domain, cfDomain)
+	}
 	p.log.Info("Detailed Guide: dns.md")
 	p.log.Info("════════════════════════════════════════════")
 }

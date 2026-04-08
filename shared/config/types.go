@@ -48,6 +48,15 @@ type ServerlessConfig struct {
 	IsrRevalidation   bool   `yaml:"isr_revalidation,omitempty"`   // Deploy ISR Revalidation Lambda + SQS
 	ImageOptimization bool   `yaml:"image_optimization,omitempty"` // Deploy Image Optimizer Lambda + CF Behavior
 	Warmer            bool   `yaml:"warmer,omitempty"`             // Deploy EventBridge warmer cron
+
+	// AllowSecretsInEnv opts in to the insecure fallback that injects every
+	// secret directly into the Lambda's environment variables when the IAM
+	// principal lacks lambda:GetLayerVersion (and therefore cannot use the
+	// Secrets Extension layer). Default false; deploys fail loudly with IAM
+	// guidance instead. Only set this to true if you accept that secrets will
+	// be visible in the Lambda console, CloudTrail, and persisted in every
+	// published Lambda version.
+	AllowSecretsInEnv bool `yaml:"allow_secrets_in_env,omitempty"`
 }
 
 type WebServer struct {

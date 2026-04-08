@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -227,11 +228,22 @@ func handleLogsSubcommand() {
 func handleRollbackSubcommand() {
 	appName := ""
 	dopplerToken := ""
+	toCommit := ""
+	steps := 0
 	for _, arg := range os.Args[2:] {
 		if strings.HasPrefix(arg, "--appName=") {
 			appName = strings.TrimPrefix(arg, "--appName=")
 		} else if strings.HasPrefix(arg, "--dopplerToken=") {
 			dopplerToken = strings.TrimPrefix(arg, "--dopplerToken=")
+		} else if strings.HasPrefix(arg, "--toCommit=") {
+			toCommit = strings.TrimPrefix(arg, "--toCommit=")
+		} else if strings.HasPrefix(arg, "--steps=") {
+			n, err := strconv.Atoi(strings.TrimPrefix(arg, "--steps="))
+			if err != nil || n < 0 {
+				fmt.Fprintln(os.Stderr, "Error: --steps must be a non-negative integer")
+				os.Exit(1)
+			}
+			steps = n
 		}
 	}
 	if appName == "" {
@@ -241,6 +253,13 @@ func handleRollbackSubcommand() {
 	args := map[string]interface{}{"appName": appName}
 	if dopplerToken != "" {
 		args["dopplerToken"] = dopplerToken
+	}
+	if toCommit != "" {
+		args["toCommit"] = toCommit
+	}
+	if steps > 0 {
+		// JSON over the wire decodes numbers as float64; encode as such for symmetry.
+		args["steps"] = float64(steps)
 	}
 	sendDaemonCommand(daemontypes.Command{Type: "rollback", Args: args})
 }
