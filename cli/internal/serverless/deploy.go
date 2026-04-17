@@ -69,17 +69,30 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	}
 	log.Info("Package split: %dMB Lambda zip, %d S3 assets", pkgResult.LambdaZipSize/(1024*1024), len(pkgResult.S3Assets))
 
-	// ── 3. Push secrets ──────────────────────────────────────────────────────
-	//FIX: the load secrets is just nextdeploy.yml
-	appSecrets, err := loadLocalSecrets(cfg)
-	if err != nil {
-		// Non-fatal: warn but proceed with empty secrets if none are configured
-		log.Warn("Failed to load local secrets (non-fatal): %v", err)
-		appSecrets = map[string]string{}
+	// ── 3. Push secrets (ordering depends on provider) ───────────────────────
+	// AWS: secrets must land in Secrets Manager BEFORE DeployCompute, because
+	//      the allow_secrets_in_env fallback reads them at deploy time to bake
+	//      into Lambda env vars.
+	// Cloudflare: secrets are attached to an existing worker, so the worker
+	//      must be created by DeployCompute first.
+	secretsBeforeCompute := cfg.Serverless.Provider != "cloudflare"
+
+	pushSecrets := func() error {
+		appSecrets, err := loadLocalSecrets(cfg)
+		if err != nil {
+			log.Warn("Failed to load local secrets (non-fatal): %v", err)
+			appSecrets = map[string]string{}
+		}
+		if err := p.UpdateSecrets(ctx, cfg.App.Name, appSecrets); err != nil {
+			return fmt.Errorf("failed to push secrets to cloud provider: %w", err)
+		}
+		return nil
 	}
 
-	if err := p.UpdateSecrets(ctx, cfg.App.Name, appSecrets); err != nil {
-		return fmt.Errorf("failed to push secrets to cloud provider: %w", err)
+	if secretsBeforeCompute {
+		if err := pushSecrets(); err != nil {
+			return err
+		}
 	}
 
 	// ── 4. Deploy static assets ──────────────────────────────────────────────
@@ -98,6 +111,12 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	}
 	if verbose {
 		log.Info("  Lambda deployment completed in %s", time.Since(t0).Round(time.Millisecond))
+	}
+
+	if !secretsBeforeCompute {
+		if err := pushSecrets(); err != nil {
+			return err
+		}
 	}
 
 	// ── 6. Invalidate CDN cache ──────────────────────────────────────────────

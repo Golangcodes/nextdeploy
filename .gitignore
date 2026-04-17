@@ -62,7 +62,12 @@ test_src_dir/
 !CONTRIBUTING.md
 !cli/internal/serverless/REVIEW.md
 !**/README.md
+!CLOUDFLARE_PARITY.md
 
 # ── Misc ─────────────────────────────────────────────────────────
 /daemon.md
 vendor/
+
+# ── Dev-local ────────────────────────────────────────────────────
+tmp/
+NextDeploy/

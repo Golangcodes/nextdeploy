@@ -8,7 +8,7 @@
 #   - Obvious secrets (.env, AWS keys, private keys)
 #   - Files matching ignored patterns
 #
-# Install with: make pre-commit-install
+# Install with: mage preCommitInstall
 # Bypass (use sparingly, with explicit reason): git commit --no-verify
 
 set -euo pipefail
@@ -86,7 +86,7 @@ if [ -n "$go_files" ]; then
     if [ -n "$bad" ]; then
       err "Go files need gofmt:"
       echo "$bad" | sed 's/^/    /' >&2
-      echo "  Fix with: make fmt" >&2
+      echo "  Fix with: mage fmt" >&2
     fi
   fi
 fi

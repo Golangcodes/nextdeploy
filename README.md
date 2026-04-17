@@ -44,7 +44,7 @@ Every other Next.js deployment tool — Vercel, SST, OpenNext, Netlify CLI, Ampl
 
 NextDeploy is the opposite. It's a single statically-linked Go binary. It boots in **~38 milliseconds** on a stock Linux laptop. It has zero runtime dependencies. It exists to be a working example of what infrastructure tooling looks like when you use the right language for the job.
 
-You don't have to take that on faith — there's a benchmark in the repo. Run `make bench-startup` and it'll time `nextdeploy --version` against any other deploy CLI you have installed (Vercel, SST, Wrangler, Netlify, Amplify). Sample run from this machine:
+You don't have to take that on faith — there's a benchmark in the repo. Run `mage benchStartup` and it'll time `nextdeploy --version` against any other deploy CLI you have installed (Vercel, SST, Wrangler, Netlify, Amplify). Sample run from this machine:
 
 ```
   nextdeploy (this repo)          min   35 ms   median   38 ms   mean   41 ms
@@ -226,7 +226,7 @@ For VPS targets, secrets are written to a `systemd` `EnvironmentFile` on the ser
 |---|---|---|---|
 | **Language** | TypeScript SaaS | TypeScript + CDK/Pulumi | Pure Go |
 | **Setup** | `vercel login` | `npm install`, learn SST DSL | Download a binary |
-| **`--version` boot time** | n/a (SaaS) | seconds (Node + CDK boot) | ~38 ms (measured, see `make bench-startup`) |
+| **`--version` boot time** | n/a (SaaS) | seconds (Node + CDK boot) | ~38 ms (measured, see `mage benchStartup`) |
 | **State management** | Vercel-managed | Pulumi/CDK state file | Stateless reconciliation |
 | **Where it runs** | Vercel infra | Your AWS account | Your AWS account or your VPS |
 | **Self-host?** | No | AWS only | AWS, Cloudflare (WIP), or any SSH-able server |
@@ -313,7 +313,7 @@ Read [`CODE_QUALITY.md`](./CODE_QUALITY.md) before opening a PR. The house style
 Parts of this codebase and documentation were written with AI assistance, and contributions made the same way are explicitly welcome. **You don't need to disclose AI usage in your PRs** — it's expected and normalized here. What we do ask:
 
 - **Read what you submit.** If you can't explain a function in your own words, don't open the PR. Ask the AI to explain it to you first, then write it in the PR description in your words. That's the moment you actually learn.
-- **Test what you submit.** `make test-unit` and `make build-cli` must pass. AI-generated tests count, but only if they actually exercise the change.
+- **Test what you submit.** `mage testUnit` and `mage buildCLI` must pass. AI-generated tests count, but only if they actually exercise the change.
 - **Check for hallucinations.** AI confidently invents AWS API method names, Go stdlib functions, and file paths that don't exist. The compiler catches some of this; integration tests catch more; reviewers catch the rest. Don't trust, verify.
 - **Match the house style.** Read [`CODE_QUALITY.md`](./CODE_QUALITY.md) and point your AI at it. AI assistants follow style guides much better when you give them the guide explicitly.
 - **Don't paste raw AI output as documentation.** Edit it to sound like you. Strip the "Certainly! Here's a comprehensive..." preamble. Cut hedging. Match the tone of the surrounding docs.

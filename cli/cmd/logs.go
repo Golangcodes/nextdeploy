@@ -12,6 +12,7 @@ import (
 	"github.com/Golangcodes/nextdeploy/cli/internal/server"
 	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/Golangcodes/nextdeploy/shared/sensitive"
 	"github.com/spf13/cobra"
 )
 
@@ -100,7 +101,7 @@ func streamAppLogs(ctx context.Context, srv *server.ServerStruct, serverName, ap
 	daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd logs --appName=%s", appName)
 	serviceName, err := srv.ExecuteCommand(ctx, serverName, daemonCmd, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\033[31mError querying app logs: %v\033[0m\n", err)
+		sensitive.Fprintf(os.Stderr, "\033[31mError querying app logs: %v\033[0m\n", err)
 		return
 	}
 	serviceName = strings.TrimSpace(serviceName)

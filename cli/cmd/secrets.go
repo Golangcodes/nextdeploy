@@ -88,7 +88,6 @@ func runSecretAction(action string, args []string) {
 
 	switch target {
 	case "serverless":
-		log.Info("Using Cloud Secrets (AWS Secrets Manager)")
 		runServerlessSecretAction(action, args, appName, cfg, log)
 	case "vps":
 		log.Info("Using Server Secrets (VPS NextDeploy Daemon)")
@@ -100,7 +99,19 @@ func runSecretAction(action string, args []string) {
 }
 
 func runServerlessSecretAction(action string, args []string, appName string, cfg *config.NextDeployConfig, log *shared.Logger) {
-	p, err := serverless.New("aws", false)
+	providerName := "aws"
+	if cfg.Serverless != nil && cfg.Serverless.Provider != "" {
+		providerName = strings.ToLower(cfg.Serverless.Provider)
+	}
+
+	storeName := "AWS Secrets Manager"
+	switch providerName {
+	case "cloudflare":
+		storeName = "Cloudflare Worker secrets"
+	}
+	log.Info("Using Cloud Secrets (%s)", storeName)
+
+	p, err := serverless.New(providerName, false)
 	if err != nil {
 		log.Error("Failed to initialize serverless provider: %v", err)
 		os.Exit(1)
@@ -123,7 +134,7 @@ func runServerlessSecretAction(action string, args []string, appName string, cfg
 			if err := p.SetSecret(ctx, appName, parts[0], parts[1]); err != nil {
 				log.Error("Failed to set secret %s: %v", parts[0], err)
 			} else {
-				log.Success("Secret %s set in AWS Secrets Manager", parts[0])
+				log.Success("Secret %s set in %s", parts[0], storeName)
 			}
 		}
 	case "get":
@@ -132,6 +143,9 @@ func runServerlessSecretAction(action string, args []string, appName string, cfg
 			log.Error("Failed to get secrets: %v", err)
 		} else {
 			if val, ok := secrets[args[0]]; ok {
+				// Intentional plaintext sink: 'secrets get' is the canonical
+				// way to retrieve a value. Do NOT route through sensitive.Printf
+				// — that would scrub registered values and break the command.
 				fmt.Printf("%s=%s\n", args[0], val)
 			} else {
 				log.Warn("Secret %s not found", args[0])
@@ -142,7 +156,7 @@ func runServerlessSecretAction(action string, args []string, appName string, cfg
 		if err != nil {
 			log.Error("Failed to list secrets: %v", err)
 		} else {
-			fmt.Printf("Secrets for %s (AWS Secrets Manager):\n", appName)
+			fmt.Printf("Secrets for %s (%s):\n", appName, storeName)
 			keys := make([]string, 0, len(secrets))
 			for k := range secrets {
 				keys = append(keys, k)
@@ -157,7 +171,7 @@ func runServerlessSecretAction(action string, args []string, appName string, cfg
 			if err := p.UnsetSecret(ctx, appName, key); err != nil {
 				log.Error("Failed to unset secret %s: %v", key, err)
 			} else {
-				log.Success("Secret %s removed from AWS Secrets Manager", key)
+				log.Success("Secret %s removed from %s", key, storeName)
 			}
 		}
 	}

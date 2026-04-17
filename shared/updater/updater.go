@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Golangcodes/nextdeploy/shared/sensitive"
+
 	"github.com/Golangcodes/nextdeploy/shared"
 )
 
@@ -384,7 +386,7 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 		fmt.Printf(" Creating backup: %s\n", filepath.Base(backupBin))
 
 		if err := copyFileWithSudo(currentBin, backupBin); err != nil {
-			fmt.Printf("⚠️  Warning: failed to create backup: %v\n", err)
+			sensitive.Printf("⚠️  Warning: failed to create backup: %v\n", err)
 			backupBin = ""
 		}
 	}
@@ -414,7 +416,7 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 
 	// 14. Set permissions
 	if err := setPermissions(currentBin); err != nil {
-		fmt.Printf("  Warning: could not set permissions: %v\n", err)
+		sensitive.Printf("  Warning: could not set permissions: %v\n", err)
 	}
 
 	// 15. Verify installed version

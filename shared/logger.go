@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Golangcodes/nextdeploy/shared/sensitive"
 )
 
 type LogLevel int
@@ -197,6 +199,7 @@ func (l *Logger) Log(level LogLevel, msg string, args ...interface{}) {
 	}
 
 	formattedMsg := fmt.Sprintf(msg, args...)
+	formattedMsg = sensitive.Scrub(formattedMsg)
 
 	indent := strings.Repeat("  ", l.indentLevel)
 	formattedMsg = indent + strings.Replace(formattedMsg, "\n", "\n"+indent, -1)

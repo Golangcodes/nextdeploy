@@ -9,31 +9,27 @@ import (
 	"strings"
 )
 
-func CollectBuildMetadata() (*NextBuildMetadata, error) {
+// CollectBuildMetadata runs the Next.js build and reads the manifests it
+// produces. It intentionally does NOT compute OutputMode — the canonical
+// source is NextConfig.Output, and the caller threads that into the payload.
+func CollectBuildMetadata(buildCmd string) (*NextBuildMetadata, error) {
 	projectDir, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
-	NextCoreLogger.Debug("Build the next to generate build metadata")
-	PackageManager, err := DetectPackageManager(projectDir)
-	if err != nil {
-		PackageManager = "npm"
-	}
-	buildCommand, err := buildCommand(string(PackageManager))
-	if err != nil {
-		return nil, err
-	}
+	NextCoreLogger.Debug("Building Next.js app to generate build metadata")
+
 	if err := os.MkdirAll(".nextdeploy", 0750); err != nil {
 		return nil, fmt.Errorf("failed to create .nextdeploy directory: %w", err)
 	}
+
 	// #nosec G204
-	cmd := exec.Command("sh", "-c", buildCommand)
+	cmd := exec.Command("sh", "-c", buildCmd)
 	cmd.Dir = projectDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stdout
-
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("build failed:%w", err)
+		return nil, fmt.Errorf("build failed: %w", err)
 	}
 
 	nextDir := filepath.Join(projectDir, ".next")
@@ -42,6 +38,7 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read BUILD_ID: %w", err)
 	}
+
 	readJSON := func(filename string) (interface{}, error) {
 		// #nosec G304
 		data, err := os.ReadFile(filepath.Join(nextDir, filename))
@@ -65,34 +62,22 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 	imagesManifest, _ := readJSON("images-manifest.json")
 	appPathRoutesManifest, _ := readJSON("app-path-routes-manifest.json")
 	reactLoadableManifest, _ := readJSON("react-loadable-manifest.json")
+
 	var diagnostics []string
-	diagnosticsDir := filepath.Join(nextDir, "diagnostics")
-	if files, err := os.ReadDir(diagnosticsDir); err == nil {
+	if files, err := os.ReadDir(filepath.Join(nextDir, "diagnostics")); err == nil {
 		for _, file := range files {
 			diagnostics = append(diagnostics, file.Name())
 		}
 	}
 
-	outputMode := OutputModeDefault
-	if _, err := os.Stat(filepath.Join(nextDir, "standalone")); err == nil {
-		outputMode = OutputModeStandalone
-	} else if b, err := os.ReadFile(filepath.Join(projectDir, "next.config.js")); err == nil { // #nosec G304
-		content := string(b)
-		if strings.Contains(content, "output: 'export'") || strings.Contains(content, "output: \"export\"") {
-			outputMode = OutputModeExport
-		}
-	} else if b, err := os.ReadFile(filepath.Join(projectDir, "next.config.mjs")); err == nil { // #nosec G304
-		content := string(b)
-		if strings.Contains(content, "output: 'export'") || strings.Contains(content, "output: \"export\"") {
-			outputMode = OutputModeExport
-		}
-	}
-
 	hasAppRouter := appPathRoutesManifest != nil
-	if _, err := os.Stat(filepath.Join(projectDir, "app")); err == nil {
-		hasAppRouter = true
-	} else if _, err := os.Stat(filepath.Join(projectDir, "src", "app")); err == nil {
-		hasAppRouter = true
+	if !hasAppRouter {
+		for _, rel := range []string{"app", filepath.Join("src", "app")} {
+			if _, err := os.Stat(filepath.Join(projectDir, rel)); err == nil {
+				hasAppRouter = true
+				break
+			}
+		}
 	}
 
 	return &NextBuildMetadata{
@@ -105,8 +90,38 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 		AppPathRoutesManifest: appPathRoutesManifest,
 		ReactLoadableManifest: reactLoadableManifest,
 		Diagnostics:           diagnostics,
-		OutputMode:            outputMode,
 		HasAppRouter:          hasAppRouter,
 	}, nil
+}
 
+// detectOutputMode resolves the Next.js output mode using the parsed config
+// first (the authoritative source) and falling back to filesystem / raw
+// config-file scanning when the config couldn't be evaluated.
+func detectOutputMode(projectDir string, nextConfig *NextConfig, distDir string) OutputMode {
+	if nextConfig != nil {
+		switch nextConfig.Output {
+		case "export":
+			return OutputModeExport
+		case "standalone":
+			return OutputModeStandalone
+		}
+	}
+	if distDir == "" {
+		distDir = ".next"
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, distDir, "standalone")); err == nil {
+		return OutputModeStandalone
+	}
+	for _, name := range []string{"next.config.js", "next.config.mjs", "next.config.ts"} {
+		// #nosec G304
+		b, err := os.ReadFile(filepath.Join(projectDir, name))
+		if err != nil {
+			continue
+		}
+		s := string(b)
+		if strings.Contains(s, "output: 'export'") || strings.Contains(s, `output: "export"`) {
+			return OutputModeExport
+		}
+	}
+	return OutputModeDefault
 }

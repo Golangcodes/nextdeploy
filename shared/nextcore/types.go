@@ -14,13 +14,7 @@ const (
 
 type NextCorePayload struct {
 	AppName           string            `json:"app_name"`
-	NextVersion       string            `json:"next_version"`
 	NextBuildMetadata NextBuildMetadata `json:"nextbuildmetadata"`
-	StaticRoutes      []string          `json:"static_routes"`
-	DynamicRoutes     []string          `json:"dynamic_routes"`
-	BuildCommand      string            `json:"build_command"`
-	StartCommand      string            `json:"start_command"`
-	HasImageAssets    bool              `json:"has_image_assets"`
 	CDNEnabled        bool              `json:"cdn_enabled"`
 	Domain            string            `json:"domain"`
 	Middleware        *MiddlewareConfig `json:"middleware"`
@@ -28,9 +22,6 @@ type NextCorePayload struct {
 	GitCommit         string            `json:"git_commit,omitempty"`
 	GitDirty          bool              `json:"git_dirty,omitempty"`
 	GeneratedAt       string            `json:"generated_at,omitempty"`
-	BuildLockFile     string            `json:"build_lock_file,omitempty"`
-	MetadataFilePath  string            `json:"metadata_file_path,omitempty"`
-	AssetsOutputDir   string            `json:"assets_output_dir,omitempty"`
 	Config            config.SafeConfig `json:"config,omitempty"`
 	ImageAssets       ImageAssets       `json:"image_assets"`
 	RouteInfo         RouteInfo         `json:"route_info"`
@@ -38,19 +29,7 @@ type NextCorePayload struct {
 	DistDir           string            `json:"dist_dir"`
 	ExportDir         string            `json:"export_dir"`
 	OutputMode        OutputMode        `json:"output_mode"`
-	NextBuild         NextBuild         `json:"next_build"`
-	WorkingDir        string            `json:"working_dir"`
-	RootDir           string            `json:"root_dir"`
 	PackageManager    string            `json:"package_manager"`
-	Entrypoint        string            `json:"entrypoint"`
-}
-
-type DeployMetadata struct {
-	GeneratedAt string            `json:"generated_at"`
-	Routes      RoutesManifest    `json:"routes"`
-	BuildInfo   BuildManifest     `json:"build_info"`
-	Middleware  []string          `json:"middleware"`
-	EnvVars     map[string]string `json:"env_vars"`
 }
 
 type BuildLock struct {
@@ -58,22 +37,6 @@ type BuildLock struct {
 	GitDirty    bool   `json:"git_dirty"`
 	GeneratedAt string `json:"generated_at"`
 	Metadata    string `json:"metadata_file"`
-}
-
-type RoutesManifest struct {
-	Version       int            `json:"version"`
-	Pages         []string       `json:"pages"`
-	DynamicRoutes []DynamicRoute `json:"dynamicRoutes"`
-}
-
-type DynamicRoute struct {
-	Page      string            `json:"page"`
-	Regex     string            `json:"regex"`
-	RouteKeys map[string]string `json:"routeKeys"`
-}
-
-type BuildManifest struct {
-	Pages map[string][]string `json:"pages"`
 }
 
 type StaticAsset struct {
@@ -141,6 +104,7 @@ type NextConfig struct {
 	Compiler                   *CompilerConfig        `json:"compiler,omitempty"`
 	Webpack                    interface{}            `json:"webpack,omitempty"`
 	Webpack5                   bool                   `json:"webpack5,omitempty"`
+	Turbopack                  interface{}            `json:"turbopack,omitempty"`
 	Experimental               *ExperimentalConfig    `json:"experimental,omitempty"`
 	EdgeRegions                []string               `json:"edgeRegions,omitempty"`
 	EdgeRuntime                string                 `json:"edgeRuntime,omitempty"`
@@ -266,114 +230,5 @@ type NextBuildMetadata struct {
 	AppPathRoutesManifest interface{} `json:"appPathRoutesManifest"`
 	ReactLoadableManifest interface{} `json:"reactLoadableManifest"`
 	Diagnostics           []string    `json:"diagnostics"`
-	OutputMode            OutputMode  `json:"outputMode"`
 	HasAppRouter          bool        `json:"hasAppRouter"`
-}
-
-type NextBuild struct {
-	RootFiles      RootFiles     `json:"root_files"`
-	Cache          Cache         `json:"cache"`
-	Server         Server        `json:"server"`
-	Static         Static        `json:"static"`
-	HasAppRouter   bool          `json:"has_app_router"`
-	HasPagesRouter bool          `json:"has_pages_router"`
-	BuildMetadata  BuildMetadata `json:"build_metadata"`
-}
-
-type RootFiles struct {
-	BuildManifest         string `json:"build_manifest"`
-	AppBuildManifest      string `json:"app_build_manifest"`
-	ReactLoadableManifest string `json:"react_loadable_manifest"`
-	PackageJSON           string `json:"package_json"`
-	LastBuildTimestamp    string `json:"last_build_timestamp"`
-	TraceFile             string `json:"trace_file,omitempty"`
-}
-
-type Cache struct {
-	Images  []ImageCacheEntry `json:"images"`
-	Webpack WebpackCache      `json:"webpack"`
-	SWC     []string          `json:"swc"`
-}
-
-type ImageCacheEntry struct {
-	Hash      string `json:"hash"`
-	Format    string `json:"format"`
-	Width     int    `json:"width"`
-	Height    int    `json:"height"`
-	CachePath string `json:"cache_path"`
-}
-
-type WebpackCache struct {
-	ClientDevelopment     []string `json:"client_development"`
-	ClientProduction      []string `json:"client_production"`
-	ServerDevelopment     []string `json:"server_development"`
-	ServerProduction      []string `json:"server_production"`
-	EdgeServerDevelopment []string `json:"edge_server_development"`
-	EdgeServerProduction  []string `json:"edge_server_production"`
-}
-
-type Server struct {
-	Manifests    ServerManifests `json:"manifests"`
-	AppRoutes    []AppRoute      `json:"app_routes"`
-	VendorChunks []string        `json:"vendor_chunks"`
-	Middleware   Middleware      `json:"middleware"`
-}
-
-type ServerManifests struct {
-	AppPaths        string `json:"app_paths"`
-	Middleware      string `json:"middleware"`
-	Pages           string `json:"pages"`
-	Font            string `json:"font"`
-	ServerReference string `json:"server_reference"`
-}
-
-type AppRoute struct {
-	RoutePath       string `json:"route_path"`
-	PageJS          string `json:"page_js"`
-	ClientReference string `json:"client_reference"`
-}
-
-type Middleware struct {
-	Path     string   `json:"path"`
-	Matchers []string `json:"matchers"`
-}
-
-type Static struct {
-	Chunks  Chunks             `json:"chunks"`
-	CSS     []CSSFile          `json:"css"`
-	Media   []MediaFile        `json:"media"`
-	Webpack []WebpackHotUpdate `json:"webpack"`
-}
-
-type Chunks struct {
-	App       []string `json:"app"`
-	Pages     []string `json:"pages"`
-	Polyfills string   `json:"polyfills"`
-	Webpack   string   `json:"webpack"`
-	Main      string   `json:"main"`
-}
-
-type CSSFile struct {
-	Path     string `json:"path"`
-	IsGlobal bool   `json:"is_global"`
-}
-
-type MediaFile struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Ext  string `json:"ext"`
-}
-
-type WebpackHotUpdate struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-}
-
-type BuildMetadata struct {
-	NextVersion   string     `json:"next_version"`
-	BuildTarget   string     `json:"build_target"`
-	BuildID       string     `json:"build_id"`
-	HasTypeScript bool       `json:"has_typescript"`
-	HasESLint     bool       `json:"has_eslint"`
-	OutputMode    OutputMode `json:"output_mode"`
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/Golangcodes/nextdeploy/internal/packaging"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/Golangcodes/nextdeploy/shared/sensitive"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +18,7 @@ var inspectCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		projectDir, err := os.Getwd()
 		if err != nil {
-			fmt.Printf("✗ Error getting current directory: %v\n", err)
+			sensitive.Printf("✗ Error getting current directory: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -38,7 +39,7 @@ var inspectCmd = &cobra.Command{
 
 		report, err := packaging.AuditStandaloneSize(standaloneDir)
 		if err != nil {
-			fmt.Printf("✗ Error auditing bundle: %v\n", err)
+			sensitive.Printf("✗ Error auditing bundle: %v\n", err)
 			os.Exit(1)
 		}
 

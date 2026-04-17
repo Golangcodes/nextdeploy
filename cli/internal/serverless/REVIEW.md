@@ -224,3 +224,74 @@ User's house style: **no file > 300 LOC, no function/struct > 20 LOC**. Current 
 1. **C15** — Split `applyDistributionConfig` into 4 reconcilers
 2. **C21** — Inject SDK clients via interfaces (unlocks testing)
 3. **C25 + secrets** — Restructure package into subpackages by responsibility (see proposal in chat)
+
+---
+
+## Secrets Follow-up Audit (2026-04-17)
+
+Items marked **S**-prefix are additions from a focused re-audit of the secrets path (`aws_secrets.go`, `aws_lambda.go` layer-fallback code, `aws.go::bridgeJS`, `deploy.go::loadLocalSecrets`). They are ordered by ship-readiness, not severity.
+
+### Tier 1 — pure mechanical refactors, no behavior change
+
+#### S1. `fetchSecretsWithVersion` duplicates `GetSecrets`
+**File:** `aws_secrets.go:94` and `:121`
+**Severity:** Low (code quality)
+Same `GetSecretValue` call, same unmarshal, same not-found handling. Collapse into one private fetch + two wrappers. Cuts ~25 lines.
+
+#### S2. `mutateSecrets` → `UpdateSecrets` does three reads per write
+**File:** `aws_secrets.go:53`, `:149`
+**Severity:** Low (cost/latency)
+Flow today: `fetch → mutate → fetch-for-CAS → UpdateSecrets → fetch-for-diff → PUT`. Three `GetSecretValue` per CLI `secrets set`. Pass the already-fetched pre-image into an internal `updateSecretsUnchecked(ctx, name, new, prev)` so the diff-before-write inside `UpdateSecrets` doesn't re-fetch.
+
+#### S3. Banner-style error output uses 15 sequential `log.Error` calls
+**File:** `aws_lambda.go:318–332` and near-duplicate at `:536`
+**Severity:** Trivial (code quality)
+Replace both with a single `log.Error("\n%s", bannerConst)`. Stops the two copies from drifting out of sync.
+
+### Tier 2 — small behavior improvements
+
+#### S4. `bridge.js` has no try/catch around `JSON.parse(SecretString)`
+**File:** `aws.go::bridgeJS` (raw string literal)
+**Severity:** Medium (operability)
+A malformed secret kills the Node process mid-boot with a stacktrace and no CloudWatch-friendly context. Wrap with try/catch, log `secretName + parse error` at ERROR level, then exit with a specific non-zero code so `nextdeploy logs` can hint at the cause. (Follow-up to C22: do this *after* extracting to a real .js file, while the surface is already open.)
+
+#### S5. `lambda:GetLayerVersion` precheck happens too late
+**File:** `aws_lambda.go:316`, `:536`
+**Severity:** Medium
+Today the IAM-missing-permission detection lives inside the UpdateFunctionConfiguration / CreateFunction retry path — after S3 upload, after IAM role creation, sometimes after a partial Lambda update. Move the probe to `Initialize`/`Setup`: call `GetLayerVersion` once as a permission check. If it fails and `AllowSecretsInEnv=false`, bail before any mutation. Keep the current retry-path gating as defense in depth.
+
+### Tier 3 — small feature adds (already tracked in "Secret-area open" above, restating here for ordering)
+
+- **KMS CMK option** — ✅ LANDED. `serverless.kms_key_id` plumbs through to `CreateSecret.KmsKeyId` and `UpdateSecret.KmsKeyId` (see `aws_secrets.go::writeSecretBlob`, `aws.go::Initialize`).
+- **Audit tagging** — ✅ LANDED. `auditTags()` applies `LastDeployedBy` (STS caller ARN), `LastGitCommit` (`shared.Commit` via ldflags), `LastDeployedAt`, `ManagedBy=nextdeploy` to every write. Tags set on Create; refreshed via `TagResource` after Update; failures are warned, not fatal (avoids blocking writes when `secretsmanager:TagResource` is missing). Per-version audit history lives in CloudTrail.
+- **Drop bridge `cachedSecrets` module var** — ✅ LANDED. `cachedSecrets` removed; `startServer` holds the fetched map locally and passes it to the child `node server.js` env only.
+
+### Tier 4 — architectural
+
+- **Extract `secrets/` subpackage.** Today secrets logic spans `deploy.go::loadLocalSecrets`, `aws_secrets.go`, `aws_lambda.go` (layer wiring + fallback gating), and `internal/packaging/runtime/bridge.js`. One subpackage with a clear API gives Cloudflare a template and removes ~500 lines from the god-files. Defer until C21 (SDK injection) lands — that's the natural seam.
+
+### S6. ISR revalidation endpoint + FATAL-on-empty-secrets missing from shipped bridge.js
+**File:** `internal/packaging/runtime/bridge.js` (canonical runtime, post-C22 extraction)
+**Severity:** High (silent production bug)
+Discovered during C22 extraction. Prior to the extraction there were two diverged `bridgeJS` copies: a dead const in `cli/internal/serverless/aws.go` (never shipped) and the packager's literal (actually shipped). The *dead* copy had two features the shipped one lacked:
+
+1. A `POST /_nextdeploy/revalidate` handler that forwards `{tag, path}` payloads to the SQS revalidation queue via `ND_REVALIDATION_QUEUE`. Without it, Next.js `revalidatePath`/`revalidateTag` calls do nothing — the main Lambda has the queue URL in env but no code reads it. ISR appears to work (no error) but cache never flushes.
+2. A FATAL `process.exit(1)` when `ND_SECRET_NAME` is set but the extension returned zero secrets. Without it, the Next.js process starts with a blank `process.env` and typically 500s on its first DB call with cryptic stack traces.
+
+**Plan:** Port both behaviors into `runtime/bridge.js`. Pair with S4 (the JSON.parse hardening) since we'll already be editing the file. Add a minimal Node integration test (feed a fake Lambda event, assert the response shape) before merging — currently zero test coverage on this runtime.
+
+**Status (2026-04-17):** ✅ LANDED.
+
+- `POST /_nextdeploy/revalidate` now forwards `{tag?, path?}` bodies to `ND_REVALIDATION_QUEUE` via `@aws-sdk/client-sqs` (pre-installed in Node 20 Lambda runtime). Returns 202 on enqueue, 400 on bad body, 502 on SQS failure, 503 if `ND_REVALIDATION_QUEUE` is unset.
+- FATAL guard: if `ND_SECRET_NAME` is set AND `ND_SECRETS_MODE !== "env"` AND the extension returned an empty map, `bridge.js` now `process.exit(1)`s with a message pointing at IAM / layer / blob-shape root causes rather than booting into a 500-loop.
+- `ND_SECRETS_MODE=env` is set by the Go side (`aws_lambda.go` UpdateFunctionConfiguration + CreateFunction fallback branches) when the insecure-env fallback applies, so the guard doesn't misfire when secrets are legitimately in `process.env`.
+
+Still open: a standalone `bridge.test.js` under `node --test` — deferred to a separate change; the integration test here is smoke-verification via actual deploy.
+
+## Top 3 to Fix First (updated)
+
+Tier-1 items (S1, S2, S3) are pre-approved cleanup — land them boy-scout style next time anyone touches the file. Real priority for new effort:
+
+1. **S5** — `GetLayerVersion` precheck (stops partial-deploy damage)
+2. **C20** — typed errors for the marked-for-deletion + GetLayerVersion string matches
+3. **C22 + S4** — bridge.js extraction and hardening (paired refactor)

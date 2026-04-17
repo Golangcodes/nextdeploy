@@ -46,7 +46,11 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	log.Info("\nNextDeploy understands your application.\n")
 	prompt := &survey.Select{
 		Message: "Where would you like to deploy your Next.js application?",
-		Options: []string{"VPS (Virtual Private Server - SSH)", "Serverless (AWS CloudFront & Lambda)"},
+		Options: []string{
+			"VPS (Virtual Private Server - SSH)",
+			"Serverless (AWS CloudFront & Lambda)",
+			"Serverless (Cloudflare Workers + R2)",
+		},
 	}
 	var targetChoice string
 	if err := survey.AskOne(prompt, &targetChoice); err != nil {
@@ -54,7 +58,10 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	targetType := "vps"
-	if strings.Contains(targetChoice, "Serverless") {
+	switch {
+	case strings.Contains(targetChoice, "Cloudflare"):
+		targetType = "cloudflare"
+	case strings.Contains(targetChoice, "Serverless"):
 		targetType = "serverless"
 	}
 

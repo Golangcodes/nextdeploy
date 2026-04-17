@@ -45,8 +45,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
           cache-dependency-path: go.sum
+      - name: Install mage
+        run: go install github.com/magefile/mage@latest
       - name: gofmt
-        run: make fmt-check
+        run: mage fmtCheck
 
   build:
     name: Build (${{ matrix.os }})
@@ -62,11 +64,13 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
           cache-dependency-path: go.sum
+      - name: Install mage
+        run: go install github.com/magefile/mage@latest
       - name: Build CLI
-        run: make build-cli
+        run: mage buildCLI
       - name: Build Daemon
         if: runner.os == 'Linux'
-        run: make build-daemon
+        run: mage buildDaemon
 
   test:
     name: Unit Tests
@@ -79,8 +83,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
           cache-dependency-path: go.sum
+      - name: Install mage
+        run: go install github.com/magefile/mage@latest
       - name: Run unit tests
-        run: make test-unit
+        run: mage testUnit
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -1
       - name: Upload coverage

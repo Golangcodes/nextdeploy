@@ -23,7 +23,7 @@ RUNS=10
 NEXTDEPLOY_BIN="${NEXTDEPLOY_BIN:-./bin/nextdeploy}"
 
 if [ ! -x "$NEXTDEPLOY_BIN" ]; then
-  echo "nextdeploy binary not found at $NEXTDEPLOY_BIN — run 'make build-cli' first" >&2
+  echo "nextdeploy binary not found at $NEXTDEPLOY_BIN — run 'mage buildCLI' first" >&2
   exit 1
 fi
 

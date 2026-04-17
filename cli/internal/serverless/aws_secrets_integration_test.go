@@ -2,7 +2,7 @@
 
 // Package serverless integration tests.
 //
-// Run with: make test-integration
+// Run with: mage testIntegration
 //
 // Requires AWS credentials in the environment with permissions for
 // secretsmanager:CreateSecret/UpdateSecret/GetSecretValue/DeleteSecret on

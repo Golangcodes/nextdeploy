@@ -220,6 +220,10 @@ func parseConfigObject(config map[string]interface{}) (*NextConfig, error) {
 		result.Webpack = webpack
 	}
 
+	if turbopack, ok := config["turbopack"]; ok {
+		result.Turbopack = turbopack
+	}
+
 	return result, nil
 }
 

@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/Golangcodes/nextdeploy/shared/sensitive"
 )
 
 func ExtractTarGz(src, dest string) error {
@@ -27,6 +29,43 @@ func ExtractTarGz(src, dest string) error {
 	return nil
 }
 
+// CreateTarGz packs srcDir into a gzipped tar at targetTar. Entries are
+// relative to srcDir (no leading dir component). Uses system `tar` when
+// available so behaviour matches `ExtractTarGz`; no pure-Go fallback yet
+// because every supported dev/CI host ships tar.
+func CreateTarGz(srcDir, targetTar string) error {
+	absTarget, err := filepath.Abs(targetTar)
+	if err != nil {
+		return err
+	}
+	absSrc, err := filepath.Abs(srcDir)
+	if err != nil {
+		return err
+	}
+	if info, err := os.Stat(absSrc); err != nil {
+		return fmt.Errorf("tar source %s: %w", absSrc, err)
+	} else if !info.IsDir() {
+		return fmt.Errorf("tar source %s is not a directory", absSrc)
+	}
+	if err := os.MkdirAll(filepath.Dir(absTarget), 0o750); err != nil {
+		return fmt.Errorf("mkdir for tar target: %w", err)
+	}
+
+	tarPath, err := exec.LookPath("tar")
+	if err != nil {
+		return fmt.Errorf("tar utility not found in PATH: %w", err)
+	}
+
+	// -C srcDir, then pack '.' so entries are stored without a leading
+	// directory — symmetric with ExtractTarGz.
+	// #nosec G204
+	cmd := exec.Command(tarPath, "-czf", absTarget, "-C", absSrc, ".")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tar creation failed: %v - %s", err, string(out))
+	}
+	return nil
+}
+
 func CreateZip(srcDir, targetZip string) error {
 	absTarget, _ := filepath.Abs(targetZip)
 	absSrc, _ := filepath.Abs(srcDir)
@@ -36,7 +75,7 @@ func CreateZip(srcDir, targetZip string) error {
 		cmd := exec.Command(zipPath, "-rq9", absTarget, ".")
 		cmd.Dir = absSrc
 		if out, err := cmd.CombinedOutput(); err != nil {
-			fmt.Printf("System zip failed, falling back: %v - %s\n", err, string(out))
+			sensitive.Printf("System zip failed, falling back: %v - %s\n", err, string(out))
 		} else {
 			return nil
 		}

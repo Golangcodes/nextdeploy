@@ -24,6 +24,178 @@ import (
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
+// secretsExtensionLayerAccount is the AWS-published account ID that hosts the
+// Parameters & Secrets Lambda Extension layer. Pinned per AWS documentation.
+// The *version* is resolved at deploy time via ListLayerVersions and cached on
+// the provider (p.secretsLayerVersion); the default below is only used as a
+// fallback when lambda:ListLayerVersions is unavailable. Last verified: 2026-04.
+const (
+	secretsExtensionLayerAccount        = "177933130628"
+	secretsExtensionLayerName           = "AWS-Parameters-and-Secrets-Lambda-Extension"
+	defaultSecretsExtensionLayerVersion = "11"
+)
+
+// isMissingGetLayerVersion reports whether err is an IAM AccessDenied on
+// lambda:GetLayerVersion — the one error code we want to react to with the
+// opt-in allow_secrets_in_env fallback. Typed API check + substring match:
+// defense in depth in case AWS reformats the message.
+func isMissingGetLayerVersion(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.ErrorCode() != "AccessDeniedException" {
+		return false
+	}
+	return strings.Contains(err.Error(), "lambda:GetLayerVersion")
+}
+
+// secretsExtensionLayerARN returns the layer ARN for the given region using
+// the version cached on the provider, falling back to the pinned default when
+// none has been resolved yet.
+func (p *AWSProvider) secretsExtensionLayerARN(region string) string {
+	version := p.secretsLayerVersion
+	if version == "" {
+		version = defaultSecretsExtensionLayerVersion
+	}
+	return fmt.Sprintf(
+		"arn:aws:lambda:%s:%s:layer:%s:%s",
+		region,
+		secretsExtensionLayerAccount,
+		secretsExtensionLayerName,
+		version,
+	)
+}
+
+// resolveSecretsExtensionLayerVersion asks AWS for the latest published version
+// of the Secrets Extension layer. Returns the version as a string, or "" when
+// the caller lacks lambda:ListLayerVersions or the call fails — the caller
+// should then fall back to defaultSecretsExtensionLayerVersion.
+func (p *AWSProvider) resolveSecretsExtensionLayerVersion(ctx context.Context, client *lambda.Client, region string) string {
+	layerNameARN := fmt.Sprintf(
+		"arn:aws:lambda:%s:%s:layer:%s",
+		region,
+		secretsExtensionLayerAccount,
+		secretsExtensionLayerName,
+	)
+	out, err := client.ListLayerVersions(ctx, &lambda.ListLayerVersionsInput{
+		LayerName: aws.String(layerNameARN),
+		MaxItems:  aws.Int32(1),
+	})
+	if err != nil {
+		p.log.Warn("Could not list Secrets Extension layer versions (falling back to pinned :%s): %v", defaultSecretsExtensionLayerVersion, err)
+		return ""
+	}
+	if len(out.LayerVersions) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", out.LayerVersions[0].Version)
+}
+
+// probeSecretsExtensionLayer calls GetLayerVersion as a lightweight IAM probe.
+// Runs at Initialize time, before any S3 upload or Lambda mutation, so a
+// misconfigured deploy fails before it leaves partial state behind.
+//
+//   - layer resolves + read succeeds → nil (happy path)
+//   - AccessDenied on lambda:GetLayerVersion + AllowSecretsInEnv=false → error
+//     (bail before mutating anything)
+//   - AccessDenied + AllowSecretsInEnv=true → nil (warn now; the existing
+//     retry path in ensureMainLambdaUpdatedToCurrentZip handles the fallback
+//     layer drop — defense in depth).
+//   - any other error → nil (probe is advisory; don't block deploys on
+//     transient list/describe failures)
+func (p *AWSProvider) probeSecretsExtensionLayer(ctx context.Context, appCfg *cfgTypes.NextDeployConfig) error {
+	if appCfg == nil || appCfg.Serverless == nil {
+		return nil
+	}
+	region := p.cfg.Region
+	if region == "" {
+		return nil
+	}
+
+	client := lambda.NewFromConfig(p.cfg)
+
+	// Resolve the latest version up front so every subsequent CreateFunction /
+	// UpdateFunctionConfiguration uses the same ARN. Silent fallback to the
+	// pinned default if List is unavailable — non-fatal.
+	if v := p.resolveSecretsExtensionLayerVersion(ctx, client, region); v != "" {
+		p.secretsLayerVersion = v
+	}
+
+	layerARN := p.secretsExtensionLayerARN(region)
+	probeVersion := p.secretsLayerVersion
+	if probeVersion == "" {
+		probeVersion = defaultSecretsExtensionLayerVersion
+	}
+
+	_, err := client.GetLayerVersion(ctx, &lambda.GetLayerVersionInput{
+		LayerName:     aws.String(layerARN),
+		VersionNumber: mustAtoi64(probeVersion),
+	})
+	if err == nil {
+		return nil
+	}
+
+	if isMissingGetLayerVersion(err) {
+		if !appCfg.Serverless.AllowSecretsInEnv {
+			p.log.Error("\n%s", missingLayerBlockedBanner)
+			return errors.New(missingLayerBlockedErr)
+		}
+		p.log.Warn("\n%s", missingLayerFallbackBanner)
+		return nil
+	}
+
+	p.log.Warn("Secrets Extension layer probe returned a non-IAM error (continuing anyway): %v", err)
+	return nil
+}
+
+func mustAtoi64(s string) *int64 {
+	var n int64
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return nil
+		}
+		n = n*10 + int64(c-'0')
+	}
+	return &n
+}
+
+// missingLayerBlockedBanner is shown when the IAM principal lacks
+// `lambda:GetLayerVersion` AND `serverless.allow_secrets_in_env` is NOT set.
+// We fail loudly rather than silently leaking secrets into Lambda env vars.
+const missingLayerBlockedBanner = `════════════════════ DEPLOYMENT BLOCKED ════════════════════
+IAM user lacks 'lambda:GetLayerVersion' for the AWS Secrets Extension Layer.
+
+Recommended fix: add this permission to your IAM policy:
+    {
+      "Effect": "Allow",
+      "Action": "lambda:GetLayerVersion",
+      "Resource": "arn:aws:lambda:*:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:*"
+    }
+
+Insecure escape hatch (NOT RECOMMENDED): set ` + "`serverless.allow_secrets_in_env: true`" + `
+in nextdeploy.yml. This injects every secret directly into Lambda environment
+variables, where they are visible in the AWS console, CloudTrail, and persist
+in every published Lambda version forever (you cannot redact a published version).
+════════════════════════════════════════════════════════════`
+
+// missingLayerFallbackBanner is shown when the user has opted into the
+// insecure fallback and we're about to drop the Secrets Extension layer.
+const missingLayerFallbackBanner = `════════════════════ INSECURE FALLBACK ════════════════════
+` + "`serverless.allow_secrets_in_env`" + ` is enabled.
+Injecting secrets directly into Lambda env vars.
+These will be visible in the AWS console and persist in every Lambda version.
+Add lambda:GetLayerVersion to IAM and unset this flag as soon as possible.
+════════════════════════════════════════════════════════════`
+
+// missingLayerBlockedErr is the error returned to the caller when a deploy is
+// refused for lack of lambda:GetLayerVersion. Wrapped with %w at the call site
+// so errors.Is/As keep working.
+const missingLayerBlockedErr = "missing lambda:GetLayerVersion IAM permission; refusing to leak secrets into Lambda env (set serverless.allow_secrets_in_env to override)"
+
 // ImageOptConfig is the JSON contract consumed by the imgopt Lambda binary.
 // AllowedDomains is the flattened list of every Next.js image source — both
 // the legacy `images.domains[]` and the hostnames extracted from
@@ -262,8 +434,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	}
 
 	p.log.Info("Updating Lambda configuration (Handler: %s)...", handler)
-	region := p.cfg.Region
-	secretsExtensionLayer := fmt.Sprintf("arn:aws:lambda:%s:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:11", region)
+	secretsExtensionLayer := p.secretsExtensionLayerARN(p.cfg.Region)
 
 	// Reuse the queue URL cached in 6a — avoids a second AWS API call and
 	// ensures we never silently drop ND_REVALIDATION_QUEUE on transient errors.
@@ -311,35 +482,19 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 		// lambda:GetLayerVersion AND the user has explicitly opted in via
 		// `serverless.allow_secrets_in_env`. Without opt-in we fail loudly so
 		// secrets are never silently leaked into Lambda env vars / console /
-		// CloudTrail / version history.
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException" && strings.Contains(err.Error(), "lambda:GetLayerVersion") && len(layersToApply) > 0 {
+		// CloudTrail / version history. Usually the S5 precheck in Initialize
+		// has already bailed; this branch is defense in depth.
+		if isMissingGetLayerVersion(err) && len(layersToApply) > 0 {
 			if !appCfg.Serverless.AllowSecretsInEnv {
-				p.log.Error("════════════════════ DEPLOYMENT BLOCKED ════════════════════")
-				p.log.Error("IAM user lacks 'lambda:GetLayerVersion' for the AWS Secrets Extension Layer.")
-				p.log.Error("")
-				p.log.Error("Recommended fix: add this permission to your IAM policy:")
-				p.log.Error("    {")
-				p.log.Error("      \"Effect\": \"Allow\",")
-				p.log.Error("      \"Action\": \"lambda:GetLayerVersion\",")
-				p.log.Error("      \"Resource\": \"arn:aws:lambda:*:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:*\"")
-				p.log.Error("    }")
-				p.log.Error("")
-				p.log.Error("Insecure escape hatch (NOT RECOMMENDED): set `serverless.allow_secrets_in_env: true`")
-				p.log.Error("in nextdeploy.yml. This injects every secret directly into Lambda environment")
-				p.log.Error("variables, where they are visible in the AWS console, CloudTrail, and persist")
-				p.log.Error("in every published Lambda version forever (you cannot redact a published version).")
-				p.log.Error("════════════════════════════════════════════════════════════")
-				return fmt.Errorf("missing lambda:GetLayerVersion IAM permission; refusing to leak secrets into Lambda env (set serverless.allow_secrets_in_env to override)")
+				p.log.Error("\n%s", missingLayerBlockedBanner)
+				return errors.New(missingLayerBlockedErr)
 			}
 			if !layerFallbackApplied {
-				p.log.Warn("════════════════════ INSECURE FALLBACK ════════════════════")
-				p.log.Warn("`serverless.allow_secrets_in_env` is enabled.")
-				p.log.Warn("Injecting secrets directly into Lambda env vars.")
-				p.log.Warn("These will be visible in the AWS console and persist in every Lambda version.")
-				p.log.Warn("Add lambda:GetLayerVersion to IAM and unset this flag as soon as possible.")
-				p.log.Warn("════════════════════════════════════════════════════════════")
+				p.log.Warn("\n%s", missingLayerFallbackBanner)
 				layersToApply = nil // remove the layer and retry immediately
+				// Signal fallback to bridge.js so it skips the extension fetch
+				// and does not FATAL on "no secrets returned".
+				envVars["ND_SECRETS_MODE"] = "env"
 				layerFallbackApplied = true
 				i-- // safe: only happens once, guarded by flag
 				continue
@@ -498,9 +653,7 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 	p.log.Info("Lambda function %s does not exist, creating with role %s (Handler: %s, Runtime: %s)...", name, roleArn, handler, runtime)
 
 	// Managed Layer for Secrets Extension (Node.js 20 compatible)
-	// arn:aws:lambda:<region>:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:11
-	region := p.cfg.Region
-	secretsExtensionLayer := fmt.Sprintf("arn:aws:lambda:%s:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:11", region)
+	secretsExtensionLayer := p.secretsExtensionLayerARN(p.cfg.Region)
 
 	createInput := &lambda.CreateFunctionInput{
 		Code: &lambdaTypes.FunctionCode{
@@ -532,14 +685,19 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 		}
 
 		// See UpdateFunctionConfiguration block above for the security rationale.
-		var apiErr smithy.APIError
-		if errors.As(createErr, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException" && strings.Contains(createErr.Error(), "lambda:GetLayerVersion") && len(createInput.Layers) > 0 {
+		if isMissingGetLayerVersion(createErr) && len(createInput.Layers) > 0 {
 			if !sCfg.AllowSecretsInEnv {
-				return false, fmt.Errorf("missing lambda:GetLayerVersion IAM permission; refusing to leak secrets into Lambda env (set serverless.allow_secrets_in_env to override). underlying: %w", createErr)
+				p.log.Error("\n%s", missingLayerBlockedBanner)
+				return false, fmt.Errorf("%s. underlying: %w", missingLayerBlockedErr, createErr)
 			}
 			if !layerFallbackApplied {
-				p.log.Warn("INSECURE FALLBACK: allow_secrets_in_env enabled, dropping Secrets Extension layer for CreateFunction.")
+				p.log.Warn("\n%s", missingLayerFallbackBanner)
 				createInput.Layers = nil // remove the layer and retry immediately
+				// Mirror the UpdateFunctionConfiguration fallback: tell bridge.js
+				// to skip the extension fetch and avoid the FATAL-on-empty guard.
+				if createInput.Environment != nil && createInput.Environment.Variables != nil {
+					createInput.Environment.Variables["ND_SECRETS_MODE"] = "env"
+				}
 				layerFallbackApplied = true
 				i-- // safe: only happens once, guarded by flag
 				continue

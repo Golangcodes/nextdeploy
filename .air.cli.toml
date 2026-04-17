@@ -2,7 +2,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "make build-cli-dev"
+  cmd = "mage buildCLIDev"
   bin = "/home/hersi/.nextdeploy/bin/nextdeploy"
   full_bin = ""
   include_ext = ["go", "toml"]
