@@ -19,6 +19,13 @@ import (
 // common dev hardware.
 const scanConcurrency = 32
 
+// Compiled-path prefixes that classify where a module lives in Next's
+// standalone output. `app/` for App Router, `pages/` for Pages Router.
+const (
+	appRouterPrefix  = "app/"
+	pagesRouterPrefix = "pages/"
+)
+
 // ScanCompiledServer walks the server subtree of a Next standalone build
 // in parallel and returns a ModuleRef per compiled route/handler/middleware.
 // Non-server assets (client chunks, static files) are skipped — those flow
@@ -335,10 +342,10 @@ func routePathFromCompiled(rel string) string {
 		return "/_middleware"
 	case rel == "proxy.js" || rel == "proxy.mjs":
 		return "/_proxy"
-	case strings.HasPrefix(rel, "app/"):
-		return appRouteFromPath(strings.TrimPrefix(rel, "app/"))
-	case strings.HasPrefix(rel, "pages/"):
-		return pagesRouteFromPath(strings.TrimPrefix(rel, "pages/"))
+	case strings.HasPrefix(rel, appRouterPrefix):
+		return appRouteFromPath(strings.TrimPrefix(rel, appRouterPrefix))
+	case strings.HasPrefix(rel, pagesRouterPrefix):
+		return pagesRouteFromPath(strings.TrimPrefix(rel, pagesRouterPrefix))
 	}
 	return ""
 }
@@ -420,7 +427,7 @@ func kindFromCompiled(rel string) RouteKind {
 		return RouteKindPage
 	case strings.HasSuffix(rel, "/layout.js") || strings.HasSuffix(rel, "/layout.mjs"):
 		return RouteKindLayout
-	case strings.HasPrefix(rel, "pages/"):
+	case strings.HasPrefix(rel, pagesRouterPrefix):
 		return RouteKindPage
 	}
 	return RouteKindUnknown

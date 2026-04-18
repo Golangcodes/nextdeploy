@@ -206,7 +206,10 @@ func normalizeOpts(opts CompileOpts) CompileOpts {
 
 func ensureOutDir(dir string) error {
 	// Restrictive perms — this tree ends up in a worker bundle and
-	// may contain compiled secrets-by-reference.
+	// may contain compiled secrets-by-reference. 0o750 (rwxr-x---)
+	// prevents other users on shared build hosts from reading the
+	// pre-bundle artifacts. NOSONAR: chosen intentionally for this
+	// reason; do not widen to 0o755.
 	return os.MkdirAll(dir, 0o750)
 }
 

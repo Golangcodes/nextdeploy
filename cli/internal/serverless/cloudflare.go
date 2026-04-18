@@ -369,50 +369,75 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 	}
 	p.log.Info("Worker deployed: %s", workerName)
 
-	// Cron triggers — only touched when cloudflare.triggers is explicitly set
-	// in yaml. Nil means "leave whatever's in the dashboard alone".
-	if cfBlock != nil && cfBlock.Triggers != nil {
-		if err := p.applyCronTriggers(ctx, workerName, cfBlock.Triggers.Crons); err != nil {
-			return fmt.Errorf("apply cron triggers: %w", err)
+	if err := p.applyWorkerTriggers(ctx, workerName, cfBlock); err != nil {
+		return err
+	}
+	if err := p.wireQueueConsumers(ctx, workerName, cfBlock); err != nil {
+		return err
+	}
+	p.attachEdgeRoutes(ctx, workerName, cfg, cfBlock)
+
+	return nil
+}
+
+// applyWorkerTriggers applies cron schedules declared under the cloudflare
+// block. Nil means "leave whatever's in the dashboard alone".
+func (p *CloudflareProvider) applyWorkerTriggers(ctx context.Context, workerName string, cfBlock *config.CloudflareConfig) error {
+	if cfBlock == nil || cfBlock.Triggers == nil {
+		return nil
+	}
+	if err := p.applyCronTriggers(ctx, workerName, cfBlock.Triggers.Crons); err != nil {
+		return fmt.Errorf("apply cron triggers: %w", err)
+	}
+	return nil
+}
+
+// wireQueueConsumers attaches each declared queue consumer to the worker.
+// Producer queues themselves are created by ProvisionResources; consumers
+// connect them to the script.
+func (p *CloudflareProvider) wireQueueConsumers(ctx context.Context, workerName string, cfBlock *config.CloudflareConfig) error {
+	if cfBlock == nil || cfBlock.Bindings == nil || cfBlock.Bindings.Queues == nil {
+		return nil
+	}
+	for _, c := range cfBlock.Bindings.Queues.Consumers {
+		if err := p.ensureQueueConsumer(ctx, workerName, c); err != nil {
+			return fmt.Errorf("wire queue consumer for %q: %w", c.Queue, err)
 		}
 	}
+	return nil
+}
 
-	// Queue consumers — must run AFTER the worker exists. Each consumer
-	// declaration wires this worker as the handler for the named queue, with
-	// optional DLQ + retry settings. Producer queues themselves are created
-	// by ProvisionResources; consumers connect them to the script.
-	if cfBlock != nil && cfBlock.Bindings != nil && cfBlock.Bindings.Queues != nil {
-		for _, c := range cfBlock.Bindings.Queues.Consumers {
-			if err := p.ensureQueueConsumer(ctx, workerName, c); err != nil {
-				return fmt.Errorf("wire queue consumer for %q: %w", c.Queue, err)
-			}
-		}
-	}
-
-	// Custom Domains (preferred edge attachment per Pesastream §4)
+// attachEdgeRoutes wires custom domains + explicit routes. Each attempt is
+// independent and non-fatal so one bad hostname doesn't sink the deploy.
+// Falls back to the legacy app.domain route when cfBlock has no explicit
+// edge configuration.
+func (p *CloudflareProvider) attachEdgeRoutes(ctx context.Context, workerName string, cfg *config.NextDeployConfig, cfBlock *config.CloudflareConfig) {
 	if cfBlock != nil {
 		for _, cd := range cfBlock.CustomDomains {
 			if err := p.ensureCustomDomain(ctx, workerName, cd); err != nil {
 				p.log.Warn("Failed to attach custom domain %s (non-fatal): %v", cd.Hostname, err)
 			}
 		}
-		// Explicit routes from cloudflare.routes (zone-route pattern)
 		for _, rt := range cfBlock.Routes {
 			if err := p.ensureWorkerRouteForZone(ctx, workerName, rt.Pattern, rt.Zone); err != nil {
 				p.log.Warn("Failed to set worker route %s (non-fatal): %v", rt.Pattern, err)
 			}
 		}
 	}
-
-	// Legacy single-domain route from app.domain — kept for back-compat with
-	// existing nextdeploy.yml files that don't use the cloudflare block.
-	if cfg.App.Domain != "" && (cfBlock == nil || (len(cfBlock.CustomDomains) == 0 && len(cfBlock.Routes) == 0)) {
+	// Legacy single-domain fallback — only when the cloudflare block has
+	// no explicit edge configuration of its own.
+	if cfg.App.Domain != "" && hasNoExplicitEdge(cfBlock) {
 		if err := p.ensureWorkerRoute(ctx, workerName, cfg.App.Domain); err != nil {
 			p.log.Warn("Failed to set worker route for %s (non-fatal): %v", cfg.App.Domain, err)
 		}
 	}
+}
 
-	return nil
+func hasNoExplicitEdge(cfBlock *config.CloudflareConfig) bool {
+	if cfBlock == nil {
+		return true
+	}
+	return len(cfBlock.CustomDomains) == 0 && len(cfBlock.Routes) == 0
 }
 
 // ensureCustomDomain attaches a hostname to the worker via Workers.Domains.Update.

@@ -284,8 +284,11 @@ type Logger interface {
 }
 
 // nopLogger is the zero-value sink used when CompileOpts.Log is nil.
+// Tests + callers that don't care about output get a coherent Logger
+// without having to import shared/. The three methods are intentionally
+// empty — this is a discard sink, not a stub.
 type nopLogger struct{}
 
-func (nopLogger) Info(string, ...any)  {}
-func (nopLogger) Warn(string, ...any)  {}
-func (nopLogger) Debug(string, ...any) {}
+func (nopLogger) Info(string, ...any)  { /* intentional no-op: discard sink */ }
+func (nopLogger) Warn(string, ...any)  { /* intentional no-op: discard sink */ }
+func (nopLogger) Debug(string, ...any) { /* intentional no-op: discard sink */ }

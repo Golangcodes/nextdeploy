@@ -45,7 +45,7 @@ export class NextRequest extends Request {
         const target = encodeURIComponent(name);
         for (const pair of header.split(/;\s*/)) {
           const [k, v] = pair.split("=");
-          if (k && k.trim() === target) return { name, value: decodeURIComponent(v || "") };
+          if (k?.trim() === target) return { name, value: decodeURIComponent(v || "") };
         }
         return undefined;
       },

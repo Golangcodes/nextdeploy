@@ -45,7 +45,7 @@ let tagIndex = null;
  * invalidation can fan out to the right paths.
  */
 export function initCacheIndex(manifestISR) {
-  tagIndex = (manifestISR && manifestISR.tags) || {};
+  tagIndex = manifestISR?.tags || {};
 }
 
 // ── Public API matching next/cache ───────────────────────────────────────────
@@ -108,23 +108,37 @@ const memoCache = new Map();
 
 export function unstable_cache(fn, key, opts) {
   const keyHash = Array.isArray(key) ? key.join("|") : String(key);
-  const tags = (opts && opts.tags) || [];
-  const revalidate = opts && opts.revalidate;
+  const tags = opts?.tags || [];
+  const revalidate = opts?.revalidate;
 
   return async function cached(...args) {
     const fullKey = keyHash + "|" + JSON.stringify(args);
     const hit = memoCache.get(fullKey);
-    const now = Date.now();
-    if (hit && (!revalidate || now - hit.at < revalidate * 1000)) {
-      // Tag-based invalidation beats TTL.
-      let tagged = false;
-      for (const t of tags) if (staleTags.has(t)) tagged = true;
-      if (!tagged) return hit.value;
-    }
+    if (isCacheHitUsable(hit, revalidate, tags)) return hit.value;
     const value = await fn(...args);
-    memoCache.set(fullKey, { value, at: now });
+    memoCache.set(fullKey, { value, at: Date.now() });
     return value;
   };
+}
+
+/**
+ * isCacheHitUsable decides whether the stored memoCache entry is still
+ * valid for the current invocation. Two axes: TTL vs revalidate window,
+ * and tag-based invalidation. Tag staleness wins over TTL freshness —
+ * matches Next's semantics.
+ */
+function isCacheHitUsable(hit, revalidate, tags) {
+  if (!hit) return false;
+  if (isTaggedStale(tags)) return false;
+  if (!revalidate) return true;
+  return Date.now() - hit.at < revalidate * 1000;
+}
+
+function isTaggedStale(tags) {
+  for (const t of tags) {
+    if (staleTags.has(t)) return true;
+  }
+  return false;
 }
 
 // ── Tier 2: KV binding persistence ───────────────────────────────────────────

@@ -47,97 +47,118 @@ let cacheIndexInitialized = false;
  * @returns {Promise<Response>}
  */
 export async function dispatch(request, env, ctx, tables) {
-  const {
-    manifest,
-    staticTable,
-    dynamicTable,
-    middlewareRef,
-    proxyRef,
-    actionManifest,
-    actionLoaders,
-  } = tables;
-  if (!cacheIndexInitialized) {
-    initCacheIndex(manifest.isr);
-    cacheIndexInitialized = true;
-  }
+  const { manifest } = tables;
+  ensureCacheIndexInit(manifest);
 
   const url = new URL(request.url);
   const pathname = stripBasePath(url.pathname, manifest.basePath);
 
   try {
-    // 0a. /_next/image — short-circuit to image.mjs before anything else.
-    //     Matches Next's dispatch priority.
-    if (pathname === "/_next/image" || pathname.startsWith("/_next/image?")) {
-      return await handleImageRequest(request, env, manifest);
-    }
+    const short = await tryShortCircuits(request, env, ctx, pathname, tables);
+    if (short) return short;
 
-    // 0b. Server Actions — POST + Next-Action header. Dispatched ahead of
-    //     middleware because Next's contract puts actions outside the
-    //     middleware pipeline (middleware can intercept navigation, not
-    //     action POSTs). The CSRF check lives inside handleServerAction.
-    if (actionManifest && isServerAction(request)) {
-      return await handleServerAction(request, env, ctx, actionManifest, actionLoaders);
-    }
+    // Middleware / proxy may rewrite the request. Thread the (possibly
+    // new) request back into subsequent stages.
+    const mw = await runMiddlewareStack(request, env, ctx, tables);
+    if (mw.response) return mw.response;
+    request = mw.request;
 
-    // 1-2. proxy.ts preferred over middleware.ts when both exist. Each
-    //      may return a Response (short-circuit) or nothing (continue).
-    //      Both run inside the ALS context so they can call cookies() etc.
-    for (const ref of [proxyRef, middlewareRef]) {
-      if (!ref) continue;
-      const mwResult = await runMiddlewareLike(ref, request, env, ctx);
-      if (mwResult instanceof Response) return mwResult;
-      if (mwResult && mwResult.request) request = mwResult.request;
-    }
+    const staticRes = await tryStaticAsset(env, pathname);
+    if (staticRes) return staticRes;
 
-    // 3. Static assets from R2 — short-circuit before touching any compiled
-    //    module. These two prefixes are owned by Next + nextdeploy; no user
-    //    code needs to run.
-    if (pathname.startsWith("/_next/static/") || pathname.startsWith("/public/")) {
-      const res = await serveStaticFromR2(env, pathname);
-      if (res) return res;
-      return notFound();
-    }
-
-    // 4. Static route table — O(1) lookup.
-    const staticEntry = staticTable[pathname];
-    if (staticEntry) {
-      return await invokeCompiled(staticEntry, request, env, ctx, { params: {} }, url);
-    }
-
-    // 5. SSG — pre-rendered HTML straight from R2. If the path has been
-    //    revalidated (either via revalidatePath or a tag flush), skip R2
-    //    and fall through to the compute path so it can re-render.
-    const ssgTarget = manifest.routes.ssg[pathname];
-    if (ssgTarget) {
-      const stale = await isStale(pathname, isrTagsFor(pathname, manifest), env);
-      if (!stale) {
-        const res = await serveSSGFromR2(env, ssgTarget);
-        if (res) return res;
-      }
-    }
-
-    // 6. ISR — R2 serve with the same stale-check. Full stale-while-revalidate
-    //    + Queue enqueue is a follow-up; this tier gives us local correctness.
-    const isrTarget = manifest.routes.isr[pathname];
-    if (isrTarget) {
-      const stale = await isStale(pathname, isrTagsFor(pathname, manifest), env);
-      if (!stale) {
-        const res = await serveSSGFromR2(env, isrTarget);
-        if (res) return res;
-      }
-    }
-
-    // 7. Dynamic table — ordered by specificity at build time.
-    const dyn = matchDynamic(pathname, dynamicTable);
-    if (dyn) {
-      const routeCtx = buildRouteContext(url, dyn.params);
-      return await invokeCompiled(dyn.entry, request, env, ctx, routeCtx, url);
-    }
+    const routed = await tryRouteDispatch(request, env, ctx, url, pathname, tables);
+    if (routed) return routed;
 
     return notFound();
   } catch (err) {
     return serverError(err);
   }
+}
+
+function ensureCacheIndexInit(manifest) {
+  if (cacheIndexInitialized) return;
+  initCacheIndex(manifest.isr);
+  cacheIndexInitialized = true;
+}
+
+/**
+ * Pre-middleware short-circuits: the /_next/image endpoint and Server
+ * Action POSTs. Matches Next's dispatch priority — these must run before
+ * middleware or proxy can intercept them.
+ */
+async function tryShortCircuits(request, env, ctx, pathname, tables) {
+  if (pathname === "/_next/image" || pathname.startsWith("/_next/image?")) {
+    return handleImageRequest(request, env, tables.manifest);
+  }
+  if (tables.actionManifest && isServerAction(request)) {
+    return handleServerAction(request, env, ctx, tables.actionManifest, tables.actionLoaders);
+  }
+  return null;
+}
+
+/**
+ * Run proxy.ts then middleware.ts. Either may short-circuit with a
+ * Response or mutate the request. Returns { response?, request }.
+ */
+async function runMiddlewareStack(request, env, ctx, tables) {
+  for (const ref of [tables.proxyRef, tables.middlewareRef]) {
+    if (!ref) continue;
+    const result = await runMiddlewareLike(ref, request, env, ctx);
+    if (result instanceof Response) return { response: result, request };
+    if (result?.request) request = result.request;
+  }
+  return { response: null, request };
+}
+
+/**
+ * Serve /_next/static/* and /public/* straight from R2. Returns the
+ * Response on hit (including the 404 when a prefixed path isn't in R2),
+ * or null when the path isn't in a static prefix.
+ */
+async function tryStaticAsset(env, pathname) {
+  if (!pathname.startsWith("/_next/static/") && !pathname.startsWith("/public/")) {
+    return null;
+  }
+  const res = await serveStaticFromR2(env, pathname);
+  return res || notFound();
+}
+
+/**
+ * Run route dispatch in priority order: static table → SSG → ISR →
+ * dynamic table. Returns Response on match, null to fall through.
+ */
+async function tryRouteDispatch(request, env, ctx, url, pathname, tables) {
+  const staticEntry = tables.staticTable[pathname];
+  if (staticEntry) {
+    return invokeCompiled(staticEntry, request, env, ctx, { params: {} }, url);
+  }
+
+  const cached = await tryCachedRender(env, tables.manifest, pathname);
+  if (cached) return cached;
+
+  const dyn = matchDynamic(pathname, tables.dynamicTable);
+  if (dyn) {
+    const routeCtx = buildRouteContext(url, dyn.params);
+    return invokeCompiled(dyn.entry, request, env, ctx, routeCtx, url);
+  }
+  return null;
+}
+
+/**
+ * Serve the pre-rendered HTML for SSG / ISR routes when the path isn't
+ * marked stale. Unified because both tiers use the same R2 lookup path
+ * and stale-check; only the manifest source differs.
+ */
+async function tryCachedRender(env, manifest, pathname) {
+  for (const bucket of ["ssg", "isr"]) {
+    const target = manifest.routes[bucket]?.[pathname];
+    if (!target) continue;
+    const stale = await isStale(pathname, isrTagsFor(pathname, manifest), env);
+    if (stale) continue;
+    const res = await serveSSGFromR2(env, target);
+    if (res) return res;
+  }
+  return null;
 }
 
 /**

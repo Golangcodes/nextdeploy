@@ -6,15 +6,17 @@ import (
 	"testing"
 )
 
+type parseCase struct {
+	name    string
+	in      string
+	major   int
+	minor   int
+	patch   int
+	wantErr bool
+}
+
 func TestParseNextVersion(t *testing.T) {
-	cases := []struct {
-		name    string
-		in      string
-		major   int
-		minor   int
-		patch   int
-		wantErr bool
-	}{
+	cases := []parseCase{
 		{"exact", "14.2.3", 14, 2, 3, false},
 		{"caret", "^15.0.1", 15, 0, 1, false},
 		{"tilde", "~13.4.19", 13, 4, 19, false},
@@ -26,24 +28,27 @@ func TestParseNextVersion(t *testing.T) {
 		{"garbage", "latest", 0, 0, 0, true},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			v, err := parseNextVersion(tc.in)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error for %q, got %+v", tc.in, v)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error for %q: %v", tc.in, err)
-			}
-			if v.Major != tc.major || v.Minor != tc.minor || v.Patch != tc.patch {
-				t.Errorf("got %d.%d.%d, want %d.%d.%d", v.Major, v.Minor, v.Patch, tc.major, tc.minor, tc.patch)
-			}
-			if v.Raw != tc.in {
-				t.Errorf("Raw not preserved: got %q, want %q", v.Raw, tc.in)
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { runParseCase(t, tc) })
+	}
+}
+
+func runParseCase(t *testing.T, tc parseCase) {
+	t.Helper()
+	v, err := parseNextVersion(tc.in)
+	if tc.wantErr {
+		if err == nil {
+			t.Fatalf("expected error for %q, got %+v", tc.in, v)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error for %q: %v", tc.in, err)
+	}
+	if v.Major != tc.major || v.Minor != tc.minor || v.Patch != tc.patch {
+		t.Errorf("got %d.%d.%d, want %d.%d.%d", v.Major, v.Minor, v.Patch, tc.major, tc.minor, tc.patch)
+	}
+	if v.Raw != tc.in {
+		t.Errorf("Raw not preserved: got %q, want %q", v.Raw, tc.in)
 	}
 }
 

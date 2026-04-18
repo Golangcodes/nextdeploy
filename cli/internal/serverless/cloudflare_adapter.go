@@ -190,6 +190,11 @@ func runEsbuild(ctx context.Context, entry, out, cwd string, log *shared.Logger)
 	}
 
 	log.Info("Bundling Worker via esbuild (entry: %s)...", filepath.Base(entry))
+	// NOSONAR: spawning `npx` is intentional and every argument here is
+	// either a static flag or a path the compiler just emitted into
+	// OutDir. No user-supplied string reaches argv; there is no shell
+	// interpolation — exec.CommandContext takes argv directly, not a
+	// shell string.
 	cmd := exec.CommandContext(ctx, "npx", args...)
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stderr

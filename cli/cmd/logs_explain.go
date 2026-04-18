@@ -1,5 +1,7 @@
 package cmd
 
+const logsGoFile = "cli/cmd/logs.go"
+
 var logsExplanation = explanation{
 	Name:     "logs",
 	Synopsis: "Stream application logs from the running deployment.",
@@ -14,14 +16,14 @@ var logsExplanation = explanation{
 			Num:       1,
 			Title:     "Load config + resolve target",
 			Narrative: "Same config load as ship. Target determines which log backend to connect to.",
-			Ref:       "cli/cmd/logs.go",
+			Ref:       logsGoFile,
 			Function:  "config.Load",
 		},
 		{
 			Num:       2,
 			Title:     "Open log stream",
 			Narrative: "VPS: opens an SSH session and subscribes to the daemon's /logs/stream. AWS: starts a CloudWatch Logs tail with the Lambda log group. Cloudflare: spawns wrangler tail.",
-			Ref:       "cli/cmd/logs.go",
+			Ref:       logsGoFile,
 			Output:    "io.Reader of log events",
 		},
 		{
@@ -35,7 +37,7 @@ var logsExplanation = explanation{
 			Num:       4,
 			Title:     "Terminate",
 			Narrative: "Ctrl-C cleanly closes the remote stream and unwinds SSH/CloudWatch/wrangler sessions.",
-			Ref:       "cli/cmd/logs.go",
+			Ref:       logsGoFile,
 		},
 	},
 }

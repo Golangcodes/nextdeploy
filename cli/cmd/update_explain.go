@@ -1,5 +1,7 @@
 package cmd
 
+const updaterGoFile = "shared/updater/updater.go"
+
 var updateExplanation = explanation{
 	Name:     "update",
 	Synopsis: "Check for and install CLI updates.",
@@ -13,7 +15,7 @@ var updateExplanation = explanation{
 			Num:       1,
 			Title:     "Resolve latest version",
 			Narrative: "Fetches the release feed from the configured update endpoint. Compares against the baked-in binary version via semver.",
-			Ref:       "shared/updater/updater.go",
+			Ref:       updaterGoFile,
 			Function:  "updater.CheckLatest",
 			Output:    "latestVersion, downloadURL",
 		},
@@ -27,7 +29,7 @@ var updateExplanation = explanation{
 			Num:       3,
 			Title:     "Download + verify",
 			Narrative: "Downloads the release tarball to a temp file, verifies the checksum (and signature if configured), unpacks the new binary. G110 decompression-bomb protection applies.",
-			Ref:       "shared/updater/updater.go",
+			Ref:       updaterGoFile,
 			Function:  "updater.SelfUpdateWithOptions",
 			Output:    "tempfile with new binary",
 		},
@@ -35,7 +37,7 @@ var updateExplanation = explanation{
 			Num:       4,
 			Title:     "Atomic replace",
 			Narrative: "Renames the temp file over the currently-executing binary. On Linux/macOS the old inode survives the rename so the running process keeps working; subsequent invocations pick up the new version.",
-			Ref:       "shared/updater/updater.go",
+			Ref:       updaterGoFile,
 			Function:  "atomicReplace",
 			Output:    "binary on PATH replaced in place",
 		},

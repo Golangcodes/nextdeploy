@@ -8,15 +8,16 @@ import (
 	"testing"
 )
 
+type routeRegexCase struct {
+	route      string
+	wantRegex  string
+	wantParams []string
+	matchOK    []string
+	matchFail  []string
+}
+
 func TestRouteToRegex(t *testing.T) {
-	cases := []struct {
-		route      string
-		wantRegex  string
-		wantParams []string
-		// Concrete URLs: paths that should match, paths that should not.
-		matchOK   []string
-		matchFail []string
-	}{
+	cases := []routeRegexCase{
 		{
 			route:      "/blog/[slug]",
 			wantRegex:  `/^\/blog\/([^/]+)\/?$/`,
@@ -39,30 +40,35 @@ func TestRouteToRegex(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		t.Run(tc.route, func(t *testing.T) {
-			got, params := routeToRegex(tc.route)
-			if tc.wantRegex != "" && got != tc.wantRegex {
-				t.Errorf("regex: got %s, want %s", got, tc.wantRegex)
-			}
-			if !stringSlicesEqual(params, tc.wantParams) {
-				t.Errorf("params: got %v, want %v", params, tc.wantParams)
-			}
-			// Translate to a Go regex and confirm the semantics behave the way
-			// the runtime will. Convert JS /.../ literal to Go source by
-			// stripping delimiters and unescaping \/.
-			goPattern := strings.ReplaceAll(got[1:len(got)-1], `\/`, `/`)
-			re := regexp.MustCompile(goPattern)
-			for _, ok := range tc.matchOK {
-				if !re.MatchString(ok) {
-					t.Errorf("expected match for %q against %s", ok, goPattern)
-				}
-			}
-			for _, no := range tc.matchFail {
-				if re.MatchString(no) {
-					t.Errorf("expected no match for %q against %s", no, goPattern)
-				}
-			}
-		})
+		t.Run(tc.route, func(t *testing.T) { runRouteRegexCase(t, tc) })
+	}
+}
+
+func runRouteRegexCase(t *testing.T, tc routeRegexCase) {
+	t.Helper()
+	got, params := routeToRegex(tc.route)
+	if tc.wantRegex != "" && got != tc.wantRegex {
+		t.Errorf("regex: got %s, want %s", got, tc.wantRegex)
+	}
+	if !stringSlicesEqual(params, tc.wantParams) {
+		t.Errorf("params: got %v, want %v", params, tc.wantParams)
+	}
+	goPattern := strings.ReplaceAll(got[1:len(got)-1], `\/`, `/`)
+	re := regexp.MustCompile(goPattern)
+	assertMatches(t, re, goPattern, tc.matchOK, tc.matchFail)
+}
+
+func assertMatches(t *testing.T, re *regexp.Regexp, pattern string, ok, fail []string) {
+	t.Helper()
+	for _, v := range ok {
+		if !re.MatchString(v) {
+			t.Errorf("expected match for %q against %s", v, pattern)
+		}
+	}
+	for _, v := range fail {
+		if re.MatchString(v) {
+			t.Errorf("expected no match for %q against %s", v, pattern)
+		}
 	}
 }
 

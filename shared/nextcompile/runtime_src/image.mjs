@@ -47,7 +47,7 @@ export async function handleImageRequest(request, env, manifest) {
     return passthroughFetch(resolved);
   }
 
-  if (env && env.IMAGES && typeof env.IMAGES.input === "function") {
+  if (typeof env?.IMAGES?.input === "function") {
     return await transformWithCloudflareImages(env.IMAGES, resolved, {
       width,
       quality,
@@ -61,32 +61,43 @@ export async function handleImageRequest(request, env, manifest) {
 function passesRemotePatternCheck(src, manifest) {
   const images = manifest?.images;
   if (!images) return false;
+  const srcURL = parseURLSafe(src);
+  if (!srcURL) return false;
+  if (matchesLegacyDomains(srcURL, images.domains)) return true;
+  return matchesRemotePatterns(srcURL, images.remotePatterns);
+}
 
-  let srcURL;
+function parseURLSafe(src) {
   try {
-    srcURL = new URL(src);
+    return new URL(src);
   } catch {
-    return false;
+    return null;
   }
+}
 
-  // Legacy `domains` list (Next 12-13) — exact host match.
-  if (Array.isArray(images.domains)) {
-    for (const d of images.domains) {
-      if (d && srcURL.hostname === d) return true;
-    }
-  }
+/**
+ * Legacy Next 12–13 `images.domains` — exact hostname match.
+ */
+function matchesLegacyDomains(srcURL, domains) {
+  if (!Array.isArray(domains)) return false;
+  return domains.some((d) => d && srcURL.hostname === d);
+}
 
-  // Modern `remotePatterns` — protocol / hostname / pathname / port rules.
-  if (Array.isArray(images.remotePatterns)) {
-    for (const p of images.remotePatterns) {
-      if (p.protocol && !srcURL.protocol.startsWith(p.protocol)) continue;
-      if (p.hostname && !hostnameMatches(srcURL.hostname, p.hostname)) continue;
-      if (p.port && srcURL.port !== p.port) continue;
-      if (p.pathname && !pathnameMatches(srcURL.pathname, p.pathname)) continue;
-      return true;
-    }
-  }
-  return false;
+/**
+ * Next 14+ `images.remotePatterns` — all declared fields (protocol,
+ * hostname, port, pathname) must match. Missing fields pass through.
+ */
+function matchesRemotePatterns(srcURL, patterns) {
+  if (!Array.isArray(patterns)) return false;
+  return patterns.some((p) => remotePatternMatches(srcURL, p));
+}
+
+function remotePatternMatches(srcURL, p) {
+  if (p.protocol && !srcURL.protocol.startsWith(p.protocol)) return false;
+  if (p.hostname && !hostnameMatches(srcURL.hostname, p.hostname)) return false;
+  if (p.port && srcURL.port !== p.port) return false;
+  if (p.pathname && !pathnameMatches(srcURL.pathname, p.pathname)) return false;
+  return true;
 }
 
 /**

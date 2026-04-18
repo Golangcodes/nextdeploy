@@ -9,6 +9,11 @@ import (
 	"strings"
 )
 
+// packageJSONFile is the filename npm + pnpm + yarn all use for the
+// package manifest. Centralized so the lookup-path list stays literal-
+// free.
+const packageJSONFile = "package.json"
+
 // DetectVersions reads Next.js and React versions from the standalone
 // build's dependency graph. Lookup order:
 //  1. <standaloneDir>/package.json (standalone builds vendor their own)
@@ -49,9 +54,9 @@ var ErrVersionNotFound = fmt.Errorf("nextcompile: could not locate next.js versi
 // pair where at least `next` is present.
 func readDepVersions(standaloneDir string) (string, string, error) {
 	candidates := []string{
-		filepath.Join(standaloneDir, "package.json"),
-		filepath.Join(standaloneDir, "node_modules", "next", "package.json"),
-		filepath.Join(filepath.Dir(standaloneDir), "package.json"),
+		filepath.Join(standaloneDir, packageJSONFile),
+		filepath.Join(standaloneDir, "node_modules", "next", packageJSONFile),
+		filepath.Join(filepath.Dir(standaloneDir), packageJSONFile),
 	}
 
 	for _, path := range candidates {

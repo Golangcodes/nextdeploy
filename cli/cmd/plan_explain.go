@@ -1,5 +1,7 @@
 package cmd
 
+const planGoFile = "cli/cmd/plan.go"
+
 var planExplanation = explanation{
 	Name:     "plan",
 	Synopsis: "Dry-run: show what nextdeploy would create, update, or flag as drift.",
@@ -14,7 +16,7 @@ var planExplanation = explanation{
 			Num:       1,
 			Title:     "Validate config target",
 			Narrative: "Plan is Cloudflare-only today. Missing cloudflare block → fatal. AWS deploys use the cloud-native plan tooling (terraform/cdk) instead.",
-			Ref:       "cli/cmd/plan.go:44",
+			Ref:       planGoFile + ":44",
 			Output:    "fatal if provider != cloudflare",
 		},
 		{
@@ -37,14 +39,14 @@ var planExplanation = explanation{
 			Num:       4,
 			Title:     "--only filter (optional)",
 			Narrative: "Narrows output to specific resource kinds. Useful in CI pipelines that only want to block on specific drift (e.g. `plan --only dns,queues`).",
-			Ref:       "cli/cmd/plan.go",
+			Ref:       planGoFile,
 			Function:  "filterPlanByModules",
 		},
 		{
 			Num:       5,
 			Title:     "Render plan",
 			Narrative: "Prints the results in a grouped-by-kind table, colored by action. Immutable-drift rows are loudest — those require manual intervention.",
-			Ref:       "cli/cmd/plan.go",
+			Ref:       planGoFile,
 			Function:  "renderPlan",
 			Output:    "stdout table",
 		},
@@ -52,7 +54,7 @@ var planExplanation = explanation{
 			Num:       6,
 			Title:     "Exit code",
 			Narrative: "Exit 0 on clean + create/update/no-op. Exit 2 on any immutable-drift so CI can fail the build. Non-CI callers inspect the printed output.",
-			Ref:       "cli/cmd/plan.go",
+			Ref:       planGoFile,
 			Output:    "exit 0 / 2",
 		},
 	},

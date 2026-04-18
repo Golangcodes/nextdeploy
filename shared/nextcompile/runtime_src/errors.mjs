@@ -12,7 +12,7 @@ export function notFound() {
 }
 
 export function serverError(err) {
-  const message = err && err.stack ? err.stack : String(err);
+  const message = err?.stack ? err.stack : String(err);
   return new Response("Internal Server Error\n\n" + message, {
     status: 500,
     headers: {
