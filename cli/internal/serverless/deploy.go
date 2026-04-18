@@ -136,6 +136,14 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 
 	log.Info("Serverless deployment complete! Application is live.")
 
+	// ── 6.5. Post-deploy smoke verify ───────────────────────────────────────
+	// Non-fatal by default — CI callers can opt into FailOnError when they
+	// want the deploy to gate on the smoke check. Domain-less deploys (no
+	// custom domain, workers.dev only) skip automatically.
+	if _, err := SmokeVerify(ctx, log, cfg, meta, SmokeOpts{}); err != nil {
+		log.Warn("Smoke verify returned error (non-fatal): %v", err)
+	}
+
 	// ── 7. Generate Visual Report ───────────────────────────────────────────
 	resMap, err := p.GetResourceMap(ctx, cfg)
 	if err == nil {
