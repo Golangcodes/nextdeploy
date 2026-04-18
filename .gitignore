@@ -71,3 +71,4 @@ vendor/
 # ── Dev-local ────────────────────────────────────────────────────
 tmp/
 NextDeploy/
+graphify-out/
