@@ -22,7 +22,7 @@ const scanConcurrency = 32
 // Compiled-path prefixes that classify where a module lives in Next's
 // standalone output. `app/` for App Router, `pages/` for Pages Router.
 const (
-	appRouterPrefix  = "app/"
+	appRouterPrefix   = "app/"
 	pagesRouterPrefix = "pages/"
 )
 

@@ -22,21 +22,21 @@ const manifestSchemaVersion = "1"
 // input produces identical bytes, which is the load-bearing property for
 // content-addressable bundle hashing.
 type Manifest struct {
-	SchemaVersion string           `json:"schemaVersion"`
-	GeneratedAt   string           `json:"generatedAt"`
-	AppName       string           `json:"appName"`
-	BasePath      string           `json:"basePath,omitempty"`
-	NextVersion   string           `json:"nextVersion"`
-	ReactVersion  string           `json:"reactVersion,omitempty"`
-	BuildID       string           `json:"buildId,omitempty"`
-	GitCommit     string           `json:"gitCommit,omitempty"`
-	Routes        ManifestRoutes   `json:"routes"`
-	ISR           ManifestISR      `json:"isr"`
-	Middleware    *ManifestMiddle  `json:"middleware,omitempty"`
-	Images        *ManifestImages  `json:"images,omitempty"`
-	I18n          *ManifestI18n    `json:"i18n,omitempty"`
-	HasAppRouter  bool             `json:"hasAppRouter"`
-	OutputMode    string           `json:"outputMode,omitempty"`
+	SchemaVersion string          `json:"schemaVersion"`
+	GeneratedAt   string          `json:"generatedAt"`
+	AppName       string          `json:"appName"`
+	BasePath      string          `json:"basePath,omitempty"`
+	NextVersion   string          `json:"nextVersion"`
+	ReactVersion  string          `json:"reactVersion,omitempty"`
+	BuildID       string          `json:"buildId,omitempty"`
+	GitCommit     string          `json:"gitCommit,omitempty"`
+	Routes        ManifestRoutes  `json:"routes"`
+	ISR           ManifestISR     `json:"isr"`
+	Middleware    *ManifestMiddle `json:"middleware,omitempty"`
+	Images        *ManifestImages `json:"images,omitempty"`
+	I18n          *ManifestI18n   `json:"i18n,omitempty"`
+	HasAppRouter  bool            `json:"hasAppRouter"`
+	OutputMode    string          `json:"outputMode,omitempty"`
 	// Features is the app's detected capability surface. Runtime consults
 	// this to decide which handlers to wire; operators can eyeball it to
 	// confirm the deployed bundle actually supports what they expect.

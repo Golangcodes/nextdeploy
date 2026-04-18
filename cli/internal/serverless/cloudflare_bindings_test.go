@@ -173,12 +173,12 @@ var _ = workers.ScriptUpdateParamsMetadataMigrationsWorkersMultipleStepMigration
 
 func TestZoneNameFromHostname(t *testing.T) {
 	cases := map[string]string{
-		"example.com":             "example.com",
-		"sub.example.com":         "example.com",
-		"deep.sub.example.com":    "example.com",
-		"a.b.c.example.com":       "example.com",
-		"pesastream.com":          "pesastream.com",
-		"app.pesastream.com":      "pesastream.com",
+		"example.com":          "example.com",
+		"sub.example.com":      "example.com",
+		"deep.sub.example.com": "example.com",
+		"a.b.c.example.com":    "example.com",
+		"pesastream.com":       "pesastream.com",
+		"app.pesastream.com":   "pesastream.com",
 	}
 	for in, want := range cases {
 		if got := zoneNameFromHostname(in); got != want {
@@ -189,11 +189,11 @@ func TestZoneNameFromHostname(t *testing.T) {
 
 func TestZoneNameFromPattern(t *testing.T) {
 	cases := map[string]string{
-		"example.com/*":            "example.com",
-		"*.example.com/*":          "example.com",
-		"app.example.com/api/*":    "example.com",
-		"pesastream.com/":          "pesastream.com",
-		"*.pesastream.com/*":       "pesastream.com",
+		"example.com/*":         "example.com",
+		"*.example.com/*":       "example.com",
+		"app.example.com/api/*": "example.com",
+		"pesastream.com/":       "pesastream.com",
+		"*.pesastream.com/*":    "pesastream.com",
 	}
 	for in, want := range cases {
 		if got := zoneNameFromPattern(in); got != want {

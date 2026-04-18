@@ -543,7 +543,7 @@ func parseMiddlewareMatchers(content string) ([]MiddlewareRoute, error) {
 		// Remove trailing commas before closing braces/brackets
 		trailingCommaRegex := regexp.MustCompile(`,(\s*[}\]])`)
 		cleaned = trailingCommaRegex.ReplaceAllString(cleaned, `$1`)
-		
+
 		cleaned = strings.ReplaceAll(cleaned, "\n", "")
 		cleaned = fmt.Sprintf("{%s}", cleaned)
 

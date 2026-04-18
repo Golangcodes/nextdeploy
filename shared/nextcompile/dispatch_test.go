@@ -74,7 +74,7 @@ func assertMatches(t *testing.T, re *regexp.Regexp, pattern string, ok, fail []s
 
 func TestDynamicSpecificity(t *testing.T) {
 	cases := []struct {
-		a, b     string
+		a, b      string
 		aMoreThan bool // a score > b score?
 	}{
 		{"/users/[id]/posts", "/users/[...rest]", true},

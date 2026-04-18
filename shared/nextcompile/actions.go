@@ -53,9 +53,9 @@ const (
 
 // Action is one entry in our flattened manifest.
 type Action struct {
-	ID     string        `json:"-"`
-	Module string        `json:"module"`
-	Export string        `json:"export"`
+	ID      string        `json:"-"`
+	Module  string        `json:"module"`
+	Export  string        `json:"export"`
 	Runtime ActionRuntime `json:"runtime"`
 }
 

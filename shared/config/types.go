@@ -108,8 +108,8 @@ type CFCustomDomain struct {
 }
 
 type CFRoute struct {
-	Pattern string `yaml:"pattern"`         // e.g. "*.example.com/*"
-	Zone    string `yaml:"zone,omitempty"`  // domain name; resolved to zone ID
+	Pattern string `yaml:"pattern"`        // e.g. "*.example.com/*"
+	Zone    string `yaml:"zone,omitempty"` // domain name; resolved to zone ID
 }
 
 type CFTriggers struct {
@@ -133,9 +133,9 @@ type CFR2Binding struct {
 }
 
 type CFHyperdriveBinding struct {
-	Name string `yaml:"name"`           // JS variable name (e.g. "HYPERDRIVE_DB")
-	ID   string `yaml:"id,omitempty"`   // CF Hyperdrive config UUID
-	Ref  string `yaml:"ref,omitempty"`  // OR: name of a resource in resources.hyperdrive
+	Name string `yaml:"name"`          // JS variable name (e.g. "HYPERDRIVE_DB")
+	ID   string `yaml:"id,omitempty"`  // CF Hyperdrive config UUID
+	Ref  string `yaml:"ref,omitempty"` // OR: name of a resource in resources.hyperdrive
 }
 
 type CFQueueBindings struct {
@@ -152,11 +152,11 @@ type CFQueueProducer struct {
 // metadata, not in standalone resources. The dead_letter_queue field is the
 // name of another queue, NOT a separate binding.
 type CFQueueConsumer struct {
-	Queue            string `yaml:"queue"`
-	MaxRetries       int    `yaml:"max_retries,omitempty"`
-	MaxBatchSize     int    `yaml:"max_batch_size,omitempty"`
-	MaxBatchTimeout  int    `yaml:"max_batch_timeout,omitempty"` // seconds
-	DeadLetterQueue  string `yaml:"dead_letter_queue,omitempty"`
+	Queue           string `yaml:"queue"`
+	MaxRetries      int    `yaml:"max_retries,omitempty"`
+	MaxBatchSize    int    `yaml:"max_batch_size,omitempty"`
+	MaxBatchTimeout int    `yaml:"max_batch_timeout,omitempty"` // seconds
+	DeadLetterQueue string `yaml:"dead_letter_queue,omitempty"`
 }
 
 type CFVectorizeBinding struct {
@@ -190,11 +190,11 @@ type CFPlainTextBinding struct {
 }
 
 type CFMigration struct {
-	Tag              string         `yaml:"tag"`
-	NewSQLiteClasses []string       `yaml:"new_sqlite_classes,omitempty"`
-	NewClasses       []string       `yaml:"new_classes,omitempty"`
-	DeletedClasses   []string       `yaml:"deleted_classes,omitempty"`
-	RenamedClasses   []CFRenamedDO  `yaml:"renamed_classes,omitempty"`
+	Tag                string            `yaml:"tag"`
+	NewSQLiteClasses   []string          `yaml:"new_sqlite_classes,omitempty"`
+	NewClasses         []string          `yaml:"new_classes,omitempty"`
+	DeletedClasses     []string          `yaml:"deleted_classes,omitempty"`
+	RenamedClasses     []CFRenamedDO     `yaml:"renamed_classes,omitempty"`
 	TransferredClasses []CFTransferredDO `yaml:"transferred_classes,omitempty"`
 }
 
@@ -223,8 +223,8 @@ type CFResources struct {
 }
 
 type CFHyperdriveResource struct {
-	Name   string `yaml:"name"`             // pesastream-db
-	Origin string `yaml:"origin,omitempty"` // postgres://… (read from env to avoid committing)
+	Name      string `yaml:"name"`                 // pesastream-db
+	Origin    string `yaml:"origin,omitempty"`     // postgres://… (read from env to avoid committing)
 	OriginEnv string `yaml:"origin_env,omitempty"` // env var name to read origin from
 }
 
@@ -289,7 +289,7 @@ type CloudProviderStruct struct {
 	// #nosec G117
 	AccessKey string `yaml:"access_key,omitempty"`
 	SecretKey string `yaml:"secret_key,omitempty"`
-	Profile   string `yaml:"profile,omitempty"`   // AWS CLI profile name
+	Profile   string `yaml:"profile,omitempty"`    // AWS CLI profile name
 	AccountID string `yaml:"account_id,omitempty"` // Cloudflare Account ID
 }
 type ServerConfig struct {

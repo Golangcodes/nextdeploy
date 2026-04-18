@@ -58,7 +58,9 @@ func renderDispatchTable(refs []ModuleRef, actions *ActionManifest) string {
 	statics, dynamics, middleware, proxy := partitionRefs(refs)
 
 	sort.Slice(statics, func(i, j int) bool { return statics[i].RoutePath < statics[j].RoutePath })
-	sort.Slice(dynamics, func(i, j int) bool { return dynamicSpecificity(dynamics[i].RoutePath) > dynamicSpecificity(dynamics[j].RoutePath) })
+	sort.Slice(dynamics, func(i, j int) bool {
+		return dynamicSpecificity(dynamics[i].RoutePath) > dynamicSpecificity(dynamics[j].RoutePath)
+	})
 
 	var b strings.Builder
 	b.WriteString(dispatchHeader)

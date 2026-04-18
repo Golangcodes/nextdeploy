@@ -193,7 +193,7 @@ func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
 
 	// Standalone output structure: .next/standalone/.next/server/
 	standaloneNext := filepath.Join(p.standaloneDir, ".next")
-	
+
 	prefixes := []string{
 		filepath.Join(standaloneNext, "server", "app"),
 		filepath.Join(standaloneNext, "server", "pages"),

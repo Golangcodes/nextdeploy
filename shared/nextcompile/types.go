@@ -115,17 +115,17 @@ type CompileOpts struct {
 // Callers populate this by translating from nextcore.NextCorePayload
 // in the adapter (cli/internal/serverless/cloudflare_adapter.go).
 type Payload struct {
-	AppName       string
-	DistDir       string
-	OutputMode    string
-	BasePath      string
-	HasAppRouter  bool
-	Routes        RouteInfo
-	Middleware    *MiddlewareConfig
-	ImageConfig   *ImageConfig
-	I18n          *I18nConfig
-	BuildID       string
-	GitCommit     string
+	AppName      string
+	DistDir      string
+	OutputMode   string
+	BasePath     string
+	HasAppRouter bool
+	Routes       RouteInfo
+	Middleware   *MiddlewareConfig
+	ImageConfig  *ImageConfig
+	I18n         *I18nConfig
+	BuildID      string
+	GitCommit    string
 }
 
 // RouteInfo mirrors nextcore.RouteInfo. Duplicated here so the compiler
@@ -237,10 +237,10 @@ type ModuleRef struct {
 // BindingHint is a compiler-derived suggestion for the deployment config.
 // Emitted as warnings rather than errors — the user has final say.
 type BindingHint struct {
-	Kind      string   // "secret" | "kv" | "r2" | "d1" | "service" | "queue"
-	Name      string   // env var name or logical binding name
-	Reason    string   // human-readable justification
-	Sources   []string // ModuleRef.CompiledPath list where the hint was derived
+	Kind    string   // "secret" | "kv" | "r2" | "d1" | "service" | "queue"
+	Name    string   // env var name or logical binding name
+	Reason  string   // human-readable justification
+	Sources []string // ModuleRef.CompiledPath list where the hint was derived
 }
 
 // CompileStats is the post-run summary. Logged in full at info, content-hashed
