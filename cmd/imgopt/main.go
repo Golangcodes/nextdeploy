@@ -24,11 +24,11 @@ import (
 )
 
 type ImageOptConfig struct {
-	AllowedDomains []string   `json:"allowed_domains"`
-	RemotePatterns []Pattern  `json:"remote_patterns"`
-	DeviceSizes    []int      `json:"device_sizes"`
-	ImageSizes     []int      `json:"image_sizes"`
-	Formats        []string   `json:"formats"`
+	AllowedDomains []string  `json:"allowed_domains"`
+	RemotePatterns []Pattern `json:"remote_patterns"`
+	DeviceSizes    []int     `json:"device_sizes"`
+	ImageSizes     []int     `json:"image_sizes"`
+	Formats        []string  `json:"formats"`
 }
 
 type Pattern struct {
@@ -46,26 +46,26 @@ var (
 
 func init() {
 	sourceBucket = os.Getenv("SOURCE_BUCKET")
-	
+
 	// Parse image config from metadata
 	if configJSON := os.Getenv("IMAGE_CONFIG_JSON"); configJSON != "" {
 		if err := json.Unmarshal([]byte(configJSON), &imageConfig); err != nil {
 			fmt.Printf("Warning: failed to parse IMAGE_CONFIG_JSON: %v\n", err)
 		}
 	}
-	
+
 	// Fallback to legacy ALLOWED_DOMAINS
 	if len(imageConfig.AllowedDomains) == 0 {
 		if dm := os.Getenv("ALLOWED_DOMAINS"); dm != "" {
 			imageConfig.AllowedDomains = strings.Split(dm, ",")
 		}
 	}
-	
+
 	// Default device sizes if not configured
 	if len(imageConfig.DeviceSizes) == 0 {
 		imageConfig.DeviceSizes = []int{640, 750, 828, 1080, 1200, 1920, 2048, 3840}
 	}
-	
+
 	cfg, err := config.LoadDefaultConfig(context.Background())
 	if err == nil {
 		s3Client = s3.NewFromConfig(cfg)
@@ -116,7 +116,7 @@ func handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.AP
 	// 3. Encode (fallback to JPEG/PNG since pure go webp encoding is complex for this scope)
 	var buf bytes.Buffer
 	contentType := "image/jpeg"
-	
+
 	// Fast safe pure go fallback.
 	if format == "png" {
 		contentType = "image/png"
@@ -124,7 +124,7 @@ func handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.AP
 	} else {
 		err = jpeg.Encode(&buf, src, &jpeg.Options{Quality: quality})
 	}
-	
+
 	if err != nil {
 		fmt.Printf("Error encoding image: %v\n", err)
 		return errResponse(500, "could not encode image"), nil
@@ -153,7 +153,7 @@ func fetchImage(ctx context.Context, rawURL string) (image.Image, string, error)
 		if s3Client == nil {
 			return nil, "", fmt.Errorf("s3 client is not initialized")
 		}
-		
+
 		objectKey := strings.TrimPrefix(rawURL, "/")
 		resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
 			Bucket: aws.String(sourceBucket),
@@ -192,7 +192,7 @@ func isAllowedDomain(host, scheme string) bool {
 			return true
 		}
 	}
-	
+
 	// Check remote patterns
 	for _, pattern := range imageConfig.RemotePatterns {
 		if pattern.Protocol != "" && pattern.Protocol != scheme {
@@ -203,7 +203,7 @@ func isAllowedDomain(host, scheme string) bool {
 		}
 		return true
 	}
-	
+
 	// If no config, deny by default
 	return len(imageConfig.AllowedDomains) == 0 && len(imageConfig.RemotePatterns) == 0
 }

@@ -76,10 +76,10 @@ type ContainerHealthcheck struct {
 
 // Database represents database configuration
 type Database struct {
-	Type            string `yaml:"type"`
-	Host            string `yaml:"host"`
-	Port            int    `yaml:"port"`
-	Username        string `yaml:"username"`
+	Type     string `yaml:"type"`
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Username string `yaml:"username"`
 	// #nosec G117
 	Password        string `yaml:"password"`
 	Name            string `yaml:"name"`
@@ -118,9 +118,9 @@ type Backup struct {
 }
 
 type Storage struct {
-	Provider  string `yaml:"provider"`
-	Bucket    string `yaml:"bucket"`
-	Region    string `yaml:"region"`
+	Provider string `yaml:"provider"`
+	Bucket   string `yaml:"bucket"`
+	Region   string `yaml:"region"`
 	// #nosec G117
 	AccessKey string `yaml:"access_key"`
 	SecretKey string `yaml:"secret_key"`

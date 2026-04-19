@@ -403,15 +403,15 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 
 	if dc.DefaultCacheBehavior == nil {
 		dc.DefaultCacheBehavior = &cfTypes.DefaultCacheBehavior{
-			TargetOriginId:        aws.String(targetOrigin),
-			ViewerProtocolPolicy:  cfTypes.ViewerProtocolPolicyRedirectToHttps,
-			CachePolicyId:         aws.String(cachePolicy),
-			OriginRequestPolicyId: orpId,
-			AllowedMethods:        allowedMethods,
-			FieldLevelEncryptionId: aws.String(""),
+			TargetOriginId:             aws.String(targetOrigin),
+			ViewerProtocolPolicy:       cfTypes.ViewerProtocolPolicyRedirectToHttps,
+			CachePolicyId:              aws.String(cachePolicy),
+			OriginRequestPolicyId:      orpId,
+			AllowedMethods:             allowedMethods,
+			FieldLevelEncryptionId:     aws.String(""),
 			LambdaFunctionAssociations: &cfTypes.LambdaFunctionAssociations{Quantity: aws.Int32(0)},
 			FunctionAssociations:       &cfTypes.FunctionAssociations{Quantity: aws.Int32(0)},
-			ResponseHeadersPolicyId: aws.String(securityHeadersPolicyId),
+			ResponseHeadersPolicyId:    aws.String(securityHeadersPolicyId),
 		}
 		changed = true
 	} else {
@@ -453,8 +453,28 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 				ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
 				// Custom policy keys on url/w/q so different sizes don't collide
 				// (see C7 in REVIEW.md).
-				CachePolicyId:        aws.String(imageCachePolicyId),
+				CachePolicyId:         aws.String(imageCachePolicyId),
 				OriginRequestPolicyId: orpId,
+				SmoothStreaming:       aws.Bool(false),
+				Compress:              aws.Bool(true),
+				AllowedMethods: &cfTypes.AllowedMethods{
+					Quantity: aws.Int32(2),
+					Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+					CachedMethods: &cfTypes.CachedMethods{
+						Quantity: aws.Int32(2),
+						Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
+					},
+				},
+				FieldLevelEncryptionId:     aws.String(""),
+				LambdaFunctionAssociations: &cfTypes.LambdaFunctionAssociations{Quantity: aws.Int32(0)},
+				FunctionAssociations:       &cfTypes.FunctionAssociations{Quantity: aws.Int32(0)},
+				ResponseHeadersPolicyId:    aws.String(securityHeadersPolicyId),
+			},
+			{
+				PathPattern:          aws.String("/_next/*"),
+				TargetOriginId:       aws.String(s3OriginId),
+				ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
+				CachePolicyId:        aws.String(cachingOptimizedId),
 				SmoothStreaming:      aws.Bool(false),
 				Compress:             aws.Bool(true),
 				AllowedMethods: &cfTypes.AllowedMethods{
@@ -465,18 +485,18 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 						Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
 					},
 				},
-				FieldLevelEncryptionId:  aws.String(""),
+				FieldLevelEncryptionId:     aws.String(""),
 				LambdaFunctionAssociations: &cfTypes.LambdaFunctionAssociations{Quantity: aws.Int32(0)},
 				FunctionAssociations:       &cfTypes.FunctionAssociations{Quantity: aws.Int32(0)},
-				ResponseHeadersPolicyId: aws.String(securityHeadersPolicyId),
+				ResponseHeadersPolicyId:    aws.String(securityHeadersPolicyId),
 			},
 			{
-				PathPattern:             aws.String("/_next/*"),
-				TargetOriginId:          aws.String(s3OriginId),
-				ViewerProtocolPolicy:    cfTypes.ViewerProtocolPolicyRedirectToHttps,
-				CachePolicyId:           aws.String(cachingOptimizedId),
-				SmoothStreaming:         aws.Bool(false),
-				Compress:                aws.Bool(true),
+				PathPattern:          aws.String("/assets/*"),
+				TargetOriginId:       aws.String(s3OriginId),
+				ViewerProtocolPolicy: cfTypes.ViewerProtocolPolicyRedirectToHttps,
+				CachePolicyId:        aws.String(cachingOptimizedId),
+				SmoothStreaming:      aws.Bool(false),
+				Compress:             aws.Bool(true),
 				AllowedMethods: &cfTypes.AllowedMethods{
 					Quantity: aws.Int32(2),
 					Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
@@ -485,33 +505,13 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 						Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
 					},
 				},
-				FieldLevelEncryptionId:  aws.String(""),
+				FieldLevelEncryptionId:     aws.String(""),
 				LambdaFunctionAssociations: &cfTypes.LambdaFunctionAssociations{Quantity: aws.Int32(0)},
 				FunctionAssociations:       &cfTypes.FunctionAssociations{Quantity: aws.Int32(0)},
-				ResponseHeadersPolicyId: aws.String(securityHeadersPolicyId),
-			},
-			{
-				PathPattern:             aws.String("/assets/*"),
-				TargetOriginId:          aws.String(s3OriginId),
-				ViewerProtocolPolicy:    cfTypes.ViewerProtocolPolicyRedirectToHttps,
-				CachePolicyId:           aws.String(cachingOptimizedId),
-				SmoothStreaming:         aws.Bool(false),
-				Compress:                aws.Bool(true),
-				AllowedMethods: &cfTypes.AllowedMethods{
-					Quantity: aws.Int32(2),
-					Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
-					CachedMethods: &cfTypes.CachedMethods{
-						Quantity: aws.Int32(2),
-						Items:    []cfTypes.Method{cfTypes.MethodGet, cfTypes.MethodHead},
-					},
-				},
-				FieldLevelEncryptionId:  aws.String(""),
-				LambdaFunctionAssociations: &cfTypes.LambdaFunctionAssociations{Quantity: aws.Int32(0)},
-				FunctionAssociations:       &cfTypes.FunctionAssociations{Quantity: aws.Int32(0)},
-				ResponseHeadersPolicyId: aws.String(securityHeadersPolicyId),
+				ResponseHeadersPolicyId:    aws.String(securityHeadersPolicyId),
 			},
 		}
-		
+
 		if imgOptHost == "" {
 			// If no imgOpt URL, we don't intercept /_next/image*
 			expectedBehaviors = expectedBehaviors[1:]
