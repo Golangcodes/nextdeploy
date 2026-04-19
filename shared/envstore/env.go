@@ -28,7 +28,7 @@ func WithEnvFile[T any](filename string) Option[T] {
 			return err
 		}
 
-		for k, _ := range envData {
+		for k := range envData {
 			var value T
 			s.data[k] = value
 		}
