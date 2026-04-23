@@ -123,6 +123,9 @@ serverless:
   provider: aws
   region: us-east-1
   profile: "default"           # AWS CLI profile name
+  isrRevalidation: true        # Enable ISR cache listener Lambda via SQS
+  imageOptimization: true      # Enable on-the-fly Image Resization Lambda via CloudFront
+  warmer: true                 # Keep the Lambda warm
   cloudfront_id: "" # [OPTIONAL] If provided, NextDeploy will trigger an invalidation after deploy
   # iam_role: "arn:aws:iam::ACCOUNT_ID:role/nextdeploy-serverless-role" # [OPTIONAL] Created automatically if not provided
   # handler: "server.handler" # [OPTIONAL] Lambda handler (defaults to server.handler)
@@ -131,12 +134,64 @@ serverless:
   # timeout: 30              # [OPTIONAL] Timeout in seconds (defaults to 30)
 `
 
+const cloudflareTemplate = `
+# -----
+# TARGET TYPE — "serverless" covers both AWS (Lambda + CloudFront) and Cloudflare (Workers + R2)
+# -----
+target_type: serverless
+
+# -----
+# APP METADATA
+# -----
+app:
+  name: example-app # [REQUIRED] Unique app name used for identification
+  environment: production # [REQUIRED] production | staging | development
+  domain: app.example.com # Public domain for your app
+  port: 3000 # [REQUIRED] Internal port your app listens on (used locally; Workers ignore this)
+
+# -----
+# CLOUD PROVIDER — CLOUDFLARE
+# Credentials are read from env vars (recommended) or the credstore.
+# Required env vars:
+#   CLOUDFLARE_API_TOKEN  — management plane (Workers, DNS, R2 bucket lifecycle)
+#   CLOUDFLARE_ACCOUNT_ID — can also be set via account_id below
+#   R2_ACCESS_KEY_ID      — R2 object uploads (S3-compatible)
+#   R2_SECRET_ACCESS_KEY  — R2 object uploads (S3-compatible)
+# -----
+CloudProvider:
+  name: cloudflare
+  account_id: "YOUR_CLOUDFLARE_ACCOUNT_ID" # Fallback if CLOUDFLARE_ACCOUNT_ID env var is unset
+
+# -----
+# SERVERLESS CONFIGURATION (Cloudflare Workers)
+# -----
+serverless:
+  provider: cloudflare
+  cloudflare:
+    compatibility_date: "2025-04-01"
+    compatibility_flags:
+      - nodejs_compat_v2
+    # custom_domains:
+    #   - hostname: app.example.com
+    # triggers:
+    #   crons:
+    #     - "0 * * * *"
+    # bindings:
+    #   r2:
+    #     - name: ASSETS
+    # Full schema: bindings (r2, kv, hyperdrive, queues, vectorize, ai, durable_objects),
+    # migrations, and resources (hyperdrive, queues, vectorize, ai_gateway, dns, zone_settings).
+`
+
 func GetSampleConfigTemplate(targetType string) string {
-	if targetType == "serverless" {
+	switch targetType {
+	case "serverless":
 		return commonHeader + serverlessTemplate + commonFooter
+	case "cloudflare":
+		return commonHeader + cloudflareTemplate + commonFooter
+	default:
+		return commonHeader + vpsTemplate + commonFooter
 	}
-	// Default to VPS
-	return commonHeader + vpsTemplate + commonFooter
 }
 
 func GenerateSampleConfig() error {

@@ -2,20 +2,41 @@ package packaging
 
 import (
 	"archive/zip"
+	_ "embed"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/Golangcodes/nextdeploy/shared"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
+
+// bridgeJS is the Node.js shim that the Lambda runtime executes. It:
+//   - Fetches secrets from the AWS Parameters & Secrets Lambda Extension
+//     (localhost:2773) and merges them into process.env before spawning
+//     `node server.js`.
+//   - Forwards the Lambda proxy event to the Next.js server over HTTP.
+//
+// Source of truth is `runtime/bridge.js` — edit there, not here.
+//
+//go:embed runtime/bridge.js
+var bridgeJS string
 
 type PackageResult struct {
 	LambdaZipPath string
 	LambdaZipSize int64
-	S3Assets      []S3Asset
-	SizeWarning   string
+	// StandaloneTarPath is the provider-agnostic artifact: a gzipped tar of
+	// the raw Next.js standalone directory, with no target-specific shims
+	// baked in. AWS ignores this (it deploys LambdaZipPath directly);
+	// Cloudflare extracts it before running its adapter. Empty if tar
+	// creation failed (a warning is logged but packaging does not fail —
+	// providers that need it will surface a clear error themselves).
+	StandaloneTarPath string
+	StandaloneTarSize int64
+	S3Assets          []S3Asset
+	SizeWarning       string
 }
 
 type S3Asset struct {
@@ -89,6 +110,17 @@ func (p *Packager) Package() (*PackageResult, error) {
 		result.SizeWarning = fmt.Sprintf("lambda zip is %.1fMB — approaching Lambda's 250MB limit", float64(size)/(1024*1024))
 	}
 
+	tarPath := filepath.Join(p.tmpDir, "app.tar.gz")
+	if err := shared.CreateTarGz(p.standaloneDir, tarPath); err != nil {
+		// Non-fatal: AWS doesn't need it. Leave the fields zero-valued so
+		// Cloudflare's DeployCompute falls back to reading standalone
+		// from disk and can decide how loudly to complain.
+		fmt.Fprintf(os.Stderr, "warning: could not tar standalone dir for portable artifact: %v\n", err)
+	} else if info, err := os.Stat(tarPath); err == nil {
+		result.StandaloneTarPath = tarPath
+		result.StandaloneTarSize = info.Size()
+	}
+
 	return result, nil
 }
 
@@ -138,6 +170,17 @@ func (p *Packager) collectS3Assets() ([]S3Asset, error) {
 		p.addPrerenderedAsset(&assets, route)
 	}
 
+	// 4. ISR Tag Map (if enabled/built)
+	tagMapPath := filepath.Join(p.projectRoot, ".nextdeploy", "assets", "isr-tag-map.json")
+	if _, err := os.Stat(tagMapPath); err == nil {
+		assets = append(assets, S3Asset{
+			LocalPath:    tagMapPath,
+			S3Key:        "isr-tag-map.json",
+			CacheControl: "public, max-age=0, must-revalidate",
+			ContentType:  "application/json",
+		})
+	}
+
 	return assets, nil
 }
 
@@ -148,10 +191,12 @@ func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
 		s3KeyBase = "index"
 	}
 
-	// Check for HTML and RSC in .next/server/app/ or .next/server/pages/
+	// Standalone output structure: .next/standalone/.next/server/
+	standaloneNext := filepath.Join(p.standaloneDir, ".next")
+
 	prefixes := []string{
-		filepath.Join(p.buildDir, "server", "app"),
-		filepath.Join(p.buildDir, "server", "pages"),
+		filepath.Join(standaloneNext, "server", "app"),
+		filepath.Join(standaloneNext, "server", "pages"),
 	}
 
 	for _, prefix := range prefixes {
@@ -201,110 +246,6 @@ func (p *Packager) buildLambdaZip(zipPath string) (int64, error) {
 
 		return addToZip(w, path, rel)
 	})
-
-	// Inject bridge adapter (content from cli/internal/serverless/aws.go)
-	// I'll hardcode it here or pass it in. For now, I'll use a placeholder or the actual one if I can.
-	// Since I'm in internal/packaging, I shouldn't depend on cli/internal/serverless.
-	// I'll define it here.
-	bridgeJS := `const http = require('http');
-const path = require('path');
-const { spawn } = require('child_process');
-
-let serverReady = false;
-let serverPort = 3000;
-let cachedSecrets = null;
-
-const serverPath = path.join(__dirname, 'server.js');
-
-const fetchSecrets = async () => {
-    const secretName = process.env.ND_SECRET_NAME;
-    if (!secretName) return {};
-    const options = {
-        hostname: 'localhost',
-        port: 2773,
-        path: '/secretsmanager/get?secretId=' + encodeURIComponent(secretName),
-        headers: { 'X-Aws-Parameters-Secrets-Token': process.env.AWS_SESSION_TOKEN }
-    };
-    return new Promise((resolve) => {
-        const req = http.get(options, (res) => {
-            let data = '';
-            res.on('data', (chunk) => data += chunk);
-            res.on('end', () => {
-                try {
-                    const parsed = JSON.parse(data);
-                    const secrets = JSON.parse(parsed.SecretString);
-                    resolve(secrets);
-                } catch (e) { resolve({}); }
-            });
-        });
-        req.on('error', () => resolve({}));
-        req.end();
-    });
-};
-
-const waitForServer = async () => {
-    for (let i = 0; i < 50; i++) {
-        try {
-            await new Promise((resolve, reject) => {
-                const req = http.get({
-                    hostname: '127.0.0.1',
-                    port: serverPort,
-                    path: '/',
-                    timeout: 500,
-                }, (res) => resolve(true));
-                req.on('error', reject);
-                req.end();
-            });
-            return true;
-        } catch (e) { await new Promise(r => setTimeout(r, 100)); }
-    }
-    throw new Error('Server timed out');
-};
-
-const startServer = async () => {
-    cachedSecrets = await fetchSecrets();
-    const env = { ...process.env, ...cachedSecrets, PORT: serverPort, HOSTNAME: '127.0.0.1', NODE_ENV: 'production' };
-    const serverProcess = spawn('node', [serverPath], { env: env, stdio: 'inherit' });
-    serverProcess.on('exit', () => { serverReady = false; });
-    await waitForServer();
-    serverReady = true;
-};
-
-const warmup = startServer();
-
-exports.handler = async (event) => {
-    await warmup;
-    return new Promise((resolve, reject) => {
-        const method = (event.requestContext && event.requestContext.http) ? event.requestContext.http.method : event.httpMethod;
-        const rawPath = event.rawPath || event.path || '/';
-        const queryString = event.rawQueryString || '';
-        const options = {
-            hostname: '127.0.0.1',
-            port: serverPort,
-            path: rawPath + (queryString ? '?' + queryString : ''),
-            method: method,
-            headers: event.headers || {},
-        };
-        const req = http.request(options, (res) => {
-            const chunks = [];
-            res.on('data', (chunk) => chunks.push(chunk));
-            res.on('end', () => {
-                const body = Buffer.concat(chunks);
-                resolve({
-                    statusCode: res.statusCode,
-                    headers: res.headers,
-                    body: body.toString('base64'),
-                    isBase64Encoded: true
-                });
-            });
-        });
-        if (event.body) {
-            req.write(event.isBase64Encoded ? Buffer.from(event.body, 'base64') : event.body);
-        }
-        req.on('error', reject);
-        req.end();
-    });
-};`
 
 	_ = addBytesToZip(w, "bridge.js", []byte(bridgeJS))
 	_ = w.Close()

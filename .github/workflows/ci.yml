@@ -16,54 +16,106 @@ permissions:
 env:
   GO_VERSION: "1.25.x"
   GOTOOLCHAIN: local
+  GOLANGCI_LINT_VERSION: "v2.5.0"
 
 jobs:
-  build:
-    name: Build & Test
+  modules:
+    name: Modules
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
           cache-dependency-path: go.sum
-
       - name: Verify modules
         run: |
           go mod verify
           go mod tidy
           git diff --exit-code go.mod go.sum
 
-      - name: Build CLI
-        run: go build -o /dev/null ./cli
-
-      - name: Build Daemon
-        run: go build -o /dev/null ./daemon/cmd/nextdeployd
-
-      - name: Test
-        run: go test -race -timeout 5m ./...
-
-  lint:
-    name: Lint
+  fmt:
+    name: Format Check
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
           cache-dependency-path: go.sum
+      - name: Install mage
+        run: go install github.com/magefile/mage@latest
+      - name: gofmt
+        run: mage fmtCheck
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          version: latest
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Install mage
+        run: go install github.com/magefile/mage@latest
+      - name: Build CLI
+        run: mage buildCLI
+      - name: Build Daemon
+        if: runner.os == 'Linux'
+        run: mage buildDaemon
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: [modules]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Install mage
+        run: go install github.com/magefile/mage@latest
+      - name: Run unit tests
+        run: mage testUnit
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -1
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 7
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: [modules]
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+      - name: golangci-lint
+        # v7 is required for golangci-lint v2.x (v6 only supports v1.x and
+        # errors with `invalid version string 'v2.5.0'`).
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --timeout 10m
 
   vuln:
@@ -71,9 +123,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: govulncheck
         uses: golang/govulncheck-action@v1
         with:
           go-version-input: ${{ env.GO_VERSION }}
           check-latest: true
+
+  hook-smoke:
+    name: Pre-commit Hook Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate hook syntax
+        run: bash -n .githooks/pre-commit
+      - name: Run hook against HEAD
+        run: |
+          # Stage everything from the last commit so the hook has something
+          # to inspect, then run it. Catches accidental binaries on main.
+          git -c user.email=ci@example.com -c user.name=ci \
+            reset --soft HEAD~1 || true
+          ./.githooks/pre-commit || (echo "Hook failed on HEAD"; exit 1)
+
+  quality:
+    name: Code Quality (informational)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Install scc
+        run: go install github.com/boyter/scc/v3@latest
+      - name: Lines of code
+        run: scc --format wide --exclude-dir vendor,test-serverless-app,.next
+      - name: Benchmarks (best-effort)
+        run: go test -bench=. -benchmem -run='^$' ./... 2>/dev/null || echo "No benchmarks found"

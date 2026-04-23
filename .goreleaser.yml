@@ -8,6 +8,8 @@ env:
 before:
   hooks:
     - go mod tidy
+    - env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o assets/lambda/revalidator/bootstrap ./cmd/revalidator
+    - env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o assets/lambda/imgopt/bootstrap ./cmd/imgopt
     - go generate ./...
 
 builds:
@@ -27,6 +29,7 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/Golangcodes/nextdeploy/shared.Version={{.Version}}
+      - -X github.com/Golangcodes/nextdeploy/shared.Commit={{.ShortCommit}}
       - -X github.com/Golangcodes/nextdeploy/shared/updater.Version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
@@ -44,6 +47,7 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/Golangcodes/nextdeploy/shared.Version={{.Version}}
+      - -X github.com/Golangcodes/nextdeploy/shared.Commit={{.ShortCommit}}
       - -X github.com/Golangcodes/nextdeploy/shared/updater.Version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}

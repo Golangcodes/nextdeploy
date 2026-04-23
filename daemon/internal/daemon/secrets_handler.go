@@ -182,9 +182,15 @@ func (ch *CommandHandler) syncAppSecrets(appName string, secrets map[string]stri
 
 	envFilePath := filepath.Join(appDir, ".env.nextdeploy")
 
+	keys := make([]string, 0, len(secrets))
+	for k := range secrets {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	var envLines []string
-	for k, v := range secrets {
-		envLines = append(envLines, fmt.Sprintf("%s=%s", k, v))
+	for _, k := range keys {
+		envLines = append(envLines, fmt.Sprintf("%s=%s", k, quoteEnvValue(secrets[k])))
 	}
 	content := strings.Join(envLines, "\n") + "\n"
 	if err := os.WriteFile(envFilePath, []byte(content), 0600); err != nil {
@@ -193,4 +199,18 @@ func (ch *CommandHandler) syncAppSecrets(appName string, secrets map[string]stri
 
 	log.Printf("[secrets] Updated %s, restarting service...", envFilePath)
 	return ch.processManager.RestartService(appName)
+}
+
+// quoteEnvValue wraps a secret value so that it is safely consumed by
+// systemd's EnvironmentFile= parser. systemd recognizes the escapes \\, \",
+// \n and \r inside double-quoted values, so we escape those four characters
+// and wrap the result in double quotes.
+func quoteEnvValue(v string) string {
+	r := strings.NewReplacer(
+		`\`, `\\`,
+		`"`, `\"`,
+		"\n", `\n`,
+		"\r", `\r`,
+	)
+	return `"` + r.Replace(v) + `"`
 }

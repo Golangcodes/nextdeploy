@@ -2,7 +2,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "make build-daemon-dev"
+  cmd = "mage buildDaemonDev"
   bin = "~/.nextdeploy/bin/nextdeployd"
   full_bin = "~/.nextdeploy/bin/nextdeployd --foreground=true"
   include_ext = ["go", "toml", "yml"]

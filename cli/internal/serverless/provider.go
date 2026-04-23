@@ -8,6 +8,18 @@ import (
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
 
+// RollbackOptions controls how a rollback selects its target deployment.
+// Steps and ToCommit are mutually exclusive; ToCommit wins if both are set.
+type RollbackOptions struct {
+	// Steps is the number of deployments to walk back from the current
+	// active one (1 = previous deployment). Defaults to 1 when zero.
+	Steps int
+	// ToCommit is a git commit hash (full or short prefix) to roll back to.
+	// Resolved against the deployment history; errors if not found within
+	// the retention window.
+	ToCommit string
+}
+
 // Provider defines the interface for deploying to various serverless platforms
 // (e.g., AWS, Cloudflare, GCP, Azure).
 type Provider interface {
@@ -36,9 +48,11 @@ type Provider interface {
 	// InvalidateCache clears the CDN cache to ensure fresh assets are served.
 	InvalidateCache(ctx context.Context, cfg *config.NextDeployConfig) error
 
-	// Rollback reverts the compute layer to the previous version and
+	// Rollback reverts the compute layer to a previous version and
 	// invalidates the CDN cache so the old version is served immediately.
-	Rollback(ctx context.Context, cfg *config.NextDeployConfig) error
+	// Opts.Steps (default 1) walks N deployments back; Opts.ToCommit pins
+	// rollback to a specific git commit (prefix match supported).
+	Rollback(ctx context.Context, cfg *config.NextDeployConfig, opts RollbackOptions) error
 
 	// Destroy removes all application resources from the cloud provider.
 	Destroy(ctx context.Context, cfg *config.NextDeployConfig) error

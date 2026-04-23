@@ -23,12 +23,12 @@ type Option[T any] func(*Store[T]) error
 func WithEnvFile[T any](filename string) Option[T] {
 	return func(s *Store[T]) error {
 		s.filename = filename
-		envData, err := readEnvFile(filename)
+		envData, err := ReadEnvFile(filename)
 		if err != nil {
 			return err
 		}
 
-		for k, _ := range envData {
+		for k := range envData {
 			var value T
 			s.data[k] = value
 		}
@@ -88,7 +88,7 @@ func (s *Store[T]) GetEnv(key string) (string, error) {
 	}
 
 	if s.filename != "" {
-		envData, err := readEnvFile(s.filename)
+		envData, err := ReadEnvFile(s.filename)
 		if err != nil {
 			return "", err
 		}
@@ -100,7 +100,10 @@ func (s *Store[T]) GetEnv(key string) (string, error) {
 	return "", fmt.Errorf("environment variable %s not found", key)
 }
 
-func readEnvFile(filename string) (map[string]string, error) {
+// ReadEnvFile parses a dotenv-format file (KEY=VALUE per line, # comments
+// supported, blank lines ignored) and returns a flat map. Lines without `=`
+// are skipped silently. The caller is responsible for the file path.
+func ReadEnvFile(filename string) (map[string]string, error) {
 	// #nosec G304
 	file, err := os.Open(filename)
 	if err != nil {

@@ -66,7 +66,6 @@ func ValidateNextJSProject(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("directory doesn't appear to be a Next.js project")
 	}
-
 	return nil
 }
 

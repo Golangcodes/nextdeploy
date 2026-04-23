@@ -97,7 +97,7 @@ func detectWellKnownService(f *DetectedFeatures, host string) {
 	case strings.Contains(h, "youtube.com") || strings.Contains(h, "ytimg.com") || strings.Contains(h, "youtu.be"):
 		f.HasYouTube = true
 
-	case strings.Contains(h, "googleapis.com") || strings.Contains(h, "gstatic.com") || strings.Contains(h, "fonts.google.com"):
+	case strings.Contains(h, "fonts.googleapis.com") || strings.Contains(h, "gstatic.com") || strings.Contains(h, "fonts.google.com"):
 		f.HasGoogleFonts = true
 
 	case strings.Contains(h, "google-analytics.com") || strings.Contains(h, "googletagmanager.com"):

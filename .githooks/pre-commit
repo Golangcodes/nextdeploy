@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+#
+# NextDeploy pre-commit hook
+#
+# Blocks commits that contain:
+#   - Compiled binaries (Mach-O, ELF, PE)
+#   - Files larger than MAX_FILE_KB
+#   - Obvious secrets (.env, AWS keys, private keys)
+#   - Files matching ignored patterns
+#
+# Install with: mage preCommitInstall
+# Bypass (use sparingly, with explicit reason): git commit --no-verify
+
+set -euo pipefail
+
+MAX_FILE_KB=512
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+fail=0
+
+# Collect staged files (added/copied/modified, not deleted)
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+err() { echo -e "${RED}✘ $*${NC}" >&2; fail=1; }
+warn() { echo -e "${YELLOW}⚠ $*${NC}" >&2; }
+ok() { echo -e "${GREEN}✓ $*${NC}"; }
+
+# 1. Block compiled binaries by content sniffing
+for f in $staged; do
+  [ -f "$f" ] || continue
+  mime=$(file --mime-type -b "$f" 2>/dev/null || echo "unknown")
+  case "$mime" in
+    application/x-mach-binary|application/x-executable|application/x-sharedlib|application/x-pie-executable|application/x-dosexec)
+      err "Binary file blocked: $f ($mime)"
+      ;;
+  esac
+done
+
+# 2. Block oversized files
+for f in $staged; do
+  [ -f "$f" ] || continue
+  size_kb=$(du -k "$f" | cut -f1)
+  if [ "$size_kb" -gt "$MAX_FILE_KB" ]; then
+    err "File too large: $f (${size_kb}KB > ${MAX_FILE_KB}KB). Use Git LFS or .gitignore."
+  fi
+done
+
+# 3. Block secrets by filename
+for f in $staged; do
+  case "$f" in
+    .env|.env.*|*.pem|*.key|.nextdeploy/.env|.secrets|credentials.json|service-account*.json)
+      # allow examples and testdata
+      case "$f" in
+        .env.example|*/testdata/*) continue ;;
+      esac
+      err "Secret file blocked: $f"
+      ;;
+  esac
+done
+
+# 4. Block secret PATTERNS in staged content (text files only)
+secret_pattern='(AKIA[0-9A-Z]{16}|aws_secret_access_key\s*=\s*[A-Za-z0-9/+=]{40}|-----BEGIN [A-Z ]*PRIVATE KEY-----|ghp_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]+)'
+for f in $staged; do
+  [ -f "$f" ] || continue
+  mime=$(file --mime-type -b "$f" 2>/dev/null || echo "unknown")
+  case "$mime" in text/*|application/json|application/xml|application/yaml) ;; *) continue ;; esac
+  if grep -EH "$secret_pattern" "$f" >/dev/null 2>&1; then
+    err "Possible secret detected in $f"
+    grep -EHn "$secret_pattern" "$f" | sed 's/^/    /' >&2 || true
+  fi
+done
+
+# 5. gofmt check on staged Go files
+go_files=$(echo "$staged" | grep '\.go$' || true)
+if [ -n "$go_files" ]; then
+  if ! command -v gofmt >/dev/null 2>&1; then
+    warn "gofmt not found — skipping format check"
+  else
+    bad=$(gofmt -s -l $go_files || true)
+    if [ -n "$bad" ]; then
+      err "Go files need gofmt:"
+      echo "$bad" | sed 's/^/    /' >&2
+      echo "  Fix with: mage fmt" >&2
+    fi
+  fi
+fi
+
+# 6. go vet on changed packages (cheap, catches obvious bugs)
+if [ -n "$go_files" ] && command -v go >/dev/null 2>&1; then
+  pkgs=$(echo "$go_files" | xargs -n1 dirname | sort -u | sed 's|^|./|')
+  if ! go vet $pkgs >/dev/null 2>&1; then
+    err "go vet failed on changed packages:"
+    go vet $pkgs 2>&1 | sed 's/^/    /' >&2 || true
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo
+  echo -e "${RED}Pre-commit hook blocked the commit.${NC}" >&2
+  echo "  - Fix the issues above, OR" >&2
+  echo "  - Bypass with --no-verify ONLY if you understand the risk and document why." >&2
+  exit 1
+fi
+
+ok "Pre-commit checks passed"

@@ -36,15 +36,229 @@ type SafeConfig struct {
 }
 
 type ServerlessConfig struct {
-	Provider     string `yaml:"provider"` // e.g., "aws"
-	Region       string `yaml:"region"`
-	CloudFrontId string `yaml:"cloudfront_id,omitempty"`
-	IAMRole      string `yaml:"iam_role,omitempty"`    // IAM Role ARN for Lambda
-	Handler      string `yaml:"handler,omitempty"`     // Lambda handler (defaults to server.handler)
-	Runtime      string `yaml:"runtime,omitempty"`     // Lambda runtime (defaults to nodejs20.x)
-	MemorySize   int32  `yaml:"memory_size,omitempty"` // Lambda memory size in MB (defaults to 1024)
-	Timeout      int32  `yaml:"timeout,omitempty"`     // Lambda timeout in seconds (defaults to 30)
-	Profile      string `yaml:"profile,omitempty"`     // AWS CLI profile name
+	Provider          string `yaml:"provider"` // "aws" or "cloudflare"
+	Region            string `yaml:"region"`
+	CloudFrontId      string `yaml:"cloudfront_id,omitempty"`
+	IAMRole           string `yaml:"iam_role,omitempty"`           // IAM Role ARN for Lambda
+	Handler           string `yaml:"handler,omitempty"`            // Lambda handler (defaults to server.handler)
+	Runtime           string `yaml:"runtime,omitempty"`            // Lambda runtime (defaults to nodejs20.x)
+	MemorySize        int32  `yaml:"memory_size,omitempty"`        // Lambda memory size in MB (defaults to 1024)
+	Timeout           int32  `yaml:"timeout,omitempty"`            // Lambda timeout in seconds (defaults to 30)
+	Profile           string `yaml:"profile,omitempty"`            // AWS CLI profile name
+	IsrRevalidation   bool   `yaml:"isr_revalidation,omitempty"`   // Deploy ISR Revalidation Lambda + SQS
+	ImageOptimization bool   `yaml:"image_optimization,omitempty"` // Deploy Image Optimizer Lambda + CF Behavior
+	Warmer            bool   `yaml:"warmer,omitempty"`             // Deploy EventBridge warmer cron
+
+	// AllowSecretsInEnv opts in to the insecure fallback that injects every
+	// secret directly into the Lambda's environment variables when the IAM
+	// principal lacks lambda:GetLayerVersion (and therefore cannot use the
+	// Secrets Extension layer). Default false; deploys fail loudly with IAM
+	// guidance instead. Only set this to true if you accept that secrets will
+	// be visible in the Lambda console, CloudTrail, and persisted in every
+	// published Lambda version.
+	AllowSecretsInEnv bool `yaml:"allow_secrets_in_env,omitempty"`
+
+	// KmsKeyId selects a customer-managed KMS key for Secrets Manager
+	// encryption. Accepts a key ID, key ARN, or alias (e.g. "alias/prod-secrets").
+	// Empty uses the AWS-managed `aws/secretsmanager` key. Required by many
+	// multi-account and compliance setups where the default key can't be
+	// shared across boundaries.
+	KmsKeyId string `yaml:"kms_key_id,omitempty"`
+
+	// Cloudflare-specific config. Ignored when Provider != "cloudflare".
+	// Each field maps directly to a Cloudflare API call (or a chunk of one)
+	// to keep translation from wrangler.toml mechanical.
+	Cloudflare *CloudflareConfig `yaml:"cloudflare,omitempty"`
+}
+
+// CloudflareConfig holds everything that ends up in a Workers script upload
+// (workers.ScriptUpdateParamsMetadata) plus post-upload calls (cron triggers,
+// custom domains, routes). Standalone resource provisioning (Hyperdrive,
+// Queues, Vectorize, AI Gateway, DNS, Zone settings) lives in
+// CloudflareConfig.Resources and is consumed by the plan/apply pipeline.
+type CloudflareConfig struct {
+	// Worker runtime
+	CompatibilityDate  string   `yaml:"compatibility_date,omitempty"`  // default: "2025-04-01"
+	CompatibilityFlags []string `yaml:"compatibility_flags,omitempty"` // default: ["nodejs_compat_v2"]
+
+	// Edge attachment
+	CustomDomains []CFCustomDomain `yaml:"custom_domains,omitempty"` // preferred over routes
+	Routes        []CFRoute        `yaml:"routes,omitempty"`         // legacy zone-routes
+
+	// Triggers (separate post-upload call: Workers.Scripts.Schedules.Update)
+	Triggers *CFTriggers `yaml:"triggers,omitempty"`
+
+	// Bindings — one entry per binding type; each translates 1:1 to a
+	// workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKind* struct.
+	Bindings *CFBindings `yaml:"bindings,omitempty"`
+
+	// Durable Object class migrations. Required when adding/renaming/deleting
+	// DO classes; otherwise the upload is rejected. Tags are applied in order.
+	Migrations []CFMigration `yaml:"migrations,omitempty"`
+
+	// Resources is the standalone IaC layer (Hyperdrive configs, Queues,
+	// Vectorize indexes, AI Gateway slugs, DNS records, Zone settings).
+	// Populated by the user; consumed by `nextdeploy plan` and `apply`.
+	Resources *CFResources `yaml:"resources,omitempty"`
+}
+
+type CFCustomDomain struct {
+	Hostname string `yaml:"hostname"`
+	ZoneID   string `yaml:"zone_id,omitempty"` // optional; resolved from hostname if blank
+}
+
+type CFRoute struct {
+	Pattern string `yaml:"pattern"`        // e.g. "*.example.com/*"
+	Zone    string `yaml:"zone,omitempty"` // domain name; resolved to zone ID
+}
+
+type CFTriggers struct {
+	Crons []string `yaml:"crons,omitempty"` // standard cron expressions
+}
+
+type CFBindings struct {
+	R2             []CFR2Binding         `yaml:"r2,omitempty"`
+	Hyperdrive     []CFHyperdriveBinding `yaml:"hyperdrive,omitempty"`
+	Queues         *CFQueueBindings      `yaml:"queues,omitempty"`
+	Vectorize      []CFVectorizeBinding  `yaml:"vectorize,omitempty"`
+	AI             []CFAIBinding         `yaml:"ai,omitempty"`
+	DurableObjects []CFDOBinding         `yaml:"durable_objects,omitempty"`
+	KV             []CFKVBinding         `yaml:"kv,omitempty"`
+	PlainText      []CFPlainTextBinding  `yaml:"plain_text,omitempty"`
+}
+
+type CFR2Binding struct {
+	Name   string `yaml:"name"`             // JS variable name (e.g. "ASSETS")
+	Bucket string `yaml:"bucket,omitempty"` // R2 bucket name; auto-derived if blank
+}
+
+type CFHyperdriveBinding struct {
+	Name string `yaml:"name"`          // JS variable name (e.g. "HYPERDRIVE_DB")
+	ID   string `yaml:"id,omitempty"`  // CF Hyperdrive config UUID
+	Ref  string `yaml:"ref,omitempty"` // OR: name of a resource in resources.hyperdrive
+}
+
+type CFQueueBindings struct {
+	Producers []CFQueueProducer `yaml:"producers,omitempty"`
+	Consumers []CFQueueConsumer `yaml:"consumers,omitempty"`
+}
+
+type CFQueueProducer struct {
+	Name  string `yaml:"name"`  // JS variable name
+	Queue string `yaml:"queue"` // queue name
+}
+
+// CFQueueConsumer is the consumer-side wiring; lives inside the Worker upload
+// metadata, not in standalone resources. The dead_letter_queue field is the
+// name of another queue, NOT a separate binding.
+type CFQueueConsumer struct {
+	Queue           string `yaml:"queue"`
+	MaxRetries      int    `yaml:"max_retries,omitempty"`
+	MaxBatchSize    int    `yaml:"max_batch_size,omitempty"`
+	MaxBatchTimeout int    `yaml:"max_batch_timeout,omitempty"` // seconds
+	DeadLetterQueue string `yaml:"dead_letter_queue,omitempty"`
+}
+
+type CFVectorizeBinding struct {
+	Name  string `yaml:"name"`  // JS variable name
+	Index string `yaml:"index"` // Vectorize index name
+}
+
+type CFAIBinding struct {
+	Name    string         `yaml:"name"`              // JS variable name (typically "AI")
+	Gateway *CFAIGatewayID `yaml:"gateway,omitempty"` // optional AI Gateway routing
+}
+
+type CFAIGatewayID struct {
+	ID string `yaml:"id"` // AI Gateway slug
+}
+
+type CFDOBinding struct {
+	Name      string `yaml:"name"`             // JS variable name
+	ClassName string `yaml:"class"`            // exported DO class
+	Script    string `yaml:"script,omitempty"` // script name; defaults to self
+}
+
+type CFKVBinding struct {
+	Name        string `yaml:"name"`
+	NamespaceID string `yaml:"namespace_id"`
+}
+
+type CFPlainTextBinding struct {
+	Name  string `yaml:"name"`
+	Value string `yaml:"value"`
+}
+
+type CFMigration struct {
+	Tag                string            `yaml:"tag"`
+	NewSQLiteClasses   []string          `yaml:"new_sqlite_classes,omitempty"`
+	NewClasses         []string          `yaml:"new_classes,omitempty"`
+	DeletedClasses     []string          `yaml:"deleted_classes,omitempty"`
+	RenamedClasses     []CFRenamedDO     `yaml:"renamed_classes,omitempty"`
+	TransferredClasses []CFTransferredDO `yaml:"transferred_classes,omitempty"`
+}
+
+type CFRenamedDO struct {
+	From string `yaml:"from"`
+	To   string `yaml:"to"`
+}
+
+type CFTransferredDO struct {
+	From       string `yaml:"from"`
+	FromScript string `yaml:"from_script"`
+	To         string `yaml:"to"`
+}
+
+// CFResources is the IaC standalone layer. Each entry is a desired-state
+// declaration. The plan/apply pipeline lists existing CF resources by name,
+// creates missing ones, updates drifted ones (mutable fields only), and
+// errors on immutable drift (e.g. Vectorize dims).
+type CFResources struct {
+	Hyperdrive   []CFHyperdriveResource `yaml:"hyperdrive,omitempty"`
+	Queues       []CFQueueResource      `yaml:"queues,omitempty"`
+	Vectorize    []CFVectorizeResource  `yaml:"vectorize,omitempty"`
+	AIGateway    []CFAIGatewayResource  `yaml:"ai_gateway,omitempty"`
+	DNS          []CFDNSRecord          `yaml:"dns,omitempty"`
+	ZoneSettings *CFZoneSettings        `yaml:"zone_settings,omitempty"`
+}
+
+type CFHyperdriveResource struct {
+	Name      string `yaml:"name"`                 // pesastream-db
+	Origin    string `yaml:"origin,omitempty"`     // postgres://… (read from env to avoid committing)
+	OriginEnv string `yaml:"origin_env,omitempty"` // env var name to read origin from
+}
+
+type CFQueueResource struct {
+	Name string `yaml:"name"` // whatsapp-inbound, whatsapp-inbound-dlq
+}
+
+type CFVectorizeResource struct {
+	Name       string `yaml:"name"`       // openclaw-memory
+	Dimensions int    `yaml:"dimensions"` // immutable after create
+	Metric     string `yaml:"metric"`     // cosine|euclidean|dot-product; immutable
+}
+
+type CFAIGatewayResource struct {
+	Slug string `yaml:"slug"` // pesastream
+}
+
+type CFDNSRecord struct {
+	Zone    string `yaml:"zone"`              // zone name (e.g. "example.com")
+	Name    string `yaml:"name"`              // "@" for apex, "*" for wildcard, or full FQDN
+	Type    string `yaml:"type"`              // A | AAAA | CNAME | TXT | MX
+	Content string `yaml:"content"`           // value
+	TTL     int    `yaml:"ttl,omitempty"`     // seconds; 1 = auto
+	Proxied bool   `yaml:"proxied,omitempty"` // CF orange-cloud
+}
+
+type CFZoneSettings struct {
+	Zone string `yaml:"zone"` // zone name (e.g. "example.com")
+	// MinTTL lowers the TTL of every existing DNS record in the zone whose
+	// current TTL is higher than this value. Used during cutovers to reduce
+	// DNS propagation time. Records with TTL=1 (CF "automatic") are skipped.
+	// CF has no zone-level TTL setting, so this is implemented by iterating
+	// records — affects records NOT managed by NextDeploy too.
+	MinTTL int `yaml:"min_ttl,omitempty"`
 }
 
 type WebServer struct {
@@ -75,7 +289,8 @@ type CloudProviderStruct struct {
 	// #nosec G117
 	AccessKey string `yaml:"access_key,omitempty"`
 	SecretKey string `yaml:"secret_key,omitempty"`
-	Profile   string `yaml:"profile,omitempty"` // AWS CLI profile name
+	Profile   string `yaml:"profile,omitempty"`    // AWS CLI profile name
+	AccountID string `yaml:"account_id,omitempty"` // Cloudflare Account ID
 }
 type ServerConfig struct {
 	WebServer *WebServer `yaml:"web_server,omitempty"`

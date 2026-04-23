@@ -152,6 +152,9 @@ CloudProvider:
 # serverless:
 #   provider: aws              # Only "aws" supported currently; cloudflare/gcp/azure coming soon
 #   region: us-east-1          # AWS region for all resources
+#   isrRevalidation: true      # Enable ISR cache listener Lambda via SQS
+#   imageOptimization: true    # Enable on-the-fly Image Resization Lambda via CloudFront
+#   warmer: true               # Keep the Lambda warm
 #   s3_bucket: my-app-assets   # S3 bucket where public/ and _next/static/ are uploaded
 #   cloudfront_id: EXXXXX      # CloudFront distribution ID — triggers cache invalidation after deploy
 #   lambda_function_name: my-app-handler  # Lambda function name (defaults to app name if omitted)

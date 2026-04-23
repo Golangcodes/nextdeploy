@@ -28,119 +28,82 @@ var (
 )
 
 func GenerateMetadata() (metadata NextCorePayload, err error) {
-	NextCoreLogger.Info("Generating metadata for Next.js application...")
 	cfg, err := config.Load()
 	if err != nil {
 		NextCoreLogger.Error("Failed to load configuration: %v", err)
 		return NextCorePayload{}, err
 	}
 
-	AppName := cfg.App.Name
-	NextJsVersion, err := GetNextJsVersion("package.json")
-	if err != nil {
-		NextCoreLogger.Error("Failed to get Next.js version: %v", err)
-		return NextCorePayload{}, err
-	}
-	NextCoreLogger.Info("Next.js version: %s", NextJsVersion)
 	cwd, err := os.Getwd()
 	if err != nil {
 		NextCoreLogger.Error("Error getting current working directory")
 		return NextCorePayload{}, err
 	}
 
-	configPath := filepath.Join(cwd, "next.config.mjs")
-	nextConfig, err := ParseNextConfigFile(configPath)
+	nextConfig, err := ParseNextConfigFile(filepath.Join(cwd, "next.config.mjs"))
 	if err != nil {
 		NextCoreLogger.Error("Failed to parse next config (non-fatal): %v", err)
 	}
 	features := DetectFeatures(nextConfig)
-
-	NextCoreLogger.Info("Collecting build metadata...")
-	buildMeta, err := CollectBuildMetadata()
-	if err != nil {
-		NextCoreLogger.Error("Failed to collect build metadata: %v", err)
-		return NextCorePayload{}, err
-	}
-	routeInfo, err := getRoutesFromManifests(buildMeta, features.DistDir)
-	if err != nil {
-		return NextCorePayload{}, err
-	}
 
 	packageManager, err := DetectPackageManager(cwd)
 	if err != nil {
 		NextCoreLogger.Error("Failed to detect package manager: %v", err)
 		return NextCorePayload{}, err
 	}
-	buildCommand, err := buildCommand(packageManager.String())
+	buildCmd, err := buildCommand(packageManager.String())
 	if err != nil {
 		NextCoreLogger.Error("Failed to get build command: %v", err)
 		return NextCorePayload{}, err
 	}
-	startCommand, err := startCommand(packageManager.String())
+
+	nextVersion, _ := GetNextJsVersion(filepath.Join(cwd, "package.json"))
+	buildCmd = MaybeInjectWebpackFlag(buildCmd, cwd, nextConfig, nextVersion, NextCoreLogger)
+
+	buildMeta, err := CollectBuildMetadata(buildCmd)
 	if err != nil {
-		NextCoreLogger.Error("Failed to get start command: %v", err)
+		NextCoreLogger.Error("Failed to collect build metadata: %v", err)
 		return NextCorePayload{}, err
 	}
+	outputMode := detectOutputMode(cwd, nextConfig, features.DistDir)
+
+	routeInfo, err := getRoutesFromManifests(buildMeta, features.DistDir)
+	if err != nil {
+		return NextCorePayload{}, err
+	}
+
 	imagesAssets, err := detectImageAssets(buildMeta, cwd, features.DistDir)
-	var HasImageAssets bool
 	if err != nil {
 		NextCoreLogger.Error("Failed to detect image assets: %v", err)
 		return NextCorePayload{}, err
 	}
-	if len(imagesAssets.PublicImages) == 0 && len(imagesAssets.OptimizedImages) == 0 && len(imagesAssets.StaticImports) == 0 {
-		NextCoreLogger.Info("No image assets found in the Next.js build")
-	} else {
-		HasImageAssets = true
-	}
 
-	domainName := cfg.App.Domain
 	middlewareConfig, err := ParseMiddleware(cwd)
-
 	if err != nil {
 		NextCoreLogger.Error("Failed to parse middleware configuration: %v", err)
 		return NextCorePayload{}, err
 	}
 
-	StaticAssets, err := ParseStaticAssets(cwd, features.DistDir)
+	staticAssets, err := ParseStaticAssets(cwd, features.DistDir)
 	if err != nil {
 		NextCoreLogger.Error("Failed to parse static assets: %v", err)
 		return NextCorePayload{}, err
 	}
 
-	gitCommt, err := git.GetCommitHash()
+	gitCommit, err := git.GetCommitHash()
 	if err != nil {
 		NextCoreLogger.Error("Failed to get git commit hash: %v", err)
 		return NextCorePayload{}, err
-	} else {
-		NextCoreLogger.Debug("Git commit hash: %s", gitCommt)
 	}
-	gitDiry := git.IsDirty()
+	NextCoreLogger.Debug("Git commit hash: %s", gitCommit)
 
-	PayloadPath, err := filepath.Abs(filepath.Join(cwd, MetadataFileName))
-	if err != nil {
-		NextCoreLogger.Error("Failed to get payload path: %v", err)
-		return NextCorePayload{}, err
-	}
-	buildLockPath, err := filepath.Abs(filepath.Join(cwd, BuildLockFileName))
-	if err != nil {
-		NextCoreLogger.Error("Failed to get build lock path: %v", err)
-		return NextCorePayload{}, err
-	}
-	AssetsOutputDir, err := filepath.Abs(filepath.Join(cwd, AssetsOutputDir))
-	if err != nil {
-		NextCoreLogger.Error("Failed to get assets output directory: %v", err)
-		return NextCorePayload{}, err
-	}
-	// 4. Copy static assets
 	if err := copyStaticAssets(); err != nil {
 		NextCoreLogger.Error("Failed to copy static assets: %v", err)
 		return NextCorePayload{}, fmt.Errorf("failed to copy static assets: %w", err)
 	}
 
-	// 4. Track git state
 	metadata = NextCorePayload{
-		AppName:           AppName,
-		NextVersion:       NextJsVersion,
+		AppName:           cfg.App.Name,
 		NextBuildMetadata: *buildMeta,
 		Config: config.SafeConfig{
 			AppName:     cfg.App.Name,
@@ -149,44 +112,29 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 			Environment: cfg.App.Environment,
 			TargetType:  cfg.ResolveTargetType(""),
 		},
-		BuildCommand:     buildCommand,
-		StartCommand:     startCommand,
-		Entrypoint:       deriveEntrypoint(buildMeta.OutputMode, "."),
-		HasImageAssets:   HasImageAssets,
 		CDNEnabled:       cfg.App.CDNEnabled,
-		Domain:           domainName,
+		Domain:           cfg.App.Domain,
 		RouteInfo:        *routeInfo,
 		DetectedFeatures: features,
 		DistDir:          features.DistDir,
 		ExportDir:        features.ExportDir,
-		StaticRoutes:     routeInfo.StaticRoutes,
-		DynamicRoutes:    routeInfo.DynamicRoutes,
 		Middleware:       middlewareConfig,
-		StaticAssets:     StaticAssets,
-		GitCommit:        gitCommt,
-		GitDirty:         gitDiry,
+		StaticAssets:     staticAssets,
+		GitCommit:        gitCommit,
+		GitDirty:         git.IsDirty(),
 		GeneratedAt:      time.Now().Format(time.RFC3339),
-		MetadataFilePath: PayloadPath,
-		BuildLockFile:    buildLockPath,
-		AssetsOutputDir:  AssetsOutputDir,
 		PackageManager:   packageManager.String(),
-		RootDir:          cwd,
-		WorkingDir:       cwd,
-		OutputMode:       buildMeta.OutputMode,
+		OutputMode:       outputMode,
 		ImageAssets:      *imagesAssets,
-		NextBuild: NextBuild{
-			HasAppRouter: buildMeta.HasAppRouter,
-			RootFiles: RootFiles{
-				BuildManifest:      filepath.Join(cwd, features.DistDir, "build-manifest.json"),
-				PackageJSON:        filepath.Join(cwd, "package.json"),
-				LastBuildTimestamp: time.Now().Format(time.RFC3339),
-			},
-			BuildMetadata: BuildMetadata{
-				NextVersion: NextJsVersion,
-				BuildID:     buildMeta.BuildID,
-				OutputMode:  buildMeta.OutputMode,
-			},
-		},
+	}
+
+	if len(metadata.RouteInfo.ISRDetail) > 0 {
+		tagMap := BuildTagMap(metadata.RouteInfo.ISRDetail)
+		if tagMapData, err := json.MarshalIndent(tagMap, "", "  "); err == nil {
+			assetsDir := filepath.Join(cwd, AssetsOutputDir)
+			_ = os.MkdirAll(assetsDir, 0750)
+			_ = os.WriteFile(filepath.Join(assetsDir, "isr-tag-map.json"), tagMapData, 0600)
+		}
 	}
 
 	if err := createBuildLock(&metadata); err != nil {
@@ -209,19 +157,6 @@ func LoadMetadata() (NextCorePayload, error) {
 	}
 
 	return metadata, nil
-}
-
-func deriveEntrypoint(outputMode OutputMode, releaseDir string) string {
-	switch outputMode {
-	case OutputModeStandalone:
-		return filepath.Join(releaseDir, "server.js")
-	case OutputModeDefault:
-		return filepath.Join(releaseDir, "node_modules", ".bin", "next start")
-	case OutputModeExport:
-		return "" // no process entrypoint - Caddy serves files directly
-	default:
-		return ""
-	}
 }
 
 func copyStaticAssets() error {
@@ -288,55 +223,30 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-// createBuildLock creates the build.lock file with git state
+// createBuildLock writes the metadata payload and a build.lock using the git
+// state already captured on the payload.
 func createBuildLock(metadata *NextCorePayload) error {
-	commitHash, err := git.GetCommitHash()
-	if err != nil {
-		NextCoreLogger.Error("Failed to get git commit hash: %v", err)
-		return fmt.Errorf("failed to get git commit hash: %w", err)
-	}
-
-	dirty := git.IsDirty()
-	// Write metadata to json file
-	fileName := ".nextdeploy/metadata.json"
-	marshalledData, err := json.MarshalIndent(metadata, "", "  ")
+	payloadData, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		NextCoreLogger.Error("Failed to marshal metadata: %v", err)
 		return err
 	}
-	if err := os.WriteFile(fileName, marshalledData, 0600); err != nil {
+	if err := os.WriteFile(MetadataFileName, payloadData, 0600); err != nil {
 		NextCoreLogger.Error("Failed to write metadata json: %v", err)
 		return err
 	}
 
-	buildLock := BuildLock{
-		GitCommit:   commitHash,
-		GitDirty:    dirty,
+	lockData, err := json.MarshalIndent(BuildLock{
+		GitCommit:   metadata.GitCommit,
+		GitDirty:    metadata.GitDirty,
 		GeneratedAt: metadata.GeneratedAt,
-		Metadata:    fileName,
-	}
-
-	data, err := json.MarshalIndent(buildLock, "", "  ")
+		Metadata:    MetadataFileName,
+	}, "", "  ")
 	if err != nil {
 		NextCoreLogger.Error("Failed to marshal build lock: %v", err)
 		return err
 	}
-
-	return os.WriteFile(filepath.Join(".nextdeploy", "build.lock"), data, 0600)
-}
-
-// getPublicEnvVars collects NEXT_PUBLIC_* environment variables
-func getPublicEnvVars() map[string]string {
-	vars := make(map[string]string)
-	for _, env := range os.Environ() {
-		if strings.HasPrefix(env, "NEXT_PUBLIC_") {
-			parts := strings.SplitN(env, "=", 2)
-			if len(parts) == 2 {
-				vars[parts[0]] = parts[1]
-			}
-		}
-	}
-	return vars
+	return os.WriteFile(BuildLockFileName, lockData, 0600)
 }
 
 // ValidateBuildState checks if the current git state matches the build lock
@@ -361,8 +271,6 @@ func ValidateBuildState() error {
 		return fmt.Errorf("failed to get current git commit: %w", err)
 	}
 	//TODO: use this data to avoid unnecessary builds
-	NextCoreLogger.Info("Current git commit: %s", currentCommit)
-	NextCoreLogger.Info("Expected git commit: %s", lock.GitCommit)
 	if currentCommit != lock.GitCommit {
 		NextCoreLogger.Error("Git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
 		return fmt.Errorf("git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
@@ -567,6 +475,8 @@ func ParseMiddleware(projectDir string) (*MiddlewareConfig, error) {
 	middlewarePaths := []string{
 		filepath.Join(projectDir, "middleware.ts"),
 		filepath.Join(projectDir, "middleware.js"),
+		filepath.Join(projectDir, "proxy.ts"),
+		filepath.Join(projectDir, "proxy.js"),
 	}
 
 	var middlewareFile string
@@ -620,11 +530,20 @@ func parseMiddlewareMatchers(content string) ([]MiddlewareRoute, error) {
 	var matchers []MiddlewareRoute
 
 	// First try to parse config object style
-	configObjRegex := regexp.MustCompile(`config\s*=\s*{([^}]*)}`)
+	configObjRegex := regexp.MustCompile(`(?:export\s+const\s+)?config\s*=\s*{([^}]*)}`)
 	configMatches := configObjRegex.FindStringSubmatch(content)
 	if len(configMatches) > 1 {
-		// Try to parse as JSON (with some cleaning)
-		cleaned := strings.ReplaceAll(configMatches[1], "'", `"`)
+		// Clean the content for pseudo-JSON parsing
+		body := configMatches[1]
+		// Convert ' to "
+		cleaned := strings.ReplaceAll(body, "'", `"`)
+		// Add quotes to keys if missing
+		keyRegex := regexp.MustCompile(`(\s*)([a-zA-Z0-9_]+):`)
+		cleaned = keyRegex.ReplaceAllString(cleaned, `$1"$2":`)
+		// Remove trailing commas before closing braces/brackets
+		trailingCommaRegex := regexp.MustCompile(`,(\s*[}\]])`)
+		cleaned = trailingCommaRegex.ReplaceAllString(cleaned, `$1`)
+
 		cleaned = strings.ReplaceAll(cleaned, "\n", "")
 		cleaned = fmt.Sprintf("{%s}", cleaned)
 
@@ -675,7 +594,7 @@ func parseMiddlewareMatchers(content string) ([]MiddlewareRoute, error) {
 	}
 
 	// Fallback to parsing individual matchers
-	matcherRegex := regexp.MustCompile(`matcher:\s*(\[[^\]]+\]|{[^}]+})`)
+	matcherRegex := regexp.MustCompile(`matcher:\s*(\[[^\]]+\]|{[^}]+}|"[^"]+"|'[^']+')`)
 	matcherMatches := matcherRegex.FindStringSubmatch(content)
 	if len(matcherMatches) > 1 {
 		cleaned := strings.ReplaceAll(matcherMatches[1], "'", `"`)
@@ -692,6 +611,15 @@ func parseMiddlewareMatchers(content string) ([]MiddlewareRoute, error) {
 				}
 				return matchers, nil
 			}
+		}
+
+		// Handle single path string
+		if strings.HasPrefix(cleaned, `"`) {
+			path := strings.Trim(cleaned, `"`)
+			matchers = append(matchers, MiddlewareRoute{
+				Pathname: path,
+			})
+			return matchers, nil
 		}
 
 		// Handle object matcher
@@ -734,62 +662,6 @@ func parseUnstableFlag(content string) string {
 	return ""
 }
 
-func parseImageConfig(images map[string]interface{}) ImageConfig {
-	result := ImageConfig{
-		Loader: "default",
-	}
-
-	if domains, ok := images["domains"].([]interface{}); ok {
-		for _, d := range domains {
-			if s, ok := d.(string); ok {
-				result.Domains = append(result.Domains, s)
-			}
-		}
-	}
-
-	if formats, ok := images["formats"].([]interface{}); ok {
-		for _, f := range formats {
-			if s, ok := f.(string); ok {
-				result.Formats = append(result.Formats, s)
-			}
-		}
-	}
-
-	if deviceSizes, ok := images["deviceSizes"].([]interface{}); ok {
-		for _, s := range deviceSizes {
-			if n, ok := s.(float64); ok {
-				result.DeviceSizes = append(result.DeviceSizes, int(n))
-			}
-		}
-	}
-
-	if imageSizes, ok := images["imageSizes"].([]interface{}); ok {
-		for _, s := range imageSizes {
-			if n, ok := s.(float64); ok {
-				result.ImageSizes = append(result.ImageSizes, int(n))
-			}
-		}
-	}
-
-	if loader, ok := images["loader"].(string); ok {
-		result.Loader = loader
-	}
-
-	if path, ok := images["path"].(string); ok {
-		result.Path = path
-	}
-
-	if ttl, ok := images["minimumCacheTTL"].(float64); ok {
-		result.MinimumCacheTTL = int(ttl)
-	}
-
-	if unoptimized, ok := images["unoptimized"].(bool); ok {
-		result.Unoptimized = unoptimized
-	}
-
-	return result
-}
-
 func detectImageAssets(buildMeta *NextBuildMetadata, projectDir string, distDir string) (*ImageAssets, error) {
 	assets := &ImageAssets{}
 	var err error
@@ -818,41 +690,31 @@ func detectImageAssets(buildMeta *NextBuildMetadata, projectDir string, distDir 
 }
 
 func findPublicImages(publicDir, projectDir string) ([]ImageAsset, error) {
+	_ = projectDir // retained for signature parity; paths are public-relative
 	var images []ImageAsset
-
-	// Supported image extensions
-	imageExts := map[string]bool{
-		".jpg":  true,
-		".jpeg": true,
-		".png":  true,
-		".webp": true,
-		".gif":  true,
-		".avif": true,
-		".svg":  true,
-	}
 
 	err := filepath.Walk(publicDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-
-		if !info.IsDir() {
-			ext := strings.ToLower(filepath.Ext(path))
-			if imageExts[ext] {
-				relPath, err := filepath.Rel(publicDir, path)
-				if err != nil {
-					return err
-				}
-
-				images = append(images, ImageAsset{
-					Path:         relPath,
-					AbsolutePath: path,
-					PublicPath:   filepath.Join("/", relPath),
-					Format:       strings.TrimPrefix(ext, "."),
-					IsOptimized:  false,
-				})
-			}
+		if info.IsDir() {
+			return nil
 		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if assetExtensions[ext] != "image" {
+			return nil
+		}
+		relPath, err := filepath.Rel(publicDir, path)
+		if err != nil {
+			return err
+		}
+		images = append(images, ImageAsset{
+			Path:         relPath,
+			AbsolutePath: path,
+			PublicPath:   filepath.Join("/", relPath),
+			Format:       strings.TrimPrefix(ext, "."),
+			IsOptimized:  false,
+		})
 		return nil
 	})
 
@@ -924,24 +786,6 @@ func parseStaticImageImports(buildManifest map[string]interface{}, projectDir st
 	}
 
 	return images
-}
-func startCommand(PackageManager string) (string, error) {
-	if PackageManager == "" {
-		return "", fmt.Errorf("no package manager provided")
-	}
-	switch PackageManager {
-	case "npm":
-		return "npm start", nil
-	case "yarn":
-		return "yarn start", nil
-	case "pnpm":
-		return "pnpm start", nil
-	case "bun":
-		return "bun start", nil
-	default:
-		return "npm start", fmt.Errorf("unsupported package manager: %s", PackageManager)
-
-	}
 }
 func buildCommand(PackageManager string) (string, error) {
 

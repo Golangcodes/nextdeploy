@@ -1,25 +1,74 @@
-/bin/ 
-/.env
-./.keys 
-.secrets
+# ── Build artifacts ──────────────────────────────────────────────
+/bin/
 /dist/
-
-/daemon.md
-.secrets
-
-# Documentation
-*.md
-!README.md
-!TECH_DOCS.md
-
-# Root-level binaries
 /nextdeploy
 /nextdeployd
+*.exe
+*.test
+*.out
+*.prof
+coverage.out
+coverage.html
 
-# Test artifacts
-test*.go
+# ── Secrets and credentials ──────────────────────────────────────
+.env
+.env.*
+!.env.example
+.secrets
+.keys
+.nextdeploy/.env
+.nextdeploy/secrets/
+*.pem
+*.key
+!**/testdata/**/*.pem
+!**/testdata/**/*.key
+credentials.json
+service-account*.json
+
+# ── Generated / packaged ─────────────────────────────────────────
+*.tar.gz
+*.tgz
+*.zip
+!assets/**/*.zip
+node_modules/
+.next/
+out/
+
+# ── Tooling / IDE / OS ───────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.air.toml
+.air.*.toml.bak
+
+# ── Test scratch ─────────────────────────────────────────────────
 testfile*
 testdir*/
 testsym*
 testwalk/
 test_src_dir/
+
+# ── Documentation ────────────────────────────────────────────────
+# Track only the docs we curate. Anything else is scratch/draft.
+*.md
+!README.md
+!TECH_DOCS.md
+!CODE_QUALITY.md
+!CHANGELOG.md
+!CONTRIBUTING.md
+!cli/internal/serverless/REVIEW.md
+!**/README.md
+!CLOUDFLARE_PARITY.md
+
+# ── Misc ─────────────────────────────────────────────────────────
+/daemon.md
+vendor/
+
+# ── Dev-local ────────────────────────────────────────────────────
+tmp/
+NextDeploy/
+graphify-out/
