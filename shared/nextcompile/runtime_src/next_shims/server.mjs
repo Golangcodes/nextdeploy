@@ -24,14 +24,21 @@ export class NextResponse extends Response {
   static redirect(url, statusOrInit) {
     return Response.redirect(String(url), typeof statusOrInit === "number" ? statusOrInit : 307);
   }
-  static rewrite(_url, _init) {
-    // Rewrites are handled by the middleware dispatch contract, not by a
-    // standalone response construction. Return a next() marker that the
-    // middleware caller recognizes.
-    return new NextResponse(null, { status: 200, headers: { "x-middleware-rewrite": String(_url) } });
+  static rewrite(url, init) {
+    // Matches Next's middleware contract: the dispatcher inspects this
+    // header to rewrite the request URL and continue, rather than
+    // short-circuit with the (empty) response body.
+    const headers = new Headers(init?.headers);
+    headers.set("x-middleware-rewrite", String(url));
+    return new NextResponse(null, { ...(init || {}), status: 200, headers });
   }
   static next(init) {
-    return new NextResponse(null, { ...(init || {}), status: 200 });
+    // x-middleware-next:1 tells the dispatcher "continue to the route
+    // handler." Without the header, an empty 200 response would be
+    // treated as a short-circuit (see dispatcher.runMiddlewareStack).
+    const headers = new Headers(init?.headers);
+    headers.set("x-middleware-next", "1");
+    return new NextResponse(null, { ...(init || {}), status: 200, headers });
   }
 }
 

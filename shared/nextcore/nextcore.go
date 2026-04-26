@@ -23,9 +23,7 @@ const (
 	PublicDir         = "public"
 )
 
-var (
-	NextCoreLogger = shared.PackageLogger("nextcore", "📦 NEXTCORE")
-)
+var NextCoreLogger = shared.PackageLogger("nextcore", "📦 NEXTCORE")
 
 func GenerateMetadata() (metadata NextCorePayload, err error) {
 	cfg, err := config.Load()
@@ -132,8 +130,8 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		tagMap := BuildTagMap(metadata.RouteInfo.ISRDetail)
 		if tagMapData, err := json.MarshalIndent(tagMap, "", "  "); err == nil {
 			assetsDir := filepath.Join(cwd, AssetsOutputDir)
-			_ = os.MkdirAll(assetsDir, 0750)
-			_ = os.WriteFile(filepath.Join(assetsDir, "isr-tag-map.json"), tagMapData, 0600)
+			_ = os.MkdirAll(assetsDir, 0o750)
+			_ = os.WriteFile(filepath.Join(assetsDir, "isr-tag-map.json"), tagMapData, 0o600)
 		}
 	}
 
@@ -164,7 +162,7 @@ func copyStaticAssets() error {
 	dstDir := filepath.Join(".nextdeploy", "assets")
 
 	// Create destination directory
-	if err := os.MkdirAll(dstDir, 0750); err != nil {
+	if err := os.MkdirAll(dstDir, 0o750); err != nil {
 		NextCoreLogger.Error("Failed to create destination directory: %v", err)
 		return err
 	}
@@ -191,7 +189,7 @@ func copyStaticAssets() error {
 		dstPath := filepath.Join(dstDir, relPath)
 
 		// Create destination directory structure
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0750); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0o750); err != nil {
 			NextCoreLogger.Error("Failed to create directory for %s: %v", dstPath, err)
 			return err
 		}
@@ -231,7 +229,7 @@ func createBuildLock(metadata *NextCorePayload) error {
 		NextCoreLogger.Error("Failed to marshal metadata: %v", err)
 		return err
 	}
-	if err := os.WriteFile(MetadataFileName, payloadData, 0600); err != nil {
+	if err := os.WriteFile(MetadataFileName, payloadData, 0o600); err != nil {
 		NextCoreLogger.Error("Failed to write metadata json: %v", err)
 		return err
 	}
@@ -246,7 +244,7 @@ func createBuildLock(metadata *NextCorePayload) error {
 		NextCoreLogger.Error("Failed to marshal build lock: %v", err)
 		return err
 	}
-	return os.WriteFile(BuildLockFileName, lockData, 0600)
+	return os.WriteFile(BuildLockFileName, lockData, 0o600)
 }
 
 // ValidateBuildState checks if the current git state matches the build lock
@@ -270,7 +268,7 @@ func ValidateBuildState() error {
 		NextCoreLogger.Error("Failed to get current git commit: %v", err)
 		return fmt.Errorf("failed to get current git commit: %w", err)
 	}
-	//TODO: use this data to avoid unnecessary builds
+	// TODO: use this data to avoid unnecessary builds
 	if currentCommit != lock.GitCommit {
 		NextCoreLogger.Error("Git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
 		return fmt.Errorf("git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
@@ -787,8 +785,8 @@ func parseStaticImageImports(buildManifest map[string]interface{}, projectDir st
 
 	return images
 }
-func buildCommand(PackageManager string) (string, error) {
 
+func buildCommand(PackageManager string) (string, error) {
 	if PackageManager == "" {
 		PackageManager = "npm" // default to npm if not specified
 	}
@@ -805,5 +803,4 @@ func buildCommand(PackageManager string) (string, error) {
 	default:
 		return "npm run build", fmt.Errorf("unsupported package manager: %s", PackageManager)
 	}
-
 }

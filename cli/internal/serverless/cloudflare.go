@@ -329,7 +329,8 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 	}
 	defer cleanup()
 
-	bundlePath, err := BuildWorkerBundle(ctx, standaloneDir, meta, cfg, p.log)
+	publicKeys := publicAssetKeysFromPackage(pkg)
+	bundlePath, err := BuildWorkerBundle(ctx, standaloneDir, meta, cfg, publicKeys, p.log)
 	if err != nil {
 		return fmt.Errorf("worker bundle build failed: %w", err)
 	}

@@ -37,6 +37,10 @@ type Manifest struct {
 	I18n          *ManifestI18n   `json:"i18n,omitempty"`
 	HasAppRouter  bool            `json:"hasAppRouter"`
 	OutputMode    string          `json:"outputMode,omitempty"`
+	// PublicAssets is the sorted set of R2 keys the runtime should serve
+	// at the bare URL root (e.g. "logo.svg" → GET /logo.svg). Runtime
+	// turns it into a Set for O(1) lookup.
+	PublicAssets []string `json:"publicAssets,omitempty"`
 	// Features is the app's detected capability surface. Runtime consults
 	// this to decide which handlers to wire; operators can eyeball it to
 	// confirm the deployed bundle actually supports what they expect.
@@ -125,6 +129,7 @@ func BuildManifest(p Payload, next NextVersion, react ReactVersion, refs []Modul
 		OutputMode:    p.OutputMode,
 		Routes:        buildManifestRoutes(p.Routes),
 		ISR:           buildManifestISR(p.Routes.ISRDetail),
+		PublicAssets:  sortedCopy(p.PublicAssets),
 		Features:      buildFeatures(p, refs),
 	}
 

@@ -126,6 +126,16 @@ type Payload struct {
 	I18n         *I18nConfig
 	BuildID      string
 	GitCommit    string
+
+	// PublicAssets is the list of R2/S3 keys for files copied out of the
+	// app's public/ directory. Next convention: these are served at the
+	// URL root (e.g. public/logo.svg → GET /logo.svg), with no /public/
+	// prefix. The runtime dispatcher consults this list to decide whether
+	// a bare-root path should be looked up in the asset bucket.
+	//
+	// Keys are stored as emitted by the packager (no leading slash). Empty
+	// when the app has no public/ files.
+	PublicAssets []string
 }
 
 // RouteInfo mirrors nextcore.RouteInfo. Duplicated here so the compiler

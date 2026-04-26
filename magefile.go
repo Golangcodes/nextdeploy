@@ -1,14 +1,5 @@
 //go:build mage
 // +build mage
-
-// Magefile is the single source of truth for building, testing, and releasing
-// NextDeploy. All targets are plain exported Go functions — no shell scripting
-// beyond what sh.Run invokes.
-//
-// Install once:        go install github.com/magefile/mage@latest
-// List targets:        mage -l
-// Run a target:        mage buildCLI
-// Verbose + args:      mage -v testPkg ./cli/internal/serverless
 package main
 
 import (
@@ -36,10 +27,6 @@ const (
 	daemonPkg  = "./daemon/cmd/nextdeployd"
 )
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-// gitQuiet runs a git command with stderr discarded. Used for diagnostic
-// lookups where an absent tag or dirty state isn't an error.
 func gitQuiet(args ...string) string {
 	cmd := exec.Command("git", args...)
 	cmd.Stderr = io.Discard

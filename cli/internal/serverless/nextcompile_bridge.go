@@ -1,10 +1,34 @@
 package serverless
 
 import (
+	"strings"
+
+	"github.com/Golangcodes/nextdeploy/internal/packaging"
 	"github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/Golangcodes/nextdeploy/shared/nextcompile"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 )
+
+// publicAssetKeysFromPackage extracts the subset of S3 keys that came from
+// the app's public/ directory — anything not prefixed with "_next/" is a
+// public file the runtime should serve at the bare URL root. Returns nil
+// for a nil package so the caller doesn't need to guard.
+func publicAssetKeysFromPackage(pkg *packaging.PackageResult) []string {
+	if pkg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(pkg.S3Assets))
+	for _, a := range pkg.S3Assets {
+		if strings.HasPrefix(a.S3Key, "_next/") {
+			continue
+		}
+		out = append(out, a.S3Key)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 // toCompilePayload translates nextcore.NextCorePayload (+ nextdeploy config)
 // into the shape nextcompile.Compile expects. The duplication is deliberate:
@@ -24,9 +48,9 @@ import (
 //     nextcore.ParseNextConfigFile) but aren't embedded in NextCorePayload.
 //     When the adapter starts calling ParseNextConfigFile directly, we'll
 //     extend this converter to forward them.
-func toCompilePayload(meta *nextcore.NextCorePayload, _ *config.NextDeployConfig) nextcompile.Payload {
+func toCompilePayload(meta *nextcore.NextCorePayload, _ *config.NextDeployConfig, publicAssets []string) nextcompile.Payload {
 	if meta == nil {
-		return nextcompile.Payload{}
+		return nextcompile.Payload{PublicAssets: publicAssets}
 	}
 
 	p := nextcompile.Payload{
@@ -37,6 +61,7 @@ func toCompilePayload(meta *nextcore.NextCorePayload, _ *config.NextDeployConfig
 		BuildID:      meta.NextBuildMetadata.BuildID,
 		GitCommit:    meta.GitCommit,
 		Routes:       convertRoutes(meta.RouteInfo),
+		PublicAssets: publicAssets,
 	}
 
 	if meta.Middleware != nil {

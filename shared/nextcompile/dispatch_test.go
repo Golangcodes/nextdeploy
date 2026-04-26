@@ -120,8 +120,8 @@ func TestRenderDispatchTable_StaticAndDynamic(t *testing.T) {
 	if !strings.Contains(src, `export const middlewareRef = { compiled:`) {
 		t.Errorf("missing middlewareRef:\n%s", src)
 	}
-	// Import paths must go one level up (past _nextdeploy/).
-	if !strings.Contains(src, `import("../.next/server/app/page.js")`) {
+	// Import paths must go two levels up (past _nextdeploy/ and OutDir/).
+	if !strings.Contains(src, `import("../../.next/server/app/page.js")`) {
 		t.Errorf("wrong import path:\n%s", src)
 	}
 }

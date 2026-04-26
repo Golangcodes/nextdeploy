@@ -1,18 +1,24 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
+	"github.com/Golangcodes/nextdeploy/cli/internal/serverless"
 	"github.com/Golangcodes/nextdeploy/internal/packaging"
 	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/Golangcodes/nextdeploy/shared/config"
 	"github.com/Golangcodes/nextdeploy/shared/nextcore"
 	"github.com/Golangcodes/nextdeploy/shared/utils"
 
 	"github.com/spf13/cobra"
 )
 
-var forceBuild bool
+var (
+	forceBuild  bool
+	workerBuild bool
+)
 
 var buildCmd = &cobra.Command{
 	Use:   "build",
@@ -102,6 +108,37 @@ var buildCmd = &cobra.Command{
 
 		log.Info("Build complete! Artifact: %s", tarballName)
 
+		// --- OPTIONAL: Cloudflare Worker bundle (--worker) ---
+		// Runs nextcompile + esbuild locally. No Cloudflare API calls, so this
+		// works without credentials — handy for dogfooding the CF adapter or
+		// inspecting worker.mjs before a real deploy.
+		if workerBuild {
+			cfg, err := config.Load()
+			if err != nil {
+				log.Error("--worker: failed to load config: %v", err)
+				os.Exit(1)
+			}
+			if cfg.Serverless == nil || cfg.Serverless.Provider != "cloudflare" {
+				log.Error("--worker requires serverless.provider: cloudflare in nextdeploy.yml")
+				os.Exit(1)
+			}
+			if payload.OutputMode != nextcore.OutputModeStandalone {
+				log.Error("--worker requires Next.js output: \"standalone\" (got %q)", payload.OutputMode)
+				os.Exit(1)
+			}
+			standaloneDir, err := filepath.Abs(filepath.Join(payload.DistDir, "standalone"))
+			if err != nil {
+				log.Error("--worker: failed to resolve standalone dir: %v", err)
+				os.Exit(1)
+			}
+			bundlePath, err := serverless.BuildWorkerBundle(context.Background(), standaloneDir, &payload, cfg, nil, log)
+			if err != nil {
+				log.Error("Worker bundle build failed: %v", err)
+				os.Exit(1)
+			}
+			log.Info("Worker bundle: %s", bundlePath)
+		}
+
 		// --- POST-BUILD VALIDATIONS ---
 		if payload.Config.TargetType == "serverless" {
 			info, err := os.Stat(tarballName)
@@ -132,5 +169,6 @@ var buildCmd = &cobra.Command{
 
 func init() {
 	buildCmd.Flags().BoolVarP(&forceBuild, "force", "f", false, "Force a full build even if git commit is unchanged")
+	buildCmd.Flags().BoolVar(&workerBuild, "worker", false, "Also compile the Cloudflare Workers bundle (requires serverless.provider=cloudflare, no API creds needed)")
 	rootCmd.AddCommand(buildCmd)
 }

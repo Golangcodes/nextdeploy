@@ -346,8 +346,10 @@ func paramNamesLiteral(names []string) string {
 
 // importPath translates a standalone-relative compiled path into the
 // import specifier used inside dispatch.mjs. dispatch.mjs lives at
-// <OutDir>/_nextdeploy/dispatch.mjs; when the bundle is assembled the
-// standalone tree is expected alongside it, so we walk back one level.
+// <OutDir>/_nextdeploy/dispatch.mjs, and OutDir is itself a subdirectory of
+// the standalone tree (e.g. <standaloneDir>/.nextdeploy-cf/). The compiled
+// module is at <standaloneDir>/<compiledPath>, so we walk back two levels:
+// out of _nextdeploy/ and out of OutDir/.
 func importPath(compiledPath string) string {
-	return "../" + compiledPath
+	return "../../" + compiledPath
 }

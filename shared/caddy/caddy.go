@@ -165,7 +165,6 @@ func (cm *CaddyManager) ApplyConfig(ctx context.Context, config *Config) error {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	// #nosec G704
 	resp, err := cm.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to apply config: %w", err)
@@ -260,7 +259,7 @@ func (cm *CaddyManager) LoadConfig(filePath string) (*Config, error) {
 
 func (cm *CaddyManager) SaveConfig(config *Config, filePath string) error {
 	tmp := filePath + ".tmp"
-	if err := os.WriteFile(tmp, []byte(config.Content), 0600); err != nil {
+	if err := os.WriteFile(tmp, []byte(config.Content), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, filePath)

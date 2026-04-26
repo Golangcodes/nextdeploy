@@ -97,17 +97,68 @@ async function tryShortCircuits(request, env, ctx, pathname, tables) {
 }
 
 /**
- * Run proxy.ts then middleware.ts. Either may short-circuit with a
- * Response or mutate the request. Returns { response?, request }.
+ * Run proxy.ts then middleware.ts in order. Either may short-circuit with
+ * a Response, rewrite the request, or pass through. Returns { response?,
+ * request } where a non-null response is the final response to send.
+ *
+ * Next's middleware contract is signaled by headers on the returned
+ * Response, not by whether a Response was returned at all:
+ *   - x-middleware-next:1      → continue (pass-through)
+ *   - x-middleware-rewrite:URL → continue with a rewritten request URL
+ *   - neither                  → short-circuit with this response
+ *
+ * Returning undefined / null from the handler is treated as pass-through
+ * (permissive — some middleware falls through implicitly).
  */
 async function runMiddlewareStack(request, env, ctx, tables) {
   for (const ref of [tables.proxyRef, tables.middlewareRef]) {
     if (!ref) continue;
     const result = await runMiddlewareLike(ref, request, env, ctx);
-    if (result instanceof Response) return { response: result, request };
-    if (result?.request) request = result.request;
+    if (!(result instanceof Response)) continue;
+
+    const action = classifyMiddlewareResponse(result);
+    if (action.kind === "next") continue;
+    if (action.kind === "rewrite") {
+      const absolute = new URL(action.url, request.url).toString();
+      request = new Request(absolute, request);
+      continue;
+    }
+    return { response: stripMiddlewareHeaders(result), request };
   }
   return { response: null, request };
+}
+
+/**
+ * Classify a middleware response using the documented x-middleware-*
+ * headers. Pure — no state.
+ */
+function classifyMiddlewareResponse(res) {
+  if (res.headers.get("x-middleware-next") === "1") {
+    return { kind: "next" };
+  }
+  const rewrite = res.headers.get("x-middleware-rewrite");
+  if (rewrite) {
+    return { kind: "rewrite", url: rewrite };
+  }
+  return { kind: "short-circuit" };
+}
+
+/**
+ * Remove middleware-internal control headers before the response is sent
+ * to the client. They're a server→server signaling channel inside the
+ * Worker; leaking them to the browser would confuse no one but it's
+ * tidier to strip them.
+ */
+function stripMiddlewareHeaders(res) {
+  const headers = new Headers(res.headers);
+  headers.delete("x-middleware-next");
+  headers.delete("x-middleware-rewrite");
+  headers.delete("x-middleware-override-headers");
+  return new Response(res.body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
+  });
 }
 
 /**

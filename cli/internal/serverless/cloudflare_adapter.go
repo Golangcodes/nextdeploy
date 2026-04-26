@@ -38,6 +38,7 @@ func BuildWorkerBundle(
 	standaloneDir string,
 	meta *nextcore.NextCorePayload,
 	cfg *config.NextDeployConfig,
+	publicAssetKeys []string,
 	log *shared.Logger,
 ) (string, error) {
 	if _, err := os.Stat(standaloneDir); err != nil {
@@ -56,7 +57,7 @@ func BuildWorkerBundle(
 		return "", fmt.Errorf("clean prior build dir: %w", err)
 	}
 
-	payload := toCompilePayload(meta, cfg)
+	payload := toCompilePayload(meta, cfg, publicAssetKeys)
 	bundle, err := nextcompile.Compile(ctx, nextcompile.CompileOpts{
 		StandaloneDir: standaloneDir,
 		Payload:       payload,
@@ -157,7 +158,11 @@ func humanBytes(n int64) string {
 //   - --format=esm        Workers require ESM
 //   - --bundle            resolve all transitively-imported modules
 //   - --platform=node     use Node-style resolution (import "node:*")
-//   - --conditions=worker,node  prefer "worker" exports where present
+//   - --conditions=workerd,worker,node  prefer workerd-specific exports (needed for
+//                                        pg-cloudflare, @neondatabase/serverless,
+//                                        and any lib with CF-specific builds);
+//                                        fall back to worker, then node
+//   - --main-fields=workerd,module,main  same reason — pick the workerd build first
 //   - --external:node:*   let the Worker runtime provide Node polyfills
 //   - --external:cloudflare:*   don't bundle CF platform modules
 //   - --loader:.json=json   dispatch.mjs imports manifest.json with JSON assertion
@@ -177,8 +182,8 @@ func runEsbuild(ctx context.Context, entry, out, cwd string, log *shared.Logger)
 		"--platform=node",
 		"--format=esm",
 		"--target=esnext",
-		"--main-fields=module,main",
-		"--conditions=worker,node",
+		"--main-fields=workerd,module,main",
+		"--conditions=workerd,worker,node",
 		"--external:node:*",
 		"--external:cloudflare:*",
 		"--loader:.node=copy",

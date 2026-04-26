@@ -36,7 +36,7 @@ func TestToCompilePayload_MapsAllFields(t *testing.T) {
 		},
 	}
 
-	got := toCompilePayload(meta, nil)
+	got := toCompilePayload(meta, nil, nil)
 
 	if got.AppName != "demo" {
 		t.Errorf("AppName: got %q", got.AppName)
@@ -86,7 +86,7 @@ func TestToCompilePayload_MapsAllFields(t *testing.T) {
 func TestToCompilePayload_NilSafe(t *testing.T) {
 	// Converter must never panic on nil inputs — DeployCompute gates on
 	// static-export mode but defensive programming covers every call path.
-	got := toCompilePayload(nil, nil)
+	got := toCompilePayload(nil, nil, nil)
 	if got.AppName != "" {
 		t.Errorf("expected zero payload, got %+v", got)
 	}
@@ -100,7 +100,7 @@ func TestToCompilePayload_NoMiddleware(t *testing.T) {
 		AppName: "nomw",
 		DistDir: ".next",
 	}
-	got := toCompilePayload(meta, nil)
+	got := toCompilePayload(meta, nil, nil)
 	if got.Middleware != nil {
 		t.Errorf("expected nil middleware when nextcore has none; got %+v", got.Middleware)
 	}

@@ -14,9 +14,7 @@ type Store[T any] struct {
 	filename string
 }
 
-var (
-	storeLogger = shared.PackageLogger("ENV", "🌱 ENV")
-)
+var storeLogger = shared.PackageLogger("ENV", "🌱 ENV")
 
 type Option[T any] func(*Store[T]) error
 
@@ -100,9 +98,6 @@ func (s *Store[T]) GetEnv(key string) (string, error) {
 	return "", fmt.Errorf("environment variable %s not found", key)
 }
 
-// ReadEnvFile parses a dotenv-format file (KEY=VALUE per line, # comments
-// supported, blank lines ignored) and returns a flat map. Lines without `=`
-// are skipped silently. The caller is responsible for the file path.
 func ReadEnvFile(filename string) (map[string]string, error) {
 	// #nosec G304
 	file, err := os.Open(filename)

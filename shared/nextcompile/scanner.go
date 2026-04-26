@@ -155,21 +155,19 @@ func attachLayoutChains(refs []ModuleRef, standaloneDir, classifyRoot string) []
 		}
 		pageDir := filepath.Dir(filepath.ToSlash(pageRel))
 
-		// Walk from the page's directory back up to server/app, collecting
-		// any layout.js sitting in an ancestor directory. Result is ordered
-		// from page-nearest to root-nearest; we reverse so the runtime can
-		// apply root-first.
+		// Walk from the page's directory back up to the root, collecting
+		// every layout.js sitting in an ancestor directory (including
+		// server/app itself). Result is ordered page-nearest to
+		// root-nearest; we reverse below so the runtime applies root-first.
+		//
+		// The loop is authoritative: every ancestor gets checked exactly
+		// once, so a page under server/app picks up the root layout
+		// without any special casing.
 		var chain []string
 		for dir := pageDir; dir != "." && dir != "/"; dir = filepath.Dir(dir) {
 			if layoutPath, ok := layoutByDir[dir]; ok {
 				chain = append(chain, layoutPath)
 			}
-		}
-		// Also check the top-level (server/app) layout.
-		if top, ok := layoutByDir["server/app"]; ok {
-			chain = append(chain, top)
-		} else if top, ok := layoutByDir[filepath.Dir(pageDir)]; ok && len(chain) == 0 {
-			chain = append(chain, top)
 		}
 
 		// Reverse to root→leaf ordering.

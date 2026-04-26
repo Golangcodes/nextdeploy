@@ -67,7 +67,7 @@ func TestAdapterPreEsbuildStateIsValid(t *testing.T) {
 
 	// Run nextcompile directly (skipping esbuild). This is the same code
 	// path BuildWorkerBundle takes, minus the final exec.
-	payload := toCompilePayload(meta, nil)
+	payload := toCompilePayload(meta, nil, nil)
 	bundle, err := nextcompile.Compile(context.Background(), nextcompile.CompileOpts{
 		StandaloneDir: dir,
 		Payload:       payload,
